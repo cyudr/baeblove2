@@ -4,24 +4,31 @@ import { calculatePercentile, UnitConverter } from '../../data/growthStandards';
 import { calculateGestationalAge } from '../../data/fetalStandards';
 import { calculateDynamicEFW, FORMULA_CATALOG } from '../../data/formulaSources';
 import { X, Calendar, Scale, Ruler, Sparkles, Stethoscope, AlertCircle, BookOpen } from 'lucide-react';
+import type { BabyMeasurement, FetalMeasurement } from '../../types';
 
 interface LogMeasurementModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenFormulaModal?: () => void;
+  editingBabyMeasurement?: BabyMeasurement | null;
+  editingFetalMeasurement?: FetalMeasurement | null;
 }
 
 export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
   isOpen,
   onClose,
   onOpenFormulaModal,
+  editingBabyMeasurement = null,
+  editingFetalMeasurement = null,
 }) => {
   const {
     activeProfile,
     unitSystem,
     formulaSettings,
     addBabyMeasurement,
+    updateBabyMeasurement,
     addFetalMeasurement,
+    updateFetalMeasurement,
     addGrowthRecord,
   } = useApp();
 
@@ -52,9 +59,107 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
   const [maternalWeightInput, setMaternalWeightInput] = useState<string>(''); // kg or lbs
   const [scanLocation, setScanLocation] = useState('');
 
-  // Auto-calculate age in months and weeks or gestational age based on date
+  // Hydrate fields when opening modal for editing vs creating new record
   useEffect(() => {
-    if (!activeProfile) return;
+    if (!isOpen || !activeProfile) return;
+
+    if (editingBabyMeasurement) {
+      setDate(editingBabyMeasurement.date);
+      setAgeMonths(editingBabyMeasurement.ageInMonths);
+      setAgeWeeks(
+        editingBabyMeasurement.ageInWeeks ?? Math.round(editingBabyMeasurement.ageInMonths * 4.345 * 10) / 10
+      );
+      if (editingBabyMeasurement.weightKg !== undefined) {
+        if (unitSystem === 'metric') {
+          setWeightInput(editingBabyMeasurement.weightKg.toString());
+          setWeightOzInput('0');
+        } else {
+          const totalLbs = editingBabyMeasurement.weightKg * 2.20462;
+          const wholeLbs = Math.floor(totalLbs);
+          const oz = Math.round((totalLbs - wholeLbs) * 16 * 10) / 10;
+          setWeightInput(wholeLbs.toString());
+          setWeightOzInput(oz.toString());
+        }
+      } else {
+        setWeightInput('');
+        setWeightOzInput('0');
+      }
+      setLengthInput(
+        editingBabyMeasurement.lengthCm !== undefined
+          ? unitSystem === 'metric'
+            ? editingBabyMeasurement.lengthCm.toString()
+            : (Math.round((editingBabyMeasurement.lengthCm / 2.54) * 10) / 10).toString()
+          : ''
+      );
+      setHcInput(
+        editingBabyMeasurement.headCircumferenceCm !== undefined
+          ? unitSystem === 'metric'
+            ? editingBabyMeasurement.headCircumferenceCm.toString()
+            : (Math.round((editingBabyMeasurement.headCircumferenceCm / 2.54) * 10) / 10).toString()
+          : ''
+      );
+      setTemperatureInput('');
+      setPediatricianVisit(Boolean(editingBabyMeasurement.pediatricianVisit));
+      setNotes(editingBabyMeasurement.notes || '');
+      return;
+    }
+
+    if (editingFetalMeasurement) {
+      setDate(editingFetalMeasurement.date);
+      setGestationalWeeks(editingFetalMeasurement.gestationalWeeks);
+      setGestationalDays(editingFetalMeasurement.gestationalDays);
+      setEfwInput(
+        editingFetalMeasurement.efwGrams !== undefined
+          ? unitSystem === 'metric'
+            ? editingFetalMeasurement.efwGrams.toString()
+            : Math.round(editingFetalMeasurement.efwGrams * 0.035274).toString()
+          : ''
+      );
+      setCrlInput(editingFetalMeasurement.crlMm !== undefined ? editingFetalMeasurement.crlMm.toString() : '');
+      setBpdInput(editingFetalMeasurement.bpdMm !== undefined ? editingFetalMeasurement.bpdMm.toString() : '');
+      setHcUltrasoundInput(editingFetalMeasurement.hcMm !== undefined ? editingFetalMeasurement.hcMm.toString() : '');
+      setAcInput(editingFetalMeasurement.acMm !== undefined ? editingFetalMeasurement.acMm.toString() : '');
+      setFlInput(editingFetalMeasurement.flMm !== undefined ? editingFetalMeasurement.flMm.toString() : '');
+      setFundalHeightInput(
+        editingFetalMeasurement.fundalHeightCm !== undefined
+          ? editingFetalMeasurement.fundalHeightCm.toString()
+          : ''
+      );
+      setMaternalWeightInput(
+        editingFetalMeasurement.maternalWeightKg !== undefined
+          ? unitSystem === 'metric'
+            ? editingFetalMeasurement.maternalWeightKg.toString()
+            : (Math.round(editingFetalMeasurement.maternalWeightKg * 2.20462 * 10) / 10).toString()
+          : ''
+      );
+      setScanLocation(editingFetalMeasurement.scanLocation || '');
+      setNotes(editingFetalMeasurement.notes || '');
+      return;
+    }
+
+    // Reset to fresh defaults when adding a new record
+    setDate(new Date().toISOString().split('T')[0]);
+    setWeightInput('');
+    setWeightOzInput('0');
+    setLengthInput('');
+    setHcInput('');
+    setTemperatureInput('');
+    setPediatricianVisit(true);
+    setEfwInput('');
+    setCrlInput('');
+    setBpdInput('');
+    setHcUltrasoundInput('');
+    setAcInput('');
+    setFlInput('');
+    setFundalHeightInput('');
+    setMaternalWeightInput('');
+    setScanLocation('');
+    setNotes('');
+  }, [isOpen, editingBabyMeasurement, editingFetalMeasurement, activeProfile?.id, unitSystem]);
+
+  // Auto-calculate age in months and weeks or gestational age based on date (for new records)
+  useEffect(() => {
+    if (!activeProfile || editingBabyMeasurement || editingFetalMeasurement) return;
     if (activeProfile.type === 'baby') {
       const birth = new Date(activeProfile.dateOfEvent);
       const current = new Date(date);
@@ -69,7 +174,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
       setGestationalWeeks(ga.weeks);
       setGestationalDays(ga.days);
     }
-  }, [activeProfile, date]);
+  }, [activeProfile, date, editingBabyMeasurement, editingFetalMeasurement]);
 
   if (!isOpen || !activeProfile) return null;
 
@@ -141,7 +246,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
         headCircumferenceCm = unitSystem === 'metric' ? parseFloat(hcInput) : UnitConverter.inchesToCm(parseFloat(hcInput));
       }
 
-      addBabyMeasurement({
+      const measurementPayload = {
         date,
         ageInMonths: ageMonths,
         ageInWeeks: ageWeeks,
@@ -150,10 +255,16 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
         headCircumferenceCm,
         pediatricianVisit,
         notes: notes.trim() || undefined,
-      });
+      };
+
+      if (editingBabyMeasurement) {
+        updateBabyMeasurement(editingBabyMeasurement.id, measurementPayload);
+      } else {
+        addBabyMeasurement(measurementPayload);
+      }
 
       const parsedTemp = temperatureInput.trim() ? parseFloat(temperatureInput) : null;
-      if (weightKg !== undefined || lengthCm !== undefined || parsedTemp !== null) {
+      if (!editingBabyMeasurement && (weightKg !== undefined || lengthCm !== undefined || parsedTemp !== null)) {
         void addGrowthRecord({
           daily_weight: weightKg ?? null,
           daily_length: lengthCm ?? null,
@@ -176,7 +287,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
             : UnitConverter.lbsToKg(parseFloat(maternalWeightInput));
       }
 
-      addFetalMeasurement({
+      const fetalPayload = {
         date,
         gestationalWeeks,
         gestationalDays,
@@ -190,11 +301,19 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
         maternalWeightKg,
         notes: notes.trim() || undefined,
         scanLocation: scanLocation.trim() || undefined,
-      });
+      };
+
+      if (editingFetalMeasurement) {
+        updateFetalMeasurement(editingFetalMeasurement.id, fetalPayload);
+      } else {
+        addFetalMeasurement(fetalPayload);
+      }
     }
 
     onClose();
   };
+
+  const isEditing = Boolean(editingBabyMeasurement || editingFetalMeasurement);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 dark:bg-black/75 backdrop-blur-xs overflow-y-auto">
@@ -203,7 +322,13 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
         <div className="flex items-center justify-between pb-4 border-b border-stone-100 dark:border-stone-800">
           <div>
             <h3 className="text-lg font-bold text-stone-900 dark:text-white">
-              {activeProfile.type === 'baby' ? 'Log Pediatric Checkup' : 'Log Ultrasound & Biometrics'}
+              {isEditing
+                ? activeProfile.type === 'baby'
+                  ? 'Edit Pediatric Measurement'
+                  : 'Edit Ultrasound Record'
+                : activeProfile.type === 'baby'
+                  ? 'Log Pediatric Checkup'
+                  : 'Log Ultrasound & Biometrics'}
             </h3>
             <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
               Recording measurements for <span className="font-semibold text-stone-700 dark:text-stone-200">{activeProfile.name}</span>

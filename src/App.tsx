@@ -5,16 +5,23 @@
 
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import type {
+  BabyMeasurement,
+  ChildProfile,
+  FetalMeasurement,
+  GrowthRecord,
+  RoutineRecord,
+} from './types';
 import { Navbar } from './components/layout/Navbar';
 import { MobileTabBar } from './components/layout/MobileTabBar';
 import { GrowthDashboardView } from './components/views/GrowthDashboardView';
-import { StagesAndWishesView } from './components/views/StagesAndWishesView';
-import { MilestonesView } from './components/views/MilestonesView';
-import { FetalHubView } from './components/views/FetalHubView';
+import {
+  StagesAndMilestonesView,
+  type StagesMilestonesSubTab,
+} from './components/views/StagesAndMilestonesView';
+import { GrowthTabView } from './components/views/GrowthTabView';
+import { RoutineView } from './components/views/RoutineView';
 import { HistoryLogsView } from './components/views/HistoryLogsView';
-import { DailyCareView } from './components/views/DailyCareView';
-import { InteractiveGrowthChart } from './components/charts/InteractiveGrowthChart';
-import { FetalBiometricsChart } from './components/charts/FetalBiometricsChart';
 import { LogMeasurementModal } from './components/modals/LogMeasurementModal';
 import { ProfileModal } from './components/modals/ProfileModal';
 import { ExportReportModal } from './components/modals/ExportReportModal';
@@ -27,7 +34,6 @@ import {
   isUserAuthenticated,
   logoutUser,
 } from './utils/authConfig';
-import { useViewportArea } from './hooks/useViewportArea';
 
 interface AppContentProps {
   isPasswordProtected: boolean;
@@ -35,61 +41,109 @@ interface AppContentProps {
 }
 
 function AppContent({ isPasswordProtected, onLockPortal }: AppContentProps) {
-  const viewport = useViewportArea();
-  const {
-    activeProfile,
-    activeBabyMeasurements,
-    activeFetalMeasurements,
-    unitSystem,
-  } = useApp();
+  const { activeProfile } = useApp();
 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [stagesMilestonesSubTab, setStagesMilestonesSubTab] =
+    useState<StagesMilestonesSubTab>('stages');
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
+  const [editingBabyMeasurement, setEditingBabyMeasurement] = useState<BabyMeasurement | null>(null);
+  const [editingFetalMeasurement, setEditingFetalMeasurement] = useState<FetalMeasurement | null>(null);
+  const [editingRoutineRecord, setEditingRoutineRecord] = useState<RoutineRecord | null>(null);
+  const [editingGrowthRecord, setEditingGrowthRecord] = useState<GrowthRecord | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<ChildProfile | undefined>(undefined);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isCustomMilestoneModalOpen, setIsCustomMilestoneModalOpen] = useState(false);
   const [isLoveNoteModalOpen, setIsLoveNoteModalOpen] = useState(false);
   const [isFormulaModalOpen, setIsFormulaModalOpen] = useState(false);
   const [loveNoteStageLabel, setLoveNoteStageLabel] = useState('Today');
 
-  // Auto-toggle tabs when profile switches between baby and fetal
-  React.useEffect(() => {
-    if (!activeProfile) return;
-    if (activeProfile.type === 'fetal' && activeTab === 'milestones') {
-      setActiveTab('fetal-hub');
-    } else if (activeProfile.type === 'baby' && activeTab === 'fetal-hub') {
-      setActiveTab('milestones');
+  const navigateToTab = (tab: string) => {
+    if (tab === 'stages') {
+      setStagesMilestonesSubTab('stages');
+      setActiveTab('stages-milestones');
+      return;
     }
-  }, [activeProfile?.id, activeProfile?.type]);
+    if (tab === 'milestones' || tab === 'fetal-hub') {
+      setStagesMilestonesSubTab('milestones');
+      setActiveTab('stages-milestones');
+      return;
+    }
+    if (tab === 'daily-care') {
+      setActiveTab('routine');
+      return;
+    }
+    setActiveTab(tab);
+  };
+
+  const openNewProfileModal = () => {
+    setEditingProfile(undefined);
+    setIsProfileModalOpen(true);
+  };
+
+  const openEditProfileModal = (profile?: ChildProfile) => {
+    setEditingProfile(profile ?? activeProfile);
+    setIsProfileModalOpen(true);
+  };
+
+  const openNewLogModal = () => {
+    setEditingBabyMeasurement(null);
+    setEditingFetalMeasurement(null);
+    setIsLogModalOpen(true);
+  };
+
+  const openEditBabyMeasurementModal = (measurement: BabyMeasurement) => {
+    setEditingFetalMeasurement(null);
+    setEditingBabyMeasurement(measurement);
+    setIsLogModalOpen(true);
+  };
+
+  const openEditFetalMeasurementModal = (measurement: FetalMeasurement) => {
+    setEditingBabyMeasurement(null);
+    setEditingFetalMeasurement(measurement);
+    setIsLogModalOpen(true);
+  };
+
+  const handleEditRoutineFromHistory = (record: RoutineRecord) => {
+    setEditingRoutineRecord(record);
+    setActiveTab('routine');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleEditGrowthFromHistory = (record: GrowthRecord) => {
+    setEditingGrowthRecord(record);
+    setActiveTab('charts');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handleOpenLoveNoteModal = (stageLabel: string) => {
     setLoveNoteStageLabel(stageLabel);
     setIsLoveNoteModalOpen(true);
   };
 
-  const isDashboard = activeTab === 'dashboard';
-
   return (
     <div className="min-h-[100dvh] w-full bg-stone-100 dark:bg-stone-950 text-stone-900 dark:text-stone-100 flex flex-col font-sans transition-colors relative selection:bg-emerald-500 selection:text-white">
       {/* Fixed Decluttered Top Navigation Bar */}
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onOpenProfileModal={() => setIsProfileModalOpen(true)}
+        setActiveTab={navigateToTab}
+        onOpenProfileModal={openNewProfileModal}
+        onOpenEditProfileModal={(profile) => openEditProfileModal(profile)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onOpenFormulaModal={() => setIsFormulaModalOpen(true)}
         isPasswordProtected={isPasswordProtected}
         onLockPortal={onLockPortal}
       />
 
-      {/* Main Content Area - dynamically scaled to viewing area with fluid scrolling */}
-      <main
-        className="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-5 lg:px-8 pt-16 pb-24 md:pb-10 transition-all"
-      >
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-5 lg:px-8 pt-16 pb-24 md:pb-10 transition-all">
         {activeTab === 'dashboard' && (
           <GrowthDashboardView
-            onOpenLogModal={() => setIsLogModalOpen(true)}
-            onNavigateTab={(tab) => setActiveTab(tab)}
+            onOpenLogModal={openNewLogModal}
+            onNavigateTab={navigateToTab}
+            onOpenProfileModal={openNewProfileModal}
+            onOpenEditProfileModal={() => openEditProfileModal(activeProfile)}
             onOpenFormulaModal={() => setIsFormulaModalOpen(true)}
             onOpenLoveNoteModal={handleOpenLoveNoteModal}
             onOpenCustomMilestoneModal={() => setIsCustomMilestoneModalOpen(true)}
@@ -97,91 +151,72 @@ function AppContent({ isPasswordProtected, onLockPortal }: AppContentProps) {
           />
         )}
 
-        {activeTab === 'stages' && (
-          <StagesAndWishesView
+        {activeTab === 'charts' && (
+          <GrowthTabView
+            onOpenLogModal={openNewLogModal}
+            onOpenFormulaModal={() => setIsFormulaModalOpen(true)}
+            onOpenProfileModal={openNewProfileModal}
+            initialEditRecord={editingGrowthRecord}
+            onClearInitialEdit={() => setEditingGrowthRecord(null)}
+          />
+        )}
+
+        {activeTab === 'routine' && (
+          <RoutineView
+            initialEditRecord={editingRoutineRecord}
+            onClearInitialEdit={() => setEditingRoutineRecord(null)}
+          />
+        )}
+
+        {activeTab === 'stages-milestones' && (
+          <StagesAndMilestonesView
+            subTab={stagesMilestonesSubTab}
+            setSubTab={setStagesMilestonesSubTab}
             onOpenLoveNoteModal={handleOpenLoveNoteModal}
             onOpenFormulaModal={() => setIsFormulaModalOpen(true)}
-          />
-        )}
-
-        {activeTab === 'charts' && (
-          <div className="space-y-6">
-            <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors">
-              <div>
-                <h2 className="text-xl font-bold text-stone-900 dark:text-white">
-                  {activeProfile?.type === 'baby'
-                    ? 'WHO Clinical Growth Curve Standards'
-                    : 'Fetal Ultrasound Biometric Reference Curves'}
-                </h2>
-                <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-                  {activeProfile?.type === 'baby'
-                    ? 'Multi-parameter percentile analysis (Weight, Length, Head Circumference) calibrated against WHO standards.'
-                    : 'Ultrasound biometrics plotted against Hadlock fetal growth distribution curves.'}
-                </p>
-              </div>
-
-              <button
-                onClick={() => setIsFormulaModalOpen(true)}
-                className="self-start sm:self-auto px-3 py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 text-xs font-semibold text-stone-700 dark:text-stone-200 hover:text-amber-900 dark:hover:text-amber-300 transition-colors flex items-center gap-1.5"
-              >
-                <span>Formula Math & Sources &rarr;</span>
-              </button>
-            </div>
-
-            {activeProfile?.type === 'baby' ? (
-              <InteractiveGrowthChart
-                profile={activeProfile}
-                measurements={activeBabyMeasurements}
-                unitSystem={unitSystem}
-                onOpenFormulaModal={() => setIsFormulaModalOpen(true)}
-              />
-            ) : (
-              <FetalBiometricsChart
-                profile={activeProfile!}
-                measurements={activeFetalMeasurements}
-                unitSystem={unitSystem}
-                onOpenFormulaModal={() => setIsFormulaModalOpen(true)}
-              />
-            )}
-          </div>
-        )}
-
-        {activeTab === 'milestones' && (
-          <MilestonesView
             onOpenCustomMilestoneModal={() => setIsCustomMilestoneModalOpen(true)}
+            onOpenLogModal={openNewLogModal}
+            onOpenProfileModal={openNewProfileModal}
           />
         )}
-
-        {activeTab === 'fetal-hub' && (
-          <FetalHubView
-            onOpenLogModal={() => setIsLogModalOpen(true)}
-            onOpenFormulaModal={() => setIsFormulaModalOpen(true)}
-          />
-        )}
-
-        {activeTab === 'daily-care' && <DailyCareView />}
 
         {activeTab === 'logs' && (
           <HistoryLogsView
-            onOpenLogModal={() => setIsLogModalOpen(true)}
+            onOpenLogModal={openNewLogModal}
+            onEditBabyMeasurement={openEditBabyMeasurementModal}
+            onEditFetalMeasurement={openEditFetalMeasurementModal}
+            onEditRoutineRecord={handleEditRoutineFromHistory}
+            onEditGrowthRecord={handleEditGrowthFromHistory}
+            onNavigateTab={navigateToTab}
+            onOpenEditProfileModal={() => openEditProfileModal(activeProfile)}
             onOpenExportModal={() => setIsExportModalOpen(true)}
           />
         )}
       </main>
 
       {/* Mobile Bottom Tab Bar */}
-      <MobileTabBar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <MobileTabBar activeTab={activeTab} setActiveTab={navigateToTab} />
 
       {/* Modals */}
       <LogMeasurementModal
         isOpen={isLogModalOpen}
-        onClose={() => setIsLogModalOpen(false)}
+        onClose={() => {
+          setIsLogModalOpen(false);
+          setEditingBabyMeasurement(null);
+          setEditingFetalMeasurement(null);
+        }}
         onOpenFormulaModal={() => setIsFormulaModalOpen(true)}
+        editingBabyMeasurement={editingBabyMeasurement}
+        editingFetalMeasurement={editingFetalMeasurement}
       />
 
       <ProfileModal
         isOpen={isProfileModalOpen}
-        onClose={() => setIsProfileModalOpen(false)}
+        onClose={() => {
+          setIsProfileModalOpen(false);
+          setEditingProfile(undefined);
+        }}
+        editingProfile={editingProfile}
       />
 
       <ExportReportModal

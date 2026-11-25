@@ -176,7 +176,7 @@ export const DeleteProfileModal: React.FC<DeleteProfileModalProps> = ({
                 className="mt-0.5 rounded-md border-stone-300 dark:border-stone-600 text-rose-600 focus:ring-rose-500"
               />
               <span className="text-xs text-stone-700 dark:text-stone-300 leading-snug">
-                I explicitly acknowledge that deleting this profile will permanently erase all associated checkups, growth curves, milestone records, kick counters, and love notes from my browser cookies.
+                I explicitly acknowledge that deleting this profile will permanently erase all associated checkups, growth curves, milestone records, kick counters, and love notes.
               </span>
             </label>
           </div>

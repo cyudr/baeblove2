@@ -61,6 +61,7 @@ import {
   Flame,
   Utensils,
   History,
+  Pencil,
 } from 'lucide-react';
 import {
   CardDetailPopupModal,
@@ -79,6 +80,8 @@ import confetti from 'canvas-confetti';
 interface GrowthDashboardViewProps {
   onOpenLogModal: () => void;
   onNavigateTab: (tab: string) => void;
+  onOpenProfileModal?: () => void;
+  onOpenEditProfileModal?: () => void;
   onOpenFormulaModal?: () => void;
   onOpenLoveNoteModal?: (stageLabel: string) => void;
   onOpenCustomMilestoneModal?: () => void;
@@ -88,6 +91,8 @@ interface GrowthDashboardViewProps {
 export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
   onOpenLogModal,
   onNavigateTab,
+  onOpenProfileModal,
+  onOpenEditProfileModal,
   onOpenFormulaModal,
   onOpenLoveNoteModal,
   onOpenCustomMilestoneModal,
@@ -100,6 +105,9 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
     activeCompletedMilestones,
     activeKickSessions,
     activeLoveNotes,
+    growthRecords,
+    routineRecords,
+    isEntriesLoading,
     addKickSession,
     deleteKickSession,
     toggleMilestone,
@@ -123,8 +131,8 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
 
   // Stage explorer inside scrollable overview
   const [babyStageMode, setBabyStageMode] = useState<'weeks' | 'months'>('weeks');
-  const [previewWeekNum, setPreviewWeekNum] = useState<number>(38);
-  const [previewFetalWeekNum, setPreviewFetalWeekNum] = useState<number>(28);
+  const [previewWeekNum, setPreviewWeekNum] = useState<number>(1);
+  const [previewFetalWeekNum, setPreviewFetalWeekNum] = useState<number>(20);
 
   const [isGraduateModalOpen, setIsGraduateModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -137,6 +145,19 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
   // Milestones filter inside scrollable overview
   const [milestoneDomainFilter, setMilestoneDomainFilter] = useState<string>('all');
 
+  // Sync stage preview week whenever the active profile or its date changes
+  useEffect(() => {
+    if (!activeProfile) return;
+    if (activeProfile.type === 'baby') {
+      const diffTime = Date.now() - new Date(activeProfile.dateOfEvent).getTime();
+      const totalDays = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+      setPreviewWeekNum(Math.max(1, Math.min(52, Math.floor(totalDays / 7) || 1)));
+    } else {
+      const ga = calculateGestationalAge(activeProfile.dateOfEvent);
+      setPreviewFetalWeekNum(Math.max(4, Math.min(42, ga.weeks || 20)));
+    }
+  }, [activeProfile?.id, activeProfile?.type, activeProfile?.dateOfEvent]);
+
   // Live timer effect
   useEffect(() => {
     let interval: any = null;
@@ -148,7 +169,66 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
     return () => clearInterval(interval);
   }, [isTimerActive]);
 
-  if (!activeProfile) return null;
+  if (isEntriesLoading && !activeProfile) {
+    return (
+      <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-10 text-center text-xs text-stone-500 dark:text-stone-400">
+        Loading your family data from Supabase...
+      </div>
+    );
+  }
+
+  if (!activeProfile) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-8 md:p-10 text-center space-y-4 shadow-xs">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
+            <Baby className="w-7 h-7" />
+          </div>
+          <div className="space-y-1.5">
+            <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-white">
+              Welcome to BaeLove
+            </h1>
+            <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 max-w-lg mx-auto">
+              All data is synced live with your Supabase tables. Add a baby or pregnancy profile to unlock personalized WHO growth curves, stages, and milestones—or jump straight into logging routine and growth entries.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+            {onOpenProfileModal && (
+              <button
+                type="button"
+                onClick={onOpenProfileModal}
+                className="px-4 py-2.5 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Baby or Pregnancy Profile</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onNavigateTab('routine')}
+              className="px-4 py-2.5 text-xs font-semibold text-emerald-900 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors cursor-pointer"
+            >
+              Log Routine ({routineRecords.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('charts')}
+              className="px-4 py-2.5 text-xs font-semibold text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 rounded-xl transition-colors cursor-pointer"
+            >
+              Log Growth ({growthRecords.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('logs')}
+              className="px-4 py-2.5 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl transition-colors cursor-pointer"
+            >
+              View History
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const isBaby = activeProfile.type === 'baby';
 
@@ -213,9 +293,13 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
     ? getBabyStageRecommendations(currentBabyWeeks, true)
     : getFetalWeekRecommendations(gestationalAgeInfo?.weeks || 28);
 
-  // Milestones for current age bracket
+  // Milestones for current age bracket (nearest CDC age bracket to baby's actual age)
   const currentAgeBracket = isBaby
-    ? AGE_BRACKETS.find((b) => b.months === 9) || AGE_BRACKETS[3]
+    ? AGE_BRACKETS.reduce((closest, bracket) =>
+        Math.abs(bracket.months - currentBabyMonth) < Math.abs(closest.months - currentBabyMonth)
+          ? bracket
+          : closest
+      , AGE_BRACKETS[0])
     : null;
   const bracketMilestones = currentAgeBracket
     ? CDC_MILESTONES.filter((m) => m.ageMonthBracket === currentAgeBracket.months)
@@ -467,6 +551,17 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                   >
                     <History className="w-4 h-4 text-amber-700 dark:text-amber-400" />
                     <span>In-Womb Journey</span>
+                  </button>
+                )}
+
+                {onOpenEditProfileModal && (
+                  <button
+                    onClick={onOpenEditProfileModal}
+                    title={isBaby ? 'Edit birth date, birth weight, length, head circumference, and profile info' : 'Edit due date and pregnancy profile details'}
+                    className="px-3.5 py-2 text-xs font-semibold rounded-2xl border border-stone-200 dark:border-stone-700 bg-white/95 dark:bg-stone-800 hover:bg-stone-50 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 transition-all flex items-center gap-1.5 shadow-2xs hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>{isBaby ? 'Edit Birth Data' : 'Edit Profile'}</span>
                   </button>
                 )}
 

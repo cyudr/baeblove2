@@ -94,11 +94,8 @@ export async function insertGrowthRecord(
 
   if (!supabase) {
     return {
-      record: {
-        id: Date.now(),
-        created_at: new Date().toISOString(),
-        ...payload,
-      },
+      record: null,
+      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
     };
   }
 
@@ -141,7 +138,10 @@ export async function updateGrowthRecord(
   if ('name' in updates) payload.name = toNullableText(updates.name);
 
   if (!supabase) {
-    return { record: null };
+    return {
+      record: null,
+      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
+    };
   }
 
   const { data, error } = await supabase
@@ -160,7 +160,9 @@ export async function updateGrowthRecord(
 }
 
 export async function deleteGrowthRecord(id: number): Promise<{ error?: string }> {
-  if (!supabase) return {};
+  if (!supabase) {
+    return { error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.' };
+  }
 
   const { error } = await supabase.from(GROWTH_TABLE).delete().eq('id', id);
   if (error) {
@@ -245,11 +247,8 @@ export async function insertRoutineRecord(
 
   if (!supabase) {
     return {
-      record: {
-        id: Date.now(),
-        created_at: new Date().toISOString(),
-        ...payload,
-      },
+      record: null,
+      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
     };
   }
 
@@ -300,7 +299,10 @@ export async function updateRoutineRecord(
   }
 
   if (!supabase) {
-    return { record: null };
+    return {
+      record: null,
+      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
+    };
   }
 
   const { data, error } = await supabase
@@ -321,7 +323,9 @@ export async function updateRoutineRecord(
 }
 
 export async function deleteRoutineRecord(id: number): Promise<{ error?: string }> {
-  if (!supabase) return {};
+  if (!supabase) {
+    return { error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.' };
+  }
 
   const { error } = await supabase.from(ROUTINE_TABLE).delete().eq('id', id);
   if (error) {

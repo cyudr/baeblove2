@@ -144,296 +144,13 @@ interface AppContextType {
   ) => Promise<{ record: RoutineRecord | null; error?: string }>;
   removeRoutineRecord: (id: number) => Promise<{ error?: string }>;
 
-  resetToSampleData: () => void;
+  isEntriesLoading: boolean;
   exportDataJSON: () => string;
   importDataJSON: (jsonStr: string) => boolean;
   isCookieStorageEnabled: boolean;
 }
 
-// Realistic sample data
-const INITIAL_PROFILES: ChildProfile[] = [
-  {
-    id: 'baby-liam',
-    name: 'Liam Alexander',
-    type: 'baby',
-    gender: 'boy',
-    dateOfEvent: '2026-01-08', // born ~9 months ago
-    birthWeightKg: 3.42,
-    birthLengthCm: 50.2,
-    birthHeadCircumferenceCm: 34.6,
-    avatarColor: 'bg-emerald-600',
-    avatarIcon: 'Baby',
-    notes: 'Born healthy at 39 weeks. Pediatrician: Dr. Sarah Chen.',
-  },
-  {
-    id: 'fetal-sprout',
-    name: 'Baby #2 (Sprout)',
-    type: 'fetal',
-    gender: 'girl',
-    dateOfEvent: '2026-12-10', // Due in ~10 weeks, currently ~30 weeks
-    prePregnancyWeightKg: 61.5,
-    maternalHeightCm: 168,
-    avatarColor: 'bg-amber-600',
-    avatarIcon: 'HeartPulse',
-    notes: 'Second pregnancy. Low-risk screening. Due mid-December.',
-  },
-];
 
-const INITIAL_BABY_MEASUREMENTS: BabyMeasurement[] = [
-  {
-    id: 'm-birth',
-    profileId: 'baby-liam',
-    date: '2026-01-08',
-    ageInMonths: 0,
-    ageInWeeks: 0,
-    weightKg: 3.42,
-    lengthCm: 50.2,
-    headCircumferenceCm: 34.6,
-    pediatricianVisit: true,
-    notes: 'Birth checkup. Apgar 9/10.',
-  },
-  {
-    id: 'm-1m',
-    profileId: 'baby-liam',
-    date: '2026-02-09',
-    ageInMonths: 1,
-    ageInWeeks: 4,
-    weightKg: 4.45,
-    lengthCm: 54.8,
-    headCircumferenceCm: 37.1,
-    pediatricianVisit: true,
-    notes: '1-month well-child visit. Nursing well.',
-  },
-  {
-    id: 'm-2m',
-    profileId: 'baby-liam',
-    date: '2026-03-10',
-    ageInMonths: 2,
-    ageInWeeks: 9,
-    weightKg: 5.62,
-    lengthCm: 58.5,
-    headCircumferenceCm: 39.2,
-    pediatricianVisit: true,
-    notes: '2-month vaccines given. Smiling frequently!',
-  },
-  {
-    id: 'm-4m',
-    profileId: 'baby-liam',
-    date: '2026-05-11',
-    ageInMonths: 4,
-    ageInWeeks: 17,
-    weightKg: 7.15,
-    lengthCm: 64.0,
-    headCircumferenceCm: 41.9,
-    pediatricianVisit: true,
-    notes: '4-month checkup. Great head control, rolling belly to back.',
-  },
-  {
-    id: 'm-6m',
-    profileId: 'baby-liam',
-    date: '2026-07-09',
-    ageInMonths: 6,
-    ageInWeeks: 26,
-    weightKg: 8.05,
-    lengthCm: 67.8,
-    headCircumferenceCm: 43.7,
-    pediatricianVisit: true,
-    notes: '6-month visit. Started puree solids (avocado & sweet potato).',
-  },
-  {
-    id: 'm-9m',
-    profileId: 'baby-liam',
-    date: '2026-09-28',
-    ageInMonths: 8.7,
-    ageInWeeks: 38,
-    weightKg: 9.12,
-    lengthCm: 72.4,
-    headCircumferenceCm: 45.4,
-    pediatricianVisit: true,
-    notes: 'Sitting solidly, pulling up on living room sofa.',
-  },
-];
-
-const INITIAL_FETAL_MEASUREMENTS: FetalMeasurement[] = [
-  {
-    id: 'fm-12w',
-    profileId: 'fetal-sprout',
-    date: '2026-03-27',
-    gestationalWeeks: 12,
-    gestationalDays: 2,
-    crlMm: 56,
-    efwGrams: 16,
-    maternalWeightKg: 62.0,
-    scanLocation: 'City Women’s Clinic',
-    notes: 'Nuchal translucency scan normal (1.2mm). Nasal bone present.',
-  },
-  {
-    id: 'fm-20w',
-    profileId: 'fetal-sprout',
-    date: '2026-05-22',
-    gestationalWeeks: 20,
-    gestationalDays: 1,
-    bpdMm: 48,
-    hcMm: 177,
-    acMm: 154,
-    flMm: 33,
-    efwGrams: 320,
-    fundalHeightCm: 20,
-    maternalWeightKg: 65.5,
-    scanLocation: 'University Maternal Hospital',
-    notes: 'Anatomy scan: 4-chamber heart view clear, kidneys and spine normal.',
-  },
-  {
-    id: 'fm-28w',
-    profileId: 'fetal-sprout',
-    date: '2026-07-17',
-    gestationalWeeks: 28,
-    gestationalDays: 0,
-    bpdMm: 72,
-    hcMm: 263,
-    acMm: 245,
-    flMm: 54,
-    efwGrams: 1040,
-    fundalHeightCm: 28,
-    maternalWeightKg: 69.8,
-    scanLocation: 'University Maternal Hospital',
-    notes: 'Growth check. Amniotic fluid index AFI 14. Cephalic presentation.',
-  },
-];
-
-const INITIAL_COMPLETED_MILESTONES: CompletedMilestone[] = [
-  {
-    milestoneId: 'm2_soc_1',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-02-15',
-    notes: 'Calmed right away with papa humming.',
-  },
-  {
-    milestoneId: 'm2_soc_2',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-02-20',
-    notes: 'First real social smile in response to grandma!',
-  },
-  {
-    milestoneId: 'm2_lang_1',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-02-28',
-    notes: 'Little "aah" and "coo" sounds in the morning.',
-  },
-  {
-    milestoneId: 'm2_mov_1',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-03-05',
-    notes: 'Held head up strong during tummy time on the sheepskin rug.',
-  },
-  {
-    milestoneId: 'm4_soc_2',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-04-18',
-    notes: 'First real belly laugh when mama made tickle sounds.',
-  },
-  {
-    milestoneId: 'm4_mov_1',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-05-02',
-    notes: 'Very sturdy head control.',
-  },
-  {
-    milestoneId: 'm6_mov_1',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-06-25',
-    notes: 'Rolled from back to tummy repeatedly.',
-  },
-  {
-    milestoneId: 'm6_lang_1',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-07-04',
-    notes: 'Blowing hilarious raspberries and taking conversational pauses.',
-  },
-  {
-    milestoneId: 'm9_lang_2',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-08-30',
-    notes: 'Turns head immediately when we say "Liam!".',
-  },
-  {
-    milestoneId: 'm9_mov_1',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-09-12',
-    notes: 'Sitting up independently with both hands free for building blocks.',
-  },
-  {
-    milestoneId: 'custom-tooth-1',
-    profileId: 'baby-liam',
-    dateAchieved: '2026-07-22',
-    isCustom: true,
-    customTitle: 'First tooth broke through!',
-    customCategory: 'movement',
-    notes: 'Lower central incisor popped out. Lots of teething rings used.',
-  },
-];
-
-const INITIAL_KICK_SESSIONS: KickSession[] = [
-  {
-    id: 'kick-1',
-    profileId: 'fetal-sprout',
-    date: '2026-09-30',
-    startTime: '20:15',
-    durationSeconds: 1140, // 19 mins
-    kicksCount: 10,
-    targetReached: true,
-    notes: 'Active after warm lemon tea.',
-  },
-  {
-    id: 'kick-2',
-    profileId: 'fetal-sprout',
-    date: '2026-10-01',
-    startTime: '21:00',
-    durationSeconds: 920, // ~15 mins
-    kicksCount: 10,
-    targetReached: true,
-    notes: 'Strong rhythmic kicks on right side.',
-  },
-];
-
-const INITIAL_LOVE_NOTES: LoveNote[] = [
-  {
-    id: 'note-1',
-    profileId: 'baby-liam',
-    date: '2026-03-10',
-    stageLabel: 'Month 2',
-    author: 'Mama',
-    emoji: '💖',
-    content: 'The very first time you looked right into my eyes and gave us that huge gummy smile, the whole room filled with warm sunshine. We love you so much, sweet boy.',
-  },
-  {
-    id: 'note-2',
-    profileId: 'baby-liam',
-    date: '2026-07-09',
-    stageLabel: 'Month 6',
-    author: 'Papa',
-    emoji: '🥑',
-    content: 'You tried sweet potato puree today and your eyes went as round as saucers! You are growing so strong, brave, and full of wonder.',
-  },
-  {
-    id: 'note-3',
-    profileId: 'fetal-sprout',
-    date: '2026-05-22',
-    stageLabel: 'Week 20',
-    author: 'Mama & Papa',
-    emoji: '✨',
-    content: 'We saw your tiny fingers open and curl today at the ultrasound. Halfway to holding you in our arms. You are already our whole world.',
-  },
-  {
-    id: 'note-4',
-    profileId: 'fetal-sprout',
-    date: '2026-07-17',
-    stageLabel: 'Week 28',
-    author: 'Mama',
-    emoji: '🌙',
-    content: 'Every evening when your papa reads near my belly, you give the happiest little kicks! You recognize our voices already.',
-  },
-];
 
 function upsertById<T extends { id: string }>(
   items: T[],
@@ -493,10 +210,8 @@ function buildEntryRows(data: {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [profiles, setProfiles] = useState<ChildProfile[]>(INITIAL_PROFILES);
-  const [activeProfileId, setActiveProfileIdState] = useState<string>(
-    INITIAL_PROFILES[0]?.id || ''
-  );
+  const [profiles, setProfiles] = useState<ChildProfile[]>([]);
+  const [activeProfileId, setActiveProfileIdState] = useState<string>('');
 
   // Theme detection: daytime (6am-7pm) = light, night (7pm-6am) = dark
   const systemOrTimeTheme = getSystemOrTimeTheme();
@@ -504,13 +219,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [unitSystem, setUnitSystemState] = useState<UnitSystem>('metric');
   const [formulaSettings, setFormulaSettings] = useState<FormulaSettings>(DEFAULT_FORMULA_SETTINGS);
-  const [babyMeasurements, setBabyMeasurements] = useState<BabyMeasurement[]>(INITIAL_BABY_MEASUREMENTS);
-  const [fetalMeasurements, setFetalMeasurements] = useState<FetalMeasurement[]>(INITIAL_FETAL_MEASUREMENTS);
-  const [completedMilestones, setCompletedMilestones] = useState<CompletedMilestone[]>(INITIAL_COMPLETED_MILESTONES);
-  const [kickSessions, setKickSessions] = useState<KickSession[]>(INITIAL_KICK_SESSIONS);
-  const [loveNotes, setLoveNotes] = useState<LoveNote[]>(INITIAL_LOVE_NOTES);
+  const [babyMeasurements, setBabyMeasurements] = useState<BabyMeasurement[]>([]);
+  const [fetalMeasurements, setFetalMeasurements] = useState<FetalMeasurement[]>([]);
+  const [completedMilestones, setCompletedMilestones] = useState<CompletedMilestone[]>([]);
+  const [kickSessions, setKickSessions] = useState<KickSession[]>([]);
+  const [loveNotes, setLoveNotes] = useState<LoveNote[]>([]);
   const [growthRecords, setGrowthRecords] = useState<GrowthRecord[]>([]);
   const [routineRecords, setRoutineRecords] = useState<RoutineRecord[]>([]);
+  const [isEntriesLoading, setIsEntriesLoading] = useState<boolean>(true);
   const [isCareTablesLoading, setIsCareTablesLoading] = useState<boolean>(false);
 
   useEffect(() => {
@@ -629,92 +345,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let isMounted = true;
 
     const hydrateFromSupabase = async () => {
-      const rows = await fetchAllEntries();
-      if (!isMounted || rows === null) return;
+      setIsEntriesLoading(true);
+      try {
+        const rows = await fetchAllEntries();
+        if (!isMounted || rows === null) return;
 
-      if (rows.length === 0) {
-        const seedRows = buildEntryRows({
-          profiles: INITIAL_PROFILES,
-          babyMeasurements: INITIAL_BABY_MEASUREMENTS,
-          fetalMeasurements: INITIAL_FETAL_MEASUREMENTS,
-          completedMilestones: INITIAL_COMPLETED_MILESTONES,
-          kickSessions: INITIAL_KICK_SESSIONS,
-          loveNotes: INITIAL_LOVE_NOTES,
-          unitSystem: 'metric',
-          formulaSettings: DEFAULT_FORMULA_SETTINGS,
-          theme: getSystemOrTimeTheme(),
-          activeProfileId: INITIAL_PROFILES[0]?.id || '',
-        });
-        await upsertEntries(seedRows);
-        return;
-      }
+        const loadedProfiles: ChildProfile[] = [];
+        const loadedBabyMeasurements: BabyMeasurement[] = [];
+        const loadedFetalMeasurements: FetalMeasurement[] = [];
+        const loadedMilestones: CompletedMilestone[] = [];
+        const loadedKicks: KickSession[] = [];
+        const loadedLoveNotes: LoveNote[] = [];
+        let loadedTheme: ThemeMode | null = null;
+        let loadedUnits: UnitSystem | null = null;
+        let loadedFormulaSettings: FormulaSettings | null = null;
+        let loadedActiveProfileId: string | null = null;
 
-      const loadedProfiles: ChildProfile[] = [];
-      const loadedBabyMeasurements: BabyMeasurement[] = [];
-      const loadedFetalMeasurements: FetalMeasurement[] = [];
-      const loadedMilestones: CompletedMilestone[] = [];
-      const loadedKicks: KickSession[] = [];
-      const loadedLoveNotes: LoveNote[] = [];
-      let loadedTheme: ThemeMode | null = null;
-      let loadedUnits: UnitSystem | null = null;
-      let loadedFormulaSettings: FormulaSettings | null = null;
-      let loadedActiveProfileId: string | null = null;
-
-      for (const row of rows) {
-        switch (row.entry_type) {
-          case 'profile':
-            if (row.payload) loadedProfiles.push(row.payload as ChildProfile);
-            break;
-          case 'baby_measurement':
-            if (row.payload) loadedBabyMeasurements.push(row.payload as BabyMeasurement);
-            break;
-          case 'fetal_measurement':
-            if (row.payload) loadedFetalMeasurements.push(row.payload as FetalMeasurement);
-            break;
-          case 'completed_milestone':
-            if (row.payload) loadedMilestones.push(row.payload as CompletedMilestone);
-            break;
-          case 'kick_session':
-            if (row.payload) loadedKicks.push(row.payload as KickSession);
-            break;
-          case 'love_note':
-            if (row.payload) loadedLoveNotes.push(row.payload as LoveNote);
-            break;
-          case 'setting': {
-            const setting = row.payload as SettingPayload | undefined;
-            if (!setting) break;
-            if (setting.key === 'theme' && (setting.value === 'light' || setting.value === 'dark')) {
-              loadedTheme = setting.value;
-            } else if (setting.key === 'units' && (setting.value === 'metric' || setting.value === 'imperial')) {
-              loadedUnits = setting.value;
-            } else if (setting.key === 'formula_settings' && setting.value && typeof setting.value === 'object') {
-              loadedFormulaSettings = setting.value as FormulaSettings;
-            } else if (setting.key === 'active_profile' && typeof setting.value === 'string') {
-              loadedActiveProfileId = setting.value;
+        for (const row of rows) {
+          switch (row.entry_type) {
+            case 'profile':
+              if (row.payload) loadedProfiles.push(row.payload as ChildProfile);
+              break;
+            case 'baby_measurement':
+              if (row.payload) loadedBabyMeasurements.push(row.payload as BabyMeasurement);
+              break;
+            case 'fetal_measurement':
+              if (row.payload) loadedFetalMeasurements.push(row.payload as FetalMeasurement);
+              break;
+            case 'completed_milestone':
+              if (row.payload) loadedMilestones.push(row.payload as CompletedMilestone);
+              break;
+            case 'kick_session':
+              if (row.payload) loadedKicks.push(row.payload as KickSession);
+              break;
+            case 'love_note':
+              if (row.payload) loadedLoveNotes.push(row.payload as LoveNote);
+              break;
+            case 'setting': {
+              const setting = row.payload as SettingPayload | undefined;
+              if (!setting) break;
+              if (setting.key === 'theme' && (setting.value === 'light' || setting.value === 'dark')) {
+                loadedTheme = setting.value;
+              } else if (setting.key === 'units' && (setting.value === 'metric' || setting.value === 'imperial')) {
+                loadedUnits = setting.value;
+              } else if (setting.key === 'formula_settings' && setting.value && typeof setting.value === 'object') {
+                loadedFormulaSettings = setting.value as FormulaSettings;
+              } else if (setting.key === 'active_profile' && typeof setting.value === 'string') {
+                loadedActiveProfileId = setting.value;
+              }
+              break;
             }
-            break;
           }
         }
-      }
 
-      if (!isMounted) return;
+        if (!isMounted) return;
 
-      const resolvedProfiles = loadedProfiles.length > 0 ? loadedProfiles : INITIAL_PROFILES;
-      setProfiles(resolvedProfiles);
-      setBabyMeasurements(loadedBabyMeasurements);
-      setFetalMeasurements(loadedFetalMeasurements);
-      setCompletedMilestones(loadedMilestones);
-      setKickSessions(loadedKicks.reverse());
-      setLoveNotes(loadedLoveNotes.reverse());
+        setProfiles(loadedProfiles);
+        setBabyMeasurements(loadedBabyMeasurements);
+        setFetalMeasurements(loadedFetalMeasurements);
+        setCompletedMilestones(loadedMilestones);
+        setKickSessions(loadedKicks.reverse());
+        setLoveNotes(loadedLoveNotes.reverse());
 
-      if (loadedTheme) setThemeState(loadedTheme);
-      if (loadedUnits) setUnitSystemState(loadedUnits);
-      if (loadedFormulaSettings) setFormulaSettings(loadedFormulaSettings);
+        if (loadedTheme) setThemeState(loadedTheme);
+        if (loadedUnits) setUnitSystemState(loadedUnits);
+        if (loadedFormulaSettings) setFormulaSettings(loadedFormulaSettings);
 
-      if (loadedActiveProfileId && resolvedProfiles.some((p) => p.id === loadedActiveProfileId)) {
-        setActiveProfileIdState(loadedActiveProfileId);
-      } else {
-        setActiveProfileIdState(resolvedProfiles[0]?.id || '');
+        if (loadedActiveProfileId && loadedProfiles.some((p) => p.id === loadedActiveProfileId)) {
+          setActiveProfileIdState(loadedActiveProfileId);
+        } else {
+          setActiveProfileIdState(loadedProfiles[0]?.id || '');
+        }
+      } finally {
+        if (isMounted) setIsEntriesLoading(false);
       }
     };
 
@@ -827,12 +530,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addProfile = (profileData: Omit<ChildProfile, 'id'>): string => {
     const newId = `profile-${Date.now()}`;
     const newProfile: ChildProfile = { ...profileData, id: newId };
-    setProfiles((prev) => upsertById(prev, newProfile));
-    setActiveProfileIdState(newId);
-    void upsertEntries([
+    const rowsToUpsert: EntryRow[] = [
       toProfileRow(newProfile),
       toSettingRow('active_profile', newId),
-    ]);
+    ];
+
+    setProfiles((prev) => upsertById(prev, newProfile));
+    setActiveProfileIdState(newId);
+
+    if (
+      newProfile.type === 'baby' &&
+      (newProfile.birthWeightKg !== undefined ||
+        newProfile.birthLengthCm !== undefined ||
+        newProfile.birthHeadCircumferenceCm !== undefined)
+    ) {
+      const birthMeasurement: BabyMeasurement = {
+        id: `bm-birth-${Date.now()}`,
+        profileId: newId,
+        date: newProfile.dateOfEvent,
+        ageInMonths: 0,
+        ageInWeeks: 0,
+        weightKg: newProfile.birthWeightKg,
+        lengthCm: newProfile.birthLengthCm,
+        headCircumferenceCm: newProfile.birthHeadCircumferenceCm,
+        pediatricianVisit: true,
+        notes: 'Birth measurement',
+      };
+      setBabyMeasurements((prev) => upsertById(prev, birthMeasurement));
+      rowsToUpsert.push(toBabyMeasurementRow(birthMeasurement));
+    }
+
+    void upsertEntries(rowsToUpsert);
     return newId;
   };
 
@@ -841,31 +569,99 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!existing) return;
     const updated: ChildProfile = { ...existing, ...updates };
     setProfiles((prev) => prev.map((p) => (p.id === id ? updated : p)));
-    void upsertEntry(toProfileRow(updated));
+
+    const rowsToUpsert: EntryRow[] = [toProfileRow(updated)];
+
+    if (updated.type === 'baby') {
+      const birthDateChanged =
+        updates.dateOfEvent !== undefined && updates.dateOfEvent !== existing.dateOfEvent;
+      const birthStatsChanged =
+        'birthWeightKg' in updates ||
+        'birthLengthCm' in updates ||
+        'birthHeadCircumferenceCm' in updates;
+
+      if (birthDateChanged || birthStatsChanged) {
+        const profileMeasurements = babyMeasurements.filter((m) => m.profileId === id);
+        const existingBirthRecord = profileMeasurements.find((m) => m.ageInMonths === 0);
+        const updatedMeasurementsById = new Map<string, BabyMeasurement>();
+
+        if (existingBirthRecord) {
+          const syncedBirth: BabyMeasurement = {
+            ...existingBirthRecord,
+            date: updated.dateOfEvent,
+            weightKg:
+              'birthWeightKg' in updates ? updated.birthWeightKg : existingBirthRecord.weightKg,
+            lengthCm:
+              'birthLengthCm' in updates ? updated.birthLengthCm : existingBirthRecord.lengthCm,
+            headCircumferenceCm:
+              'birthHeadCircumferenceCm' in updates
+                ? updated.birthHeadCircumferenceCm
+                : existingBirthRecord.headCircumferenceCm,
+          };
+          updatedMeasurementsById.set(syncedBirth.id, syncedBirth);
+          rowsToUpsert.push(toBabyMeasurementRow(syncedBirth));
+        } else if (
+          updated.birthWeightKg !== undefined ||
+          updated.birthLengthCm !== undefined ||
+          updated.birthHeadCircumferenceCm !== undefined
+        ) {
+          const newBirthRecord: BabyMeasurement = {
+            id: `bm-birth-${Date.now()}`,
+            profileId: id,
+            date: updated.dateOfEvent,
+            ageInMonths: 0,
+            ageInWeeks: 0,
+            weightKg: updated.birthWeightKg,
+            lengthCm: updated.birthLengthCm,
+            headCircumferenceCm: updated.birthHeadCircumferenceCm,
+            pediatricianVisit: true,
+            notes: 'Birth measurement',
+          };
+          updatedMeasurementsById.set(newBirthRecord.id, newBirthRecord);
+          rowsToUpsert.push(toBabyMeasurementRow(newBirthRecord));
+        }
+
+        if (birthDateChanged) {
+          const birthMs = new Date(updated.dateOfEvent).getTime();
+          if (!Number.isNaN(birthMs)) {
+            for (const m of profileMeasurements) {
+              if (existingBirthRecord && m.id === existingBirthRecord.id) continue;
+              const measMs = new Date(m.date).getTime();
+              if (Number.isNaN(measMs)) continue;
+              const diffDays = Math.max(0, Math.floor((measMs - birthMs) / (1000 * 60 * 60 * 24)));
+              const recalculated: BabyMeasurement = {
+                ...m,
+                ageInMonths: Math.round((diffDays / 30.4375) * 10) / 10,
+                ageInWeeks: Math.round((diffDays / 7) * 10) / 10,
+              };
+              updatedMeasurementsById.set(recalculated.id, recalculated);
+              rowsToUpsert.push(toBabyMeasurementRow(recalculated));
+            }
+          }
+        }
+
+        if (updatedMeasurementsById.size > 0) {
+          setBabyMeasurements((prev) => {
+            const next = prev.map((m) => updatedMeasurementsById.get(m.id) ?? m);
+            for (const [mId, record] of updatedMeasurementsById.entries()) {
+              if (!next.some((m) => m.id === mId)) {
+                next.push(record);
+              }
+            }
+            return next;
+          });
+        }
+      }
+    }
+
+    void upsertEntries(rowsToUpsert);
   };
 
   const deleteProfile = (id: string) => {
-    let remaining = profiles.filter((p) => p.id !== id);
-    let createdFallback: ChildProfile | null = null;
-
-    if (remaining.length === 0) {
-      // If all profiles were deleted, provide a fresh starter profile
-      createdFallback = {
-        id: `profile-${Date.now()}`,
-        name: 'My Baby',
-        type: 'baby',
-        gender: 'undisclosed',
-        dateOfEvent: new Date().toISOString().split('T')[0],
-        avatarColor: 'bg-emerald-600',
-        avatarIcon: 'Baby',
-        notes: 'New profile created.',
-      };
-      remaining = [createdFallback];
-    }
-
+    const remaining = profiles.filter((p) => p.id !== id);
     setProfiles(remaining);
 
-    const nextActiveId = activeProfileId === id ? remaining[0].id : activeProfileId;
+    const nextActiveId = activeProfileId === id ? remaining[0]?.id || '' : activeProfileId;
     if (activeProfileId === id) {
       setActiveProfileIdState(nextActiveId);
     }
@@ -877,17 +673,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setKickSessions((prev) => prev.filter((k) => k.profileId !== id));
     setLoveNotes((prev) => prev.filter((n) => n.profileId !== id));
 
-    const rowsToUpsert: EntryRow[] = [];
-    if (createdFallback) {
-      rowsToUpsert.push(toProfileRow(createdFallback));
-    }
-    if (activeProfileId === id) {
-      rowsToUpsert.push(toSettingRow('active_profile', nextActiveId));
-    }
-
     void deleteEntriesByProfileId(id).then(() => {
-      if (rowsToUpsert.length > 0) {
-        return upsertEntries(rowsToUpsert);
+      if (activeProfileId === id) {
+        return upsertEntry(toSettingRow('active_profile', nextActiveId));
       }
       return undefined;
     });
@@ -1161,30 +949,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     void deleteEntryById(makeLoveNoteEntryId(id));
   };
 
-  const resetToSampleData = () => {
-    const nextActiveId = INITIAL_PROFILES[0].id;
-    setProfiles(INITIAL_PROFILES);
-    setActiveProfileIdState(nextActiveId);
-    setBabyMeasurements(INITIAL_BABY_MEASUREMENTS);
-    setFetalMeasurements(INITIAL_FETAL_MEASUREMENTS);
-    setCompletedMilestones(INITIAL_COMPLETED_MILESTONES);
-    setKickSessions(INITIAL_KICK_SESSIONS);
-    setLoveNotes(INITIAL_LOVE_NOTES);
 
-    const rows = buildEntryRows({
-      profiles: INITIAL_PROFILES,
-      babyMeasurements: INITIAL_BABY_MEASUREMENTS,
-      fetalMeasurements: INITIAL_FETAL_MEASUREMENTS,
-      completedMilestones: INITIAL_COMPLETED_MILESTONES,
-      kickSessions: INITIAL_KICK_SESSIONS,
-      loveNotes: INITIAL_LOVE_NOTES,
-      unitSystem,
-      formulaSettings,
-      theme,
-      activeProfileId: nextActiveId,
-    });
-    void replaceAllEntries(rows);
-  };
 
   const refreshCareTables = useCallback(async () => {
     setIsCareTablesLoading(true);
@@ -1426,7 +1191,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addRoutineRecord,
         editRoutineRecord,
         removeRoutineRecord,
-        resetToSampleData,
+        isEntriesLoading,
         exportDataJSON,
         importDataJSON,
         isCookieStorageEnabled: false,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { ChildProfile, ProfileType, Gender } from '../../types';
 import { X, Baby, HeartPulse, Sparkles, Trash2, History } from 'lucide-react';
@@ -26,13 +26,23 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     editingProfile?.dateOfEvent || new Date().toISOString().split('T')[0]
   );
   const [birthWeightKg, setBirthWeightKg] = useState(
-    editingProfile?.birthWeightKg ? editingProfile.birthWeightKg.toString() : ''
+    editingProfile?.birthWeightKg !== undefined ? editingProfile.birthWeightKg.toString() : ''
   );
   const [birthLengthCm, setBirthLengthCm] = useState(
-    editingProfile?.birthLengthCm ? editingProfile.birthLengthCm.toString() : ''
+    editingProfile?.birthLengthCm !== undefined ? editingProfile.birthLengthCm.toString() : ''
+  );
+  const [birthHeadCircumferenceCm, setBirthHeadCircumferenceCm] = useState(
+    editingProfile?.birthHeadCircumferenceCm !== undefined
+      ? editingProfile.birthHeadCircumferenceCm.toString()
+      : ''
   );
   const [prePregnancyWeightKg, setPrePregnancyWeightKg] = useState(
-    editingProfile?.prePregnancyWeightKg ? editingProfile.prePregnancyWeightKg.toString() : ''
+    editingProfile?.prePregnancyWeightKg !== undefined
+      ? editingProfile.prePregnancyWeightKg.toString()
+      : ''
+  );
+  const [maternalHeightCm, setMaternalHeightCm] = useState(
+    editingProfile?.maternalHeightCm !== undefined ? editingProfile.maternalHeightCm.toString() : ''
   );
   const [notes, setNotes] = useState(editingProfile?.notes || '');
 
@@ -40,29 +50,84 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [isGraduateModalOpen, setIsGraduateModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
+  // Sync form state whenever modal opens or target editingProfile changes
+  useEffect(() => {
+    if (!isOpen) return;
+    if (editingProfile) {
+      setType(editingProfile.type);
+      setName(editingProfile.name);
+      setGender(editingProfile.gender);
+      setDateOfEvent(editingProfile.dateOfEvent);
+      setBirthWeightKg(
+        editingProfile.birthWeightKg !== undefined ? editingProfile.birthWeightKg.toString() : ''
+      );
+      setBirthLengthCm(
+        editingProfile.birthLengthCm !== undefined ? editingProfile.birthLengthCm.toString() : ''
+      );
+      setBirthHeadCircumferenceCm(
+        editingProfile.birthHeadCircumferenceCm !== undefined
+          ? editingProfile.birthHeadCircumferenceCm.toString()
+          : ''
+      );
+      setPrePregnancyWeightKg(
+        editingProfile.prePregnancyWeightKg !== undefined
+          ? editingProfile.prePregnancyWeightKg.toString()
+          : ''
+      );
+      setMaternalHeightCm(
+        editingProfile.maternalHeightCm !== undefined
+          ? editingProfile.maternalHeightCm.toString()
+          : ''
+      );
+      setNotes(editingProfile.notes || '');
+    } else {
+      setType('baby');
+      setName('');
+      setGender('boy');
+      setDateOfEvent(new Date().toISOString().split('T')[0]);
+      setBirthWeightKg('');
+      setBirthLengthCm('');
+      setBirthHeadCircumferenceCm('');
+      setPrePregnancyWeightKg('');
+      setMaternalHeightCm('');
+      setNotes('');
+    }
+  }, [isOpen, editingProfile]);
+
   if (!isOpen) return null;
+
+  const parseOptionalFloat = (val: string): number | undefined => {
+    const trimmed = val.trim();
+    if (!trimmed) return undefined;
+    const parsed = parseFloat(trimmed);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    const profileData: Omit<ChildProfile, 'id'> = {
+    const baseData: Partial<ChildProfile> = {
       name: name.trim(),
       type,
       gender,
       dateOfEvent,
-      birthWeightKg: birthWeightKg ? parseFloat(birthWeightKg) : undefined,
-      birthLengthCm: birthLengthCm ? parseFloat(birthLengthCm) : undefined,
-      prePregnancyWeightKg: prePregnancyWeightKg ? parseFloat(prePregnancyWeightKg) : undefined,
-      avatarColor: type === 'baby' ? (gender === 'girl' ? 'bg-rose-600' : 'bg-emerald-600') : 'bg-amber-600',
+      birthWeightKg: type === 'baby' ? parseOptionalFloat(birthWeightKg) : undefined,
+      birthLengthCm: type === 'baby' ? parseOptionalFloat(birthLengthCm) : undefined,
+      birthHeadCircumferenceCm:
+        type === 'baby' ? parseOptionalFloat(birthHeadCircumferenceCm) : undefined,
+      prePregnancyWeightKg: type === 'fetal' ? parseOptionalFloat(prePregnancyWeightKg) : undefined,
+      maternalHeightCm: type === 'fetal' ? parseOptionalFloat(maternalHeightCm) : undefined,
+      avatarColor:
+        type === 'baby' ? (gender === 'girl' ? 'bg-rose-600' : 'bg-emerald-600') : 'bg-amber-600',
       avatarIcon: type === 'baby' ? 'Baby' : 'HeartPulse',
       notes: notes.trim() || undefined,
     };
 
     if (editingProfile) {
-      updateProfile(editingProfile.id, profileData);
+      updateProfile(editingProfile.id, baseData);
     } else {
-      addProfile(profileData);
+      addProfile(baseData as Omit<ChildProfile, 'id'>);
     }
 
     onClose();
@@ -73,12 +138,23 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 dark:bg-black/75 backdrop-blur-xs overflow-y-auto">
         <div className="bg-white dark:bg-stone-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-stone-200 dark:border-stone-800 relative transition-colors my-6">
           <div className="flex items-center justify-between pb-4 border-b border-stone-100 dark:border-stone-800">
-            <h3 className="text-lg font-bold text-stone-900 dark:text-white">
-              {editingProfile ? 'Edit Profile' : 'Add Child or Pregnancy'}
-            </h3>
+            <div>
+              <h3 className="text-lg font-bold text-stone-900 dark:text-white">
+                {editingProfile
+                  ? editingProfile.type === 'baby'
+                    ? 'Edit Profile & Birth Data'
+                    : 'Edit Pregnancy Profile'
+                  : 'Add Child or Pregnancy'}
+              </h3>
+              {editingProfile && editingProfile.type === 'baby' && (
+                <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                  Updates automatically sync birth baseline stats and growth ages.
+                </p>
+              )}
+            </div>
             <button
               onClick={onClose}
-              className="p-1.5 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+              className="p-1.5 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -94,13 +170,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     <Sparkles className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     <div>
                       <div className="text-xs font-bold text-stone-900 dark:text-white">Baby has arrived?</div>
-                      <div className="text-[11px] text-stone-500 dark:text-stone-400">Celebrate birth & transition to babyhood</div>
+                      <div className="text-[11px] text-stone-500 dark:text-stone-400">Celebrate birth &amp; transition to babyhood</div>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setIsGraduateModalOpen(true)}
-                    className="px-2.5 py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-xl shadow-xs transition-colors shrink-0"
+                    className="px-2.5 py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
                   >
                     Graduate
                   </button>
@@ -114,13 +190,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     <History className="w-4 h-4 text-amber-700 dark:text-amber-400" />
                     <div>
                       <div className="text-xs font-bold text-stone-900 dark:text-white">Attached Prenatal Journey</div>
-                      <div className="text-[11px] text-stone-500 dark:text-stone-400">In-womb ultrasounds & kicks preserved</div>
+                      <div className="text-[11px] text-stone-500 dark:text-stone-400">In-womb ultrasounds &amp; kicks preserved</div>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setIsHistoryModalOpen(true)}
-                    className="px-2.5 py-1 text-xs font-bold text-stone-800 dark:text-stone-200 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/60 dark:hover:bg-amber-800 rounded-xl transition-colors shrink-0"
+                    className="px-2.5 py-1 text-xs font-bold text-stone-800 dark:text-stone-200 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/60 dark:hover:bg-amber-800 rounded-xl transition-colors shrink-0 cursor-pointer"
                   >
                     View History
                   </button>
@@ -140,7 +216,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setType('baby')}
-                    className={`p-3 rounded-2xl border text-left flex items-start gap-2.5 transition-all ${
+                    className={`p-3 rounded-2xl border text-left flex items-start gap-2.5 transition-all cursor-pointer ${
                       type === 'baby'
                         ? 'border-emerald-600 bg-emerald-50/70 dark:bg-emerald-950/40 text-stone-900 dark:text-white font-semibold'
                         : 'border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 text-stone-600 dark:text-stone-300 bg-white dark:bg-stone-800'
@@ -156,7 +232,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setType('fetal')}
-                    className={`p-3 rounded-2xl border text-left flex items-start gap-2.5 transition-all ${
+                    className={`p-3 rounded-2xl border text-left flex items-start gap-2.5 transition-all cursor-pointer ${
                       type === 'fetal'
                         ? 'border-amber-600 bg-amber-50/70 dark:bg-amber-950/40 text-stone-900 dark:text-white font-semibold'
                         : 'border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 text-stone-600 dark:text-stone-300 bg-white dark:bg-stone-800'
@@ -196,7 +272,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     key={g}
                     type="button"
                     onClick={() => setGender(g)}
-                    className={`py-1.5 text-xs font-medium rounded-xl border capitalize transition-colors ${
+                    className={`py-1.5 text-xs font-medium rounded-xl border capitalize transition-colors cursor-pointer ${
                       gender === g
                         ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 border-stone-900 dark:border-stone-100 font-semibold'
                         : 'bg-white dark:bg-stone-800 text-stone-600 dark:text-stone-300 border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600'
@@ -222,49 +298,82 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               />
             </div>
 
-            {/* Optional birth or pregnancy baseline stats */}
+            {/* Birth or Pregnancy Baseline Stats */}
             {type === 'baby' ? (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-2.5">
                 <div>
-                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                  <label className="block text-[11px] font-medium text-stone-700 dark:text-stone-300 mb-1">
                     Birth Weight (kg)
                   </label>
                   <input
                     type="number"
                     step="0.01"
-                    placeholder="e.g. 3.4"
+                    min="0"
+                    placeholder="e.g. 3.42"
                     value={birthWeightKg}
                     onChange={(e) => setBirthWeightKg(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
+                    className="w-full px-2.5 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                  <label className="block text-[11px] font-medium text-stone-700 dark:text-stone-300 mb-1">
                     Birth Length (cm)
                   </label>
                   <input
                     type="number"
                     step="0.1"
-                    placeholder="e.g. 50.0"
+                    min="0"
+                    placeholder="e.g. 50.2"
                     value={birthLengthCm}
                     onChange={(e) => setBirthLengthCm(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
+                    className="w-full px-2.5 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-700 dark:text-stone-300 mb-1">
+                    Birth Head (cm)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    placeholder="e.g. 34.6"
+                    value={birthHeadCircumferenceCm}
+                    onChange={(e) => setBirthHeadCircumferenceCm(e.target.value)}
+                    className="w-full px-2.5 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
                   />
                 </div>
               </div>
             ) : (
-              <div>
-                <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                  Pre-pregnancy Weight (kg)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  placeholder="e.g. 60.5"
-                  value={prePregnancyWeightKg}
-                  onChange={(e) => setPrePregnancyWeightKg(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                    Pre-pregnancy Weight (kg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    placeholder="e.g. 60.5"
+                    value={prePregnancyWeightKg}
+                    onChange={(e) => setPrePregnancyWeightKg(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                    Maternal Height (cm)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    placeholder="e.g. 168"
+                    value={maternalHeightCm}
+                    onChange={(e) => setMaternalHeightCm(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
+                  />
+                </div>
               </div>
             )}
 
@@ -280,25 +389,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               />
             </div>
 
-            {/* Browser Cookie Storage Indicator */}
-            <div className="p-3 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-xs text-stone-700 dark:text-stone-300 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-base">🍪</span>
-                <div>
-                  <span className="font-bold text-emerald-950 dark:text-emerald-200 block text-[11px]">
-                    Browser Cookie Storage Active
-                  </span>
-                  <span className="text-[10px] text-stone-500 dark:text-stone-400">
-                    Child profiles are persistently saved in your browser's secure cookies.
-                  </span>
-                </div>
-              </div>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold shrink-0">
-                Synced ✓
-              </span>
-            </div>
-
-            {/* Danger Zone: Delete Profile Option (Requirements 1 & 2) */}
+            {/* Danger Zone: Delete Profile Option */}
             {editingProfile && (
               <div className="pt-2">
                 <div className="p-3 rounded-2xl border border-rose-200/80 dark:border-rose-950/60 bg-rose-50/40 dark:bg-rose-950/20 flex items-center justify-between">
@@ -313,7 +404,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsDeleteModalOpen(true)}
-                    className="px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:text-white hover:bg-rose-600 dark:hover:bg-rose-600 border border-rose-300 dark:border-rose-800 rounded-xl transition-colors flex items-center gap-1.5"
+                    className="px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:text-white hover:bg-rose-600 dark:hover:bg-rose-600 border border-rose-300 dark:border-rose-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Delete</span>
@@ -326,13 +417,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-xs font-medium text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white rounded-xl transition-colors"
+                className="px-4 py-2 text-xs font-medium text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white rounded-xl transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl shadow-xs transition-colors"
+                className="px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl shadow-xs transition-colors cursor-pointer"
               >
                 {editingProfile ? 'Save Changes' : 'Create Profile'}
               </button>
@@ -341,7 +432,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         </div>
       </div>
 
-      {/* Delete Profile Modal (Requirement 2) */}
+      {/* Delete Profile Modal */}
       {editingProfile && (
         <DeleteProfileModal
           isOpen={isDeleteModalOpen}
@@ -354,7 +445,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         />
       )}
 
-      {/* Graduate Fetal Modal (Requirement 1 & 3) */}
+      {/* Graduate Fetal Modal */}
       {editingProfile && editingProfile.type === 'fetal' && (
         <GraduateFetalModal
           isOpen={isGraduateModalOpen}
@@ -367,7 +458,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         />
       )}
 
-      {/* Attached Prenatal History Review Modal (Requirement 3) */}
+      {/* Attached Prenatal History Review Modal */}
       {editingProfile && editingProfile.type === 'baby' && (
         <AttachedPrenatalHistoryModal
           isOpen={isHistoryModalOpen}
@@ -378,4 +469,3 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     </>
   );
 };
-

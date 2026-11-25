@@ -1,12 +1,10 @@
 import React from 'react';
-import { useApp } from '../../context/AppContext';
 import {
   LayoutDashboard,
   Sparkles,
   LineChart,
-  HeartPulse,
+  Droplets,
   ClipboardList,
-  Activity,
 } from 'lucide-react';
 
 interface MobileTabBarProps {
@@ -18,16 +16,12 @@ export const MobileTabBar: React.FC<MobileTabBarProps> = ({
   activeTab,
   setActiveTab,
 }) => {
-  const { activeProfile } = useApp();
-
   const tabs = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
-    { id: 'daily-care', label: 'Daily Care', icon: Activity },
     { id: 'charts', label: 'Growth', icon: LineChart },
-    { id: 'stages', label: 'Stages', icon: Sparkles },
-    ...(activeProfile?.type === 'fetal'
-      ? [{ id: 'fetal-hub', label: 'Pregnancy', icon: HeartPulse }]
-      : [{ id: 'logs', label: 'History', icon: ClipboardList }]),
+    { id: 'routine', label: 'Routine', icon: Droplets },
+    { id: 'stages-milestones', label: 'Stages', icon: Sparkles },
+    { id: 'logs', label: 'History', icon: ClipboardList },
   ];
 
   return (

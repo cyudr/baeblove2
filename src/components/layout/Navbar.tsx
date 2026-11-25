@@ -7,7 +7,6 @@ import {
   Plus,
   FileText,
   ChevronDown,
-  RotateCcw,
   Sparkles,
   Check,
   BookOpen,
@@ -19,7 +18,8 @@ import {
   LineChart,
   History,
   Trash2,
-  Activity,
+  Droplets,
+  Pencil,
 } from 'lucide-react';
 import { DeleteProfileModal } from '../modals/DeleteProfileModal';
 import { GraduateFetalModal } from '../modals/GraduateFetalModal';
@@ -29,6 +29,7 @@ interface NavbarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onOpenProfileModal: () => void;
+  onOpenEditProfileModal: (profile: ChildProfile) => void;
   onOpenExportModal: () => void;
   onOpenFormulaModal: () => void;
   isPasswordProtected?: boolean;
@@ -39,6 +40,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   onOpenProfileModal,
+  onOpenEditProfileModal,
   onOpenExportModal,
   onOpenFormulaModal,
   isPasswordProtected = false,
@@ -49,7 +51,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     activeProfileId,
     activeProfile,
     setActiveProfileId,
-    resetToSampleData,
     formulaSettings,
     theme,
     toggleTheme,
@@ -65,18 +66,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const navItems = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
-    {
-      id: 'charts',
-      label: activeProfile?.type === 'baby' ? 'Curves' : 'Biometrics',
-      icon: LineChart,
-    },
-    { id: 'stages', label: 'Stages & Wishes', icon: Sparkles },
-    {
-      id: activeProfile?.type === 'fetal' ? 'fetal-hub' : 'milestones',
-      label: activeProfile?.type === 'fetal' ? 'Pregnancy' : 'Milestones',
-      icon: activeProfile?.type === 'fetal' ? HeartPulse : Check,
-    },
-    { id: 'daily-care', label: 'Daily Care', icon: Activity },
+    { id: 'charts', label: 'Growth', icon: LineChart },
+    { id: 'routine', label: 'Routine', icon: Droplets },
+    { id: 'stages-milestones', label: 'Stages & Milestones', icon: Sparkles },
     { id: 'logs', label: 'History', icon: History },
   ];
 
@@ -108,13 +100,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-stone-200 dark:border-stone-700 hover:border-emerald-400 dark:hover:border-emerald-600 bg-stone-50/90 dark:bg-stone-800/90 text-xs font-semibold text-stone-800 dark:text-stone-200 transition-all shadow-2xs hover:bg-stone-100 dark:hover:bg-stone-700/80"
               title="Switch or manage profiles"
             >
-              {activeProfile?.type === 'baby' ? (
-                <Baby className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              ) : (
+              {activeProfile?.type === 'fetal' ? (
                 <HeartPulse className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+              ) : (
+                <Baby className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               )}
               <span className="max-w-[75px] sm:max-w-[130px] truncate">
-                {activeProfile?.name?.split(' ')[0] || 'Child'}
+                {activeProfile?.name?.split(' ')[0] || 'Add Profile'}
               </span>
               <ChevronDown className="w-3 h-3 text-stone-400 shrink-0" />
             </button>
@@ -163,8 +155,20 @@ export const Navbar: React.FC<NavbarProps> = ({
 
                         <div className="flex items-center gap-1 shrink-0">
                           {isActive && (
-                            <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mr-1" />
+                            <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mr-0.5" />
                           )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setProfileDropdownOpen(false);
+                              onOpenEditProfileModal(p);
+                            }}
+                            className="p-1 rounded-lg text-stone-400 hover:text-stone-900 dark:hover:text-white hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors cursor-pointer"
+                            title={`Edit profile & birth data: ${p.name}`}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             type="button"
                             onClick={(e) => {
@@ -185,6 +189,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {/* Special Contextual Profile Actions */}
                   {activeProfile && (
                     <div className="px-2 pt-1 border-t border-stone-100 dark:border-stone-700 my-1 space-y-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileDropdownOpen(false);
+                          onOpenEditProfileModal(activeProfile);
+                        }}
+                        className="w-full px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-700/50 border border-stone-200 dark:border-stone-600 text-left text-xs font-bold text-stone-800 dark:text-stone-100 flex items-center gap-2 hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span>
+                          {activeProfile.type === 'baby'
+                            ? 'Edit Birth Data & Profile'
+                            : 'Edit Pregnancy Details'}
+                        </span>
+                      </button>
+
                       {activeProfile.type === 'fetal' && (
                         <button
                           onClick={() => {
@@ -220,23 +240,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       setProfileDropdownOpen(false);
                       onOpenProfileModal();
                     }}
-                    className="w-full px-3.5 py-2 text-left text-xs text-stone-700 dark:text-stone-200 hover:text-stone-900 dark:hover:text-white hover:bg-stone-50 dark:hover:bg-stone-700/60 flex items-center gap-2 font-medium"
+                    className="w-full px-3.5 py-2 text-left text-xs text-stone-700 dark:text-stone-200 hover:text-stone-900 dark:hover:text-white hover:bg-stone-50 dark:hover:bg-stone-700/60 flex items-center gap-2 font-medium cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
                     <span>Add New Profile</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      if (confirm('Reset to standard sample data (Liam 9m + Fetal 28w)?')) {
-                        resetToSampleData();
-                        setProfileDropdownOpen(false);
-                      }
-                    }}
-                    className="w-full px-3.5 py-2 text-left text-xs text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-50 dark:hover:bg-stone-700/60 flex items-center gap-2"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-stone-400" />
-                    <span>Reset Sample Data</span>
                   </button>
                 </div>
               </>
