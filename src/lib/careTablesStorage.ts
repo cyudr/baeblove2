@@ -192,6 +192,56 @@ export async function insertGrowthRecord(
   return { record: null, error: formatSupabaseError(firstAttempt.error, GROWTH_TABLE) };
 }
 
+export async function insertGrowthRecordsBulk(
+  inputs: NewGrowthRecordInput[]
+): Promise<{ records: GrowthRecord[]; error?: string }> {
+  if (inputs.length === 0) return { records: [] };
+
+  const payloads = inputs.map((input) => ({
+    profile_id: toNullableText(input.profile_id),
+    date: toNullableText(input.date),
+    daily_weight: toNullableFloat(input.daily_weight),
+    daily_length: toNullableFloat(input.daily_length),
+    temperature: toNullableFloat(input.temperature),
+    remark: toNullableText(input.remark),
+    name: toNullableText(input.name),
+  }));
+
+  if (!supabase) {
+    return { records: [], error: MISSING_SUPABASE_ERROR };
+  }
+
+  const firstAttempt = await supabase.from(GROWTH_TABLE).insert(payloads).select('*');
+  if (!firstAttempt.error && Array.isArray(firstAttempt.data)) {
+    return {
+      records: (firstAttempt.data as Record<string, unknown>[]).map(normalizeGrowthRow),
+    };
+  }
+
+  // Fallback if the user's int8 primary key does not have an identity/sequence default
+  if (firstAttempt.error?.code === '23502') {
+    const baseId = Date.now();
+    const withIds = payloads.map((row, idx) => ({ id: baseId + idx, ...row }));
+    const retryAttempt = await supabase.from(GROWTH_TABLE).insert(withIds).select('*');
+    if (!retryAttempt.error && Array.isArray(retryAttempt.data)) {
+      return {
+        records: (retryAttempt.data as Record<string, unknown>[]).map(normalizeGrowthRow),
+      };
+    }
+    return {
+      records: [],
+      error: retryAttempt.error
+        ? formatSupabaseError(retryAttempt.error, GROWTH_TABLE)
+        : 'Saved to "growth", but no rows were returned. Check SELECT RLS policy on "growth".',
+    };
+  }
+
+  return {
+    records: [],
+    error: formatSupabaseError(firstAttempt.error, GROWTH_TABLE),
+  };
+}
+
 export async function updateGrowthRecord(
   id: number,
   updates: NewGrowthRecordInput
@@ -358,6 +408,58 @@ export async function insertRoutineRecord(
   }
 
   return { record: null, error: formatSupabaseError(firstAttempt.error, ROUTINE_TABLE) };
+}
+
+export async function insertRoutineRecordsBulk(
+  inputs: NewRoutineRecordInput[]
+): Promise<{ records: RoutineRecord[]; error?: string }> {
+  if (inputs.length === 0) return { records: [] };
+
+  const payloads = inputs.map((input) => ({
+    profile_id: toNullableText(input.profile_id),
+    date: toNullableText(input.date),
+    time: toNullableText(input.time),
+    'EBM (mL)': toNullableInt(input['EBM (mL)']),
+    'Formula (mL)': toNullableInt(input['Formula (mL)']),
+    Diaper: toNullableText(input.Diaper),
+    name: toNullableText(input.name),
+    remark: toNullableText(input.remark),
+    'feed duration (min)': toNullableInt(input['feed duration (min)']),
+  }));
+
+  if (!supabase) {
+    return { records: [], error: MISSING_SUPABASE_ERROR };
+  }
+
+  const firstAttempt = await supabase.from(ROUTINE_TABLE).insert(payloads).select('*');
+  if (!firstAttempt.error && Array.isArray(firstAttempt.data)) {
+    return {
+      records: (firstAttempt.data as Record<string, unknown>[]).map(normalizeRoutineRow),
+    };
+  }
+
+  // Fallback if the user's int8 primary key does not have an identity/sequence default
+  if (firstAttempt.error?.code === '23502') {
+    const baseId = Date.now();
+    const withIds = payloads.map((row, idx) => ({ id: baseId + idx, ...row }));
+    const retryAttempt = await supabase.from(ROUTINE_TABLE).insert(withIds).select('*');
+    if (!retryAttempt.error && Array.isArray(retryAttempt.data)) {
+      return {
+        records: (retryAttempt.data as Record<string, unknown>[]).map(normalizeRoutineRow),
+      };
+    }
+    return {
+      records: [],
+      error: retryAttempt.error
+        ? formatSupabaseError(retryAttempt.error, ROUTINE_TABLE)
+        : 'Saved to "routine", but no rows were returned. Check SELECT RLS policy on "routine".',
+    };
+  }
+
+  return {
+    records: [],
+    error: formatSupabaseError(firstAttempt.error, ROUTINE_TABLE),
+  };
 }
 
 export async function updateRoutineRecord(

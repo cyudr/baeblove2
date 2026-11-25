@@ -21,10 +21,12 @@ import {
   Scale,
   RefreshCw,
   Filter,
+  Sparkles,
 } from 'lucide-react';
 import { AttachedPrenatalHistoryModal } from '../modals/AttachedPrenatalHistoryModal';
 import { EditAuthModal } from '../modals/EditAuthModal';
 import { EditCareRecordModal } from '../modals/EditCareRecordModal';
+import { MassImportModal, type MassImportTable } from '../modals/MassImportModal';
 import type {
   BabyMeasurement,
   FetalMeasurement,
@@ -109,6 +111,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
   const [pendingEditAction, setPendingEditAction] = useState<PendingEditAction | null>(null);
   const [editingRoutineInHistory, setEditingRoutineInHistory] = useState<RoutineRecord | null>(null);
   const [editingGrowthInHistory, setEditingGrowthInHistory] = useState<GrowthRecord | null>(null);
+  const [massImportTable, setMassImportTable] = useState<MassImportTable | null>(null);
 
   const isBaby = activeProfile?.type === 'baby';
   const hasAttachedFetal = Boolean(isBaby && activeProfile?.attachedFetalProfileId);
@@ -186,16 +189,26 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
             Routine Data History ({filteredRoutine.length})
           </h3>
         </div>
-        {onNavigateTab && (
+        <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => onNavigateTab('routine')}
+            onClick={() => setMassImportTable('routine')}
             className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Log Routine</span>
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Mass Import</span>
           </button>
-        )}
+          {onNavigateTab && (
+            <button
+              type="button"
+              onClick={() => onNavigateTab('routine')}
+              className="text-xs font-semibold text-stone-600 dark:text-stone-300 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Log Routine</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {filteredRoutine.length === 0 ? (
@@ -314,16 +327,26 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
             Growth Data History ({filteredGrowth.length})
           </h3>
         </div>
-        {onNavigateTab && (
+        <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => onNavigateTab('charts')}
+            onClick={() => setMassImportTable('growth')}
             className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Log Growth</span>
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Mass Import</span>
           </button>
-        )}
+          {onNavigateTab && (
+            <button
+              type="button"
+              onClick={() => onNavigateTab('charts')}
+              className="text-xs font-semibold text-stone-600 dark:text-stone-300 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Log Growth</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {filteredGrowth.length === 0 ? (
@@ -794,6 +817,17 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
 
           <button
             type="button"
+            onClick={() =>
+              setMassImportTable(activeSubTab === 'growth' ? 'growth' : 'routine')
+            }
+            className="px-3 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400 dark:text-stone-950 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Mass Import</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => void refreshCareTables()}
             disabled={isCareTablesLoading}
             className="px-3 py-2 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200/60 dark:border-stone-700/60 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
@@ -978,6 +1012,13 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
           setEditingGrowthInHistory(null);
           setEditingRoutineInHistory(null);
         }}
+      />
+
+      {/* Gemini-Enabled Mass Import Modal for Routine & Growth tables */}
+      <MassImportModal
+        isOpen={massImportTable !== null}
+        initialTable={massImportTable ?? 'routine'}
+        onClose={() => setMassImportTable(null)}
       />
     </div>
   );

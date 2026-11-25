@@ -21,11 +21,13 @@ import { DEFAULT_FORMULA_SETTINGS } from '../data/formulaSources';
 import {
   fetchGrowthRecords,
   insertGrowthRecord,
+  insertGrowthRecordsBulk,
   updateGrowthRecord,
   deleteGrowthRecord,
   subscribeToGrowth,
   fetchRoutineRecords,
   insertRoutineRecord,
+  insertRoutineRecordsBulk,
   updateRoutineRecord,
   deleteRoutineRecord,
   subscribeToRoutine,
@@ -154,12 +156,18 @@ interface AppContextType {
   isCareTablesLoading: boolean;
   refreshCareTables: () => Promise<void>;
   addGrowthRecord: (input: NewGrowthRecordInput) => Promise<{ record: GrowthRecord | null; error?: string }>;
+  addGrowthRecordsBulk: (
+    inputs: NewGrowthRecordInput[]
+  ) => Promise<{ records: GrowthRecord[]; error?: string }>;
   editGrowthRecord: (
     id: number,
     updates: NewGrowthRecordInput
   ) => Promise<{ record: GrowthRecord | null; error?: string }>;
   removeGrowthRecord: (id: number) => Promise<{ error?: string }>;
   addRoutineRecord: (input: NewRoutineRecordInput) => Promise<{ record: RoutineRecord | null; error?: string }>;
+  addRoutineRecordsBulk: (
+    inputs: NewRoutineRecordInput[]
+  ) => Promise<{ records: RoutineRecord[]; error?: string }>;
   editRoutineRecord: (
     id: number,
     updates: NewRoutineRecordInput
@@ -1124,6 +1132,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return result;
   };
 
+  const addGrowthRecordsBulk = async (
+    inputs: NewGrowthRecordInput[]
+  ): Promise<{ records: GrowthRecord[]; error?: string }> => {
+    const resolvedInputs: NewGrowthRecordInput[] = inputs.map((input) => ({
+      ...input,
+      profile_id: input.profile_id !== undefined ? input.profile_id : activeProfile?.id || null,
+    }));
+    const result = await insertGrowthRecordsBulk(resolvedInputs);
+    if (result.records.length > 0) {
+      setGrowthRecords((prev) => {
+        const byId = new Map<number, GrowthRecord>();
+        for (const r of prev) byId.set(r.id, r);
+        for (const r of result.records) byId.set(r.id, r);
+        return Array.from(byId.values()).sort((a, b) => {
+          const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.created_at.slice(11, 19)}`;
+          const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.created_at.slice(11, 19)}`;
+          return bKey.localeCompare(aKey);
+        });
+      });
+    }
+    return result;
+  };
+
   const editGrowthRecord = async (
     id: number,
     updates: NewGrowthRecordInput
@@ -1181,6 +1212,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const exists = prev.some((r) => r.id === created.id);
         const next = exists ? prev.map((r) => (r.id === created.id ? created : r)) : [created, ...prev];
         return next.sort((a, b) => {
+          const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.time ?? a.created_at.slice(11, 19)}`;
+          const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.time ?? b.created_at.slice(11, 19)}`;
+          return bKey.localeCompare(aKey);
+        });
+      });
+    }
+    return result;
+  };
+
+  const addRoutineRecordsBulk = async (
+    inputs: NewRoutineRecordInput[]
+  ): Promise<{ records: RoutineRecord[]; error?: string }> => {
+    const resolvedInputs: NewRoutineRecordInput[] = inputs.map((input) => ({
+      ...input,
+      profile_id: input.profile_id !== undefined ? input.profile_id : activeProfile?.id || null,
+    }));
+    const result = await insertRoutineRecordsBulk(resolvedInputs);
+    if (result.records.length > 0) {
+      setRoutineRecords((prev) => {
+        const byId = new Map<number, RoutineRecord>();
+        for (const r of prev) byId.set(r.id, r);
+        for (const r of result.records) byId.set(r.id, r);
+        return Array.from(byId.values()).sort((a, b) => {
           const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.time ?? a.created_at.slice(11, 19)}`;
           const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.time ?? b.created_at.slice(11, 19)}`;
           return bKey.localeCompare(aKey);
@@ -1400,9 +1454,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isCareTablesLoading,
         refreshCareTables,
         addGrowthRecord,
+        addGrowthRecordsBulk,
         editGrowthRecord,
         removeGrowthRecord,
         addRoutineRecord,
+        addRoutineRecordsBulk,
         editRoutineRecord,
         removeRoutineRecord,
         addNoteRecord,
