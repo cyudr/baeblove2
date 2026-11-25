@@ -28,6 +28,7 @@ import {
   Filter,
   RotateCcw,
   Lock,
+  ChevronDown,
 } from 'lucide-react';
 
 function getCurrentDateStr(): string {
@@ -108,6 +109,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [pendingAuthRecord, setPendingAuthRecord] = useState<GrowthRecord | null>(null);
   const [isAskGeminiOpen, setIsAskGeminiOpen] = useState(false);
+  const [isLogCardExpanded, setIsLogCardExpanded] = useState(false);
 
   useEffect(() => {
     setLoggerFilter('all');
@@ -130,6 +132,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     setGrowthRemark(initialEditRecord.remark ?? '');
     setGrowthError(null);
     setRetrieveNotice(null);
+    setIsLogCardExpanded(true);
     onClearInitialEdit?.();
   }, [initialEditRecord, onClearInitialEdit]);
 
@@ -215,6 +218,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     setGrowthRemark(row.remark ?? '');
     setGrowthError(null);
     setRetrieveNotice(null);
+    setIsLogCardExpanded(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -277,31 +281,9 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               ? 'Fetal Growth & Biometric Curves'
               : 'Growth Tracking & WHO Curves'}
           </h2>
-          <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-            {activeProfile?.type === 'fetal'
-              ? 'Log daily vitals or ultrasound biometrics plotted against Hadlock fetal growth distribution curves.'
-              : 'Log daily weight, length, and temperature directly to Supabase and visualize WHO percentile curves.'}
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs">
-            <Filter className="w-3.5 h-3.5 text-stone-400" />
-            <select
-              aria-label="Filter growth records by person who logged them"
-              value={loggerFilter}
-              onChange={(e) => setLoggerFilter(e.target.value)}
-              className="bg-transparent text-stone-700 dark:text-stone-200 font-semibold focus:outline-hidden cursor-pointer"
-            >
-              <option value="all">All Loggers</option>
-              {availableLoggers.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <button
             type="button"
             onClick={() => void refreshCareTables()}
@@ -348,59 +330,102 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
       {/* Record / Edit Daily Growth Form (Supabase "growth" table) */}
       <form
         onSubmit={handleSaveGrowth}
-        className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs space-y-4"
+        className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-colors"
       >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
-              <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-              <span>
-                {editingGrowthId !== null
-                  ? `Edit Growth Entry #${editingGrowthId}`
-                  : 'Log Daily Growth & Vitals'}
-              </span>
-            </h3>
-            {activeProfile && (
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
-                Profile: {activeProfile.name}
-              </span>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {latestGrowthRecord && (
-              <>
-                <button
-                  type="button"
-                  onClick={handleRetrieveLastGrowth}
-                  className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
-                  title="Copy values from the latest growth entry into a new log"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Retrieve Last</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => requestEditGrowth(latestGrowthRecord)}
-                  className="px-2.5 py-1.5 text-[11px] font-semibold text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900 border border-amber-200 dark:border-amber-800 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
-                  title="Authenticate with bae_Key to edit the latest growth entry"
-                >
-                  <Lock className="w-3 h-3" />
-                  <span>Edit Last</span>
-                </button>
-              </>
-            )}
-            {editingGrowthId !== null && (
+        {!isLogCardExpanded ? (
+          <button
+            type="button"
+            onClick={() => setIsLogCardExpanded(true)}
+            aria-expanded={false}
+            className="w-full p-5 md:p-6 flex items-center justify-between gap-3 text-left hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
+                <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>
+                  {editingGrowthId !== null
+                    ? `Edit Growth Entry #${editingGrowthId}`
+                    : 'Log Daily Growth & Vitals'}
+                </span>
+              </h3>
+              {activeProfile && (
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
+                  Profile: {activeProfile.name}
+                </span>
+              )}
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 dark:text-stone-400 shrink-0">
+              <span className="hidden sm:inline">Expand</span>
+              <ChevronDown className="w-4 h-4" />
+            </span>
+          </button>
+        ) : (
+          <div className="p-5 md:p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={() => resetGrowthForm(false)}
-                className="px-2 py-1.5 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
+                onClick={() => setIsLogCardExpanded(false)}
+                aria-expanded={true}
+                className="flex items-center gap-2 flex-wrap text-left flex-1 min-w-0 cursor-pointer group"
               >
-                <X className="w-3.5 h-3.5" />
-                <span>Cancel edit</span>
+                <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2 group-hover:text-amber-700 dark:group-hover:text-amber-300 transition-colors">
+                  <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>
+                    {editingGrowthId !== null
+                      ? `Edit Growth Entry #${editingGrowthId}`
+                      : 'Log Daily Growth & Vitals'}
+                  </span>
+                </h3>
+                {activeProfile && (
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
+                    Profile: {activeProfile.name}
+                  </span>
+                )}
               </button>
-            )}
-          </div>
-        </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {latestGrowthRecord && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleRetrieveLastGrowth}
+                      className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Copy values from the latest growth entry into a new log"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Retrieve Last</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => requestEditGrowth(latestGrowthRecord)}
+                      className="px-2.5 py-1.5 text-[11px] font-semibold text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900 border border-amber-200 dark:border-amber-800 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Authenticate with bae_Key to edit the latest growth entry"
+                    >
+                      <Lock className="w-3 h-3" />
+                      <span>Edit Last</span>
+                    </button>
+                  </>
+                )}
+                {editingGrowthId !== null && (
+                  <button
+                    type="button"
+                    onClick={() => resetGrowthForm(false)}
+                    className="px-2 py-1.5 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Cancel edit</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsLogCardExpanded(false)}
+                  aria-label="Fold Log Daily Growth & Vitals card"
+                  title="Fold card"
+                  className="p-1.5 rounded-xl text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+                >
+                  <ChevronDown className="w-4 h-4 rotate-180 transition-transform" />
+                </button>
+              </div>
+            </div>
 
         {retrieveNotice && (
           <div className="px-3 py-2 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-2">
@@ -533,122 +558,147 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
           </button>
         </div>
 
-        {growthError && (
-          <p className="text-xs font-medium text-rose-600 dark:text-rose-400">{growthError}</p>
+            {growthError && (
+              <p className="text-xs font-medium text-rose-600 dark:text-rose-400">{growthError}</p>
+            )}
+          </div>
         )}
       </form>
 
-      {/* Growth & Vitals Interpretation Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
-              <span className="flex items-center gap-2">
-                <Scale className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                Latest Daily Weight
-              </span>
+      {/* Combined "Latest" Card (Weight, Length & Temperature on one row) */}
+      <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-colors">
+        <div className="px-4 sm:px-5 py-3 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between">
+          <h3 className="text-xs font-bold text-stone-800 dark:text-stone-200 uppercase tracking-wider">
+            Latest
+          </h3>
+        </div>
+        <div className="grid grid-cols-3 divide-x divide-stone-100 dark:divide-stone-800">
+          {/* Weight */}
+          <div className="p-3 sm:p-4 min-w-0 flex flex-col justify-between gap-2">
+            <div>
+              <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs font-bold text-stone-700 dark:text-stone-200">
+                <span className="flex items-center gap-1.5 truncate">
+                  <Scale className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="truncate">Weight</span>
+                </span>
+                {growthInsights.weightPercentile !== null && (
+                  <span className="hidden sm:inline-flex text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100/80 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 shrink-0">
+                    {growthInsights.weightPercentile}th %ile
+                  </span>
+                )}
+              </div>
+              <div className="text-lg sm:text-2xl font-black text-stone-900 dark:text-white mt-1 truncate">
+                {growthInsights.latestWeightKg !== null
+                  ? UnitConverter.formatWeight(growthInsights.latestWeightKg, unitSystem)
+                  : '—'}
+              </div>
               {growthInsights.weightPercentile !== null && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100/80 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300">
+                <div className="sm:hidden text-[10px] font-bold text-emerald-700 dark:text-emerald-400 mt-0.5">
                   WHO {growthInsights.weightPercentile}th %ile
+                </div>
+              )}
+            </div>
+            <div className="pt-2 border-t border-stone-100 dark:border-stone-800 text-[10px] sm:text-[11px] text-stone-500 dark:text-stone-400 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+              <span className="truncate">
+                Δ{' '}
+                <strong className="text-stone-800 dark:text-stone-200">
+                  {growthInsights.weightDeltaGrams !== null
+                    ? `${growthInsights.weightDeltaGrams >= 0 ? '+' : ''}${growthInsights.weightDeltaGrams} g`
+                    : '—'}
+                </strong>
+              </span>
+              {growthInsights.weightVelocityGramsPerDay !== null && (
+                <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400 truncate">
+                  {growthInsights.weightVelocityGramsPerDay >= 0 ? '+' : ''}
+                  {growthInsights.weightVelocityGramsPerDay} g/d
                 </span>
               )}
             </div>
-            <div className="text-3xl font-black text-stone-900 dark:text-white mt-2">
-              {growthInsights.latestWeightKg !== null
-                ? UnitConverter.formatWeight(growthInsights.latestWeightKg, unitSystem)
-                : '—'}
-            </div>
           </div>
-          <div className="mt-3 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[11px] text-stone-500 dark:text-stone-400 flex items-center justify-between">
-            <span>
-              Change:{' '}
-              <strong className="text-stone-800 dark:text-stone-200">
-                {growthInsights.weightDeltaGrams !== null
-                  ? `${growthInsights.weightDeltaGrams >= 0 ? '+' : ''}${growthInsights.weightDeltaGrams} g`
-                  : '—'}
-              </strong>
-            </span>
-            {growthInsights.weightVelocityGramsPerDay !== null && (
-              <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400">
-                {growthInsights.weightVelocityGramsPerDay >= 0 ? '+' : ''}
-                {growthInsights.weightVelocityGramsPerDay} g/day
-              </span>
-            )}
-          </div>
-        </div>
 
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
-              <span className="flex items-center gap-2">
-                <Ruler className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                Latest Daily Length
-              </span>
+          {/* Length */}
+          <div className="p-3 sm:p-4 min-w-0 flex flex-col justify-between gap-2">
+            <div>
+              <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs font-bold text-stone-700 dark:text-stone-200">
+                <span className="flex items-center gap-1.5 truncate">
+                  <Ruler className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+                  <span className="truncate">Length</span>
+                </span>
+                {growthInsights.lengthPercentile !== null && (
+                  <span className="hidden sm:inline-flex text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100/80 dark:bg-teal-950/70 text-teal-800 dark:text-teal-300 shrink-0">
+                    {growthInsights.lengthPercentile}th %ile
+                  </span>
+                )}
+              </div>
+              <div className="text-lg sm:text-2xl font-black text-stone-900 dark:text-white mt-1 truncate">
+                {growthInsights.latestLengthCm !== null
+                  ? UnitConverter.formatLength(growthInsights.latestLengthCm, unitSystem)
+                  : '—'}
+              </div>
               {growthInsights.lengthPercentile !== null && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100/80 dark:bg-teal-950/70 text-teal-800 dark:text-teal-300">
+                <div className="sm:hidden text-[10px] font-bold text-teal-700 dark:text-teal-400 mt-0.5">
                   WHO {growthInsights.lengthPercentile}th %ile
-                </span>
+                </div>
               )}
             </div>
-            <div className="text-3xl font-black text-stone-900 dark:text-white mt-2">
-              {growthInsights.latestLengthCm !== null
-                ? UnitConverter.formatLength(growthInsights.latestLengthCm, unitSystem)
-                : '—'}
-            </div>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[11px] text-stone-500 dark:text-stone-400">
-            Change:{' '}
-            <strong className="text-stone-800 dark:text-stone-200">
-              {growthInsights.lengthDeltaCm !== null
-                ? `${growthInsights.lengthDeltaCm >= 0 ? '+' : ''}${growthInsights.lengthDeltaCm} cm`
-                : '—'}
-            </strong>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
-              <span className="flex items-center gap-2">
-                <Thermometer className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                Body Temperature
-              </span>
-              {growthInsights.tempClass && (
-                <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${tempBadgeClasses(
-                    growthInsights.tempClass.severity
-                  )}`}
-                >
-                  {growthInsights.tempClass.label}
-                </span>
-              )}
-            </div>
-            <div className="text-3xl font-black text-stone-900 dark:text-white mt-2">
-              {growthInsights.latestTempC !== null
-                ? `${growthInsights.latestTempC.toFixed(1)}°C`
-                : '—'}
-              {growthInsights.tempClass && (
-                <span className="text-sm font-semibold text-stone-400 ml-2">
-                  ({growthInsights.tempClass.fahrenheit}°F)
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="mt-3 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[11px] text-stone-500 dark:text-stone-400 flex items-center justify-between">
-            <span>
-              Range:{' '}
+            <div className="pt-2 border-t border-stone-100 dark:border-stone-800 text-[10px] sm:text-[11px] text-stone-500 dark:text-stone-400 truncate">
+              Δ{' '}
               <strong className="text-stone-800 dark:text-stone-200">
-                {growthInsights.minTempC !== null && growthInsights.maxTempC !== null
-                  ? `${growthInsights.minTempC.toFixed(1)}–${growthInsights.maxTempC.toFixed(1)}°C`
+                {growthInsights.lengthDeltaCm !== null
+                  ? `${growthInsights.lengthDeltaCm >= 0 ? '+' : ''}${growthInsights.lengthDeltaCm} cm`
                   : '—'}
               </strong>
-            </span>
-            {growthInsights.feverEpisodes > 0 && (
-              <span className="font-semibold text-rose-600 dark:text-rose-400">
-                {growthInsights.feverEpisodes} fever log
-                {growthInsights.feverEpisodes === 1 ? '' : 's'}
+            </div>
+          </div>
+
+          {/* Temperature */}
+          <div className="p-3 sm:p-4 min-w-0 flex flex-col justify-between gap-2">
+            <div>
+              <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs font-bold text-stone-700 dark:text-stone-200">
+                <span className="flex items-center gap-1.5 truncate">
+                  <Thermometer className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="truncate">Temp</span>
+                </span>
+                {growthInsights.tempClass && (
+                  <span
+                    className={`hidden sm:inline-flex text-[10px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 ${tempBadgeClasses(
+                      growthInsights.tempClass.severity
+                    )}`}
+                  >
+                    {growthInsights.tempClass.label}
+                  </span>
+                )}
+              </div>
+              <div className="text-lg sm:text-2xl font-black text-stone-900 dark:text-white mt-1 truncate">
+                {growthInsights.latestTempC !== null
+                  ? `${growthInsights.latestTempC.toFixed(1)}°C`
+                  : '—'}
+                {growthInsights.tempClass && (
+                  <span className="hidden sm:inline text-xs font-semibold text-stone-400 ml-1.5">
+                    ({growthInsights.tempClass.fahrenheit}°F)
+                  </span>
+                )}
+              </div>
+              {growthInsights.tempClass && (
+                <div className="sm:hidden text-[10px] font-bold text-amber-700 dark:text-amber-400 mt-0.5 truncate">
+                  {growthInsights.tempClass.label}
+                </div>
+              )}
+            </div>
+            <div className="pt-2 border-t border-stone-100 dark:border-stone-800 text-[10px] sm:text-[11px] text-stone-500 dark:text-stone-400 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+              <span className="truncate">
+                <strong className="text-stone-800 dark:text-stone-200">
+                  {growthInsights.minTempC !== null && growthInsights.maxTempC !== null
+                    ? `${growthInsights.minTempC.toFixed(1)}–${growthInsights.maxTempC.toFixed(1)}°C`
+                    : '—'}
+                </strong>
               </span>
-            )}
+              {growthInsights.feverEpisodes > 0 && (
+                <span className="font-semibold text-rose-600 dark:text-rose-400 truncate">
+                  {growthInsights.feverEpisodes} fever
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -709,10 +759,26 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
 
       {/* Logged Daily Growth Table */}
       <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between">
+        <div className="px-5 py-3.5 border-b border-stone-100 dark:border-stone-800 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs font-bold text-stone-800 dark:text-stone-200 uppercase tracking-wider">
             Logged Daily Growth Entries ({filteredGrowth.length})
           </h3>
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs">
+            <Filter className="w-3.5 h-3.5 text-stone-400" />
+            <select
+              aria-label="Filter growth records by person who logged them"
+              value={loggerFilter}
+              onChange={(e) => setLoggerFilter(e.target.value)}
+              className="bg-transparent text-stone-700 dark:text-stone-200 font-semibold focus:outline-hidden cursor-pointer"
+            >
+              <option value="all">All Loggers</option>
+              {availableLoggers.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         {filteredGrowth.length === 0 ? (
           <div className="p-10 text-center text-xs text-stone-500 dark:text-stone-400">

@@ -65,7 +65,6 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
   } = useApp();
 
   // Ad hoc note composer state (linked to Supabase public."notes" table)
-  const [showQuickComposer, setShowQuickComposer] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
   const [noteAuthor, setNoteAuthor] = useState('');
   const [noteBody, setNoteBody] = useState('');
@@ -126,12 +125,11 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
     setNoteBody(note.notes ?? '');
     setNoteRemark(note.remark ?? '');
     setNoteError(null);
-    setShowQuickComposer(true);
     setSubTab('notes');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const renderAdHocNoteForm = (compact = false) => (
+  const renderAdHocNoteForm = () => (
     <form
       onSubmit={handleSaveNote}
       className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs space-y-3.5"
@@ -163,16 +161,6 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
               <span>Cancel edit</span>
             </button>
           )}
-          {compact && editingNoteId === null && (
-            <button
-              type="button"
-              onClick={() => setShowQuickComposer(false)}
-              className="p-1.5 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-              title="Close quick note composer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -195,7 +183,7 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
             Note
           </label>
           <textarea
-            rows={compact ? 2 : 3}
+            rows={3}
             required
             value={noteBody}
             onChange={(e) => setNoteBody(e.target.value)}
@@ -225,25 +213,15 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
       )}
 
       <div className="flex items-center justify-between gap-2 pt-1">
-        {compact ? (
-          <button
-            type="button"
-            onClick={() => setSubTab('notes')}
-            className="text-xs font-semibold text-sky-700 dark:text-sky-400 hover:underline cursor-pointer"
-          >
-            View all {profileNotes.length} note{profileNotes.length === 1 ? '' : 's'}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void refreshCareTables()}
-            disabled={isCareTablesLoading}
-            className="px-3 py-1.5 text-xs font-semibold text-stone-600 dark:text-stone-300 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isCareTablesLoading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => void refreshCareTables()}
+          disabled={isCareTablesLoading}
+          className="px-3 py-1.5 text-xs font-semibold text-stone-600 dark:text-stone-300 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isCareTablesLoading ? 'animate-spin' : ''}`} />
+          <span>Refresh</span>
+        </button>
 
         <button
           type="submit"
@@ -378,7 +356,7 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
           )}
         </div>
 
-        {renderAdHocNoteForm(false)}
+        {renderAdHocNoteForm()}
         {renderNotesList()}
 
         <EditAuthModal
@@ -420,17 +398,6 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
         </div>
 
         <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto shrink-0">
-          {subTab !== 'notes' && (
-            <button
-              type="button"
-              onClick={() => setShowQuickComposer((v) => !v)}
-              className="px-3 py-1.5 text-xs font-bold rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900 text-sky-900 dark:text-sky-200 transition-colors flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Quick Note</span>
-            </button>
-          )}
-
           <div className="flex items-center gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-2xl border border-stone-200/80 dark:border-stone-700/80">
             <button
               type="button"
@@ -478,13 +445,10 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
         </div>
       </div>
 
-      {/* Inline Quick Ad Hoc Note Composer when toggled from Stages or Milestones */}
-      {subTab !== 'notes' && showQuickComposer && renderAdHocNoteForm(true)}
-
       {/* Active Sub-View */}
       {subTab === 'notes' ? (
         <div className="space-y-6">
-          {renderAdHocNoteForm(false)}
+          {renderAdHocNoteForm()}
           {renderNotesList()}
         </div>
       ) : subTab === 'stages' ? (

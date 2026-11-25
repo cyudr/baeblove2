@@ -33,6 +33,7 @@ import {
   Lock,
   Calculator,
   SlidersHorizontal,
+  ChevronDown,
 } from 'lucide-react';
 
 const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
@@ -95,6 +96,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [pendingAuthRecord, setPendingAuthRecord] = useState<RoutineRecord | null>(null);
   const [isAskGeminiOpen, setIsAskGeminiOpen] = useState(false);
+  const [isLogCardExpanded, setIsLogCardExpanded] = useState(false);
 
   // Editable Milk Intake Formula state (x–y mL/kg/day, feeds/day, z% target in range)
   const [isFormulaModalOpen, setIsFormulaModalOpen] = useState(false);
@@ -146,6 +148,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setRoutineRemark(initialEditRecord.remark ?? '');
     setRoutineError(null);
     setRetrieveNotice(null);
+    setIsLogCardExpanded(true);
     onClearInitialEdit?.();
   }, [initialEditRecord, onClearInitialEdit]);
 
@@ -346,6 +349,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setRoutineRemark(row.remark ?? '');
     setRoutineError(null);
     setRetrieveNotice(null);
+    setIsLogCardExpanded(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -417,42 +421,34 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     routineInsights.estimatedTargetMl ?? 0
   );
 
+  const maxSeriesDiapers = Math.max(
+    6,
+    ...routineInsights.dailySeries.map((d) => d.totalDiapers)
+  );
+
+  const daysWithDiapers = routineInsights.dailySeries.filter((d) => d.totalDiapers > 0);
+  const sevenDayAvgDiapers =
+    daysWithDiapers.length > 0
+      ? Math.round(
+          (daysWithDiapers.reduce((sum, d) => sum + d.totalDiapers, 0) / daysWithDiapers.length) *
+            10
+        ) / 10
+      : 0;
+
   return (
     <div className="space-y-6">
       {/* Header Card */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs transition-colors">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shadow-2xs">
-              <Droplets className="w-4 h-4" />
-            </div>
-            <h2 className="text-xl font-bold text-stone-900 dark:text-white">
-              Routine Data Logging
-            </h2>
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shadow-2xs">
+            <Droplets className="w-4 h-4" />
           </div>
-          <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-            Log and analyze daily EBM, formula intake, feeding duration, and diaper output synced live with Supabase.
-          </p>
+          <h2 className="text-xl font-bold text-stone-900 dark:text-white">
+            Routine Data Logging
+          </h2>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs">
-            <Filter className="w-3.5 h-3.5 text-stone-400" />
-            <select
-              aria-label="Filter routine records by person who logged them"
-              value={loggerFilter}
-              onChange={(e) => setLoggerFilter(e.target.value)}
-              className="bg-transparent text-stone-700 dark:text-stone-200 font-semibold focus:outline-hidden cursor-pointer"
-            >
-              <option value="all">All Loggers</option>
-              {availableLoggers.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <button
             type="button"
             onClick={() => void refreshCareTables()}
@@ -477,59 +473,102 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
       {/* Record / Edit Routine Form */}
       <form
         onSubmit={handleSaveRoutine}
-        className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs space-y-4"
+        className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-colors"
       >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
-              <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>
-                {editingRoutineId !== null
-                  ? `Edit Routine Entry #${editingRoutineId}`
-                  : 'Log Routine Entry'}
-              </span>
-            </h3>
-            {activeProfile && (
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
-                Profile: {activeProfile.name}
-              </span>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {latestRoutineRecord && (
-              <>
-                <button
-                  type="button"
-                  onClick={handleRetrieveLastRoutine}
-                  className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
-                  title="Copy values from the latest routine entry into a new log"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Retrieve Last</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => requestEditRoutine(latestRoutineRecord)}
-                  className="px-2.5 py-1.5 text-[11px] font-semibold text-emerald-900 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
-                  title="Authenticate with bae_Key to edit the latest routine entry"
-                >
-                  <Lock className="w-3 h-3" />
-                  <span>Edit Last</span>
-                </button>
-              </>
-            )}
-            {editingRoutineId !== null && (
+        {!isLogCardExpanded ? (
+          <button
+            type="button"
+            onClick={() => setIsLogCardExpanded(true)}
+            aria-expanded={false}
+            className="w-full p-5 md:p-6 flex items-center justify-between gap-3 text-left hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
+                <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>
+                  {editingRoutineId !== null
+                    ? `Edit Routine Entry #${editingRoutineId}`
+                    : 'Log Routine Entry'}
+                </span>
+              </h3>
+              {activeProfile && (
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
+                  Profile: {activeProfile.name}
+                </span>
+              )}
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 dark:text-stone-400 shrink-0">
+              <span className="hidden sm:inline">Expand</span>
+              <ChevronDown className="w-4 h-4" />
+            </span>
+          </button>
+        ) : (
+          <div className="p-5 md:p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={() => resetRoutineForm(false)}
-                className="px-2 py-1.5 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
+                onClick={() => setIsLogCardExpanded(false)}
+                aria-expanded={true}
+                className="flex items-center gap-2 flex-wrap text-left flex-1 min-w-0 cursor-pointer group"
               >
-                <X className="w-3.5 h-3.5" />
-                <span>Cancel edit</span>
+                <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2 group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">
+                  <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>
+                    {editingRoutineId !== null
+                      ? `Edit Routine Entry #${editingRoutineId}`
+                      : 'Log Routine Entry'}
+                  </span>
+                </h3>
+                {activeProfile && (
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
+                    Profile: {activeProfile.name}
+                  </span>
+                )}
               </button>
-            )}
-          </div>
-        </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {latestRoutineRecord && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleRetrieveLastRoutine}
+                      className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Copy values from the latest routine entry into a new log"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Retrieve Last</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => requestEditRoutine(latestRoutineRecord)}
+                      className="px-2.5 py-1.5 text-[11px] font-semibold text-emerald-900 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Authenticate with bae_Key to edit the latest routine entry"
+                    >
+                      <Lock className="w-3 h-3" />
+                      <span>Edit Last</span>
+                    </button>
+                  </>
+                )}
+                {editingRoutineId !== null && (
+                  <button
+                    type="button"
+                    onClick={() => resetRoutineForm(false)}
+                    className="px-2 py-1.5 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Cancel edit</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsLogCardExpanded(false)}
+                  aria-label="Fold Log Routine Entry card"
+                  title="Fold card"
+                  className="p-1.5 rounded-xl text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+                >
+                  <ChevronDown className="w-4 h-4 rotate-180 transition-transform" />
+                </button>
+              </div>
+            </div>
 
         {retrieveNotice && (
           <div className="px-3 py-2 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-900/60 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2">
@@ -705,8 +744,10 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
           </button>
         </div>
 
-        {routineError && (
-          <p className="text-xs font-medium text-rose-600 dark:text-rose-400">{routineError}</p>
+            {routineError && (
+              <p className="text-xs font-medium text-rose-600 dark:text-rose-400">{routineError}</p>
+            )}
+          </div>
         )}
       </form>
 
@@ -763,8 +804,12 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
             {/* Per Feed Suggestion */}
             <div className="rounded-2xl border border-emerald-200/90 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 px-4 py-3.5 flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] font-bold text-emerald-950 dark:text-emerald-200">
-                  Per Feed Target
+                <div className="text-[11px] font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-1.5 flex-wrap">
+                  <span>Per Feed Target</span>
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                    · for {milkFormulaConfig.feedsPerDay} feed
+                    {milkFormulaConfig.feedsPerDay === 1 ? '' : 's'}
+                  </span>
                 </div>
                 <div className="mt-1">
                   <span className="text-2xl font-black font-mono text-stone-900 dark:text-white">
@@ -818,7 +863,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
       </div>
 
       {/* Analytics & Interpretation KPI Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
         {/* Total Milk Intake */}
         <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between">
           <div>
@@ -880,141 +925,251 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
           </div>
         </div>
 
-        {/* Feeding Rhythm */}
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between">
+        {/* Combined Feeding Rhythm & 7-Day Volume Trend Card */}
+        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-xs font-bold text-stone-700 dark:text-stone-200">
-              <Clock className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-              <span>Feeding Rhythm</span>
-            </div>
-            <div className="text-3xl font-black text-stone-900 dark:text-white mt-2">
-              {routineInsights.todayBucket.feedCount}{' '}
-              <span className="text-base font-bold text-stone-400">
-                feed{routineInsights.todayBucket.feedCount === 1 ? '' : 's'}
-              </span>
-            </div>
-            <div className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 space-y-0.5">
-              <div>
-                Avg volume:{' '}
-                <strong className="text-stone-800 dark:text-stone-200">
-                  {routineInsights.avgMlPerFeed ? `${routineInsights.avgMlPerFeed} mL` : '—'}
-                </strong>
-              </div>
-              {routineInsights.recommendedFeedMl !== null &&
-                routineInsights.perFeedMinMl !== null &&
-                routineInsights.perFeedMaxMl !== null && (
-                  <div>
-                    Rec. target:{' '}
-                    <strong className="text-emerald-700 dark:text-emerald-400">
-                      {routineInsights.recommendedFeedMl} mL
-                    </strong>{' '}
-                    <span className="text-stone-400">
-                      ({routineInsights.perFeedMinMl}–{routineInsights.perFeedMaxMl})
-                    </span>
-                  </div>
-                )}
-              <div>
-                Avg duration:{' '}
-                <strong className="text-stone-800 dark:text-stone-200">
-                  {routineInsights.todayBucket.avgDurationMin !== null
-                    ? `${routineInsights.todayBucket.avgDurationMin} min`
-                    : '—'}
-                </strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-3 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[10px] text-stone-500 dark:text-stone-400 truncate">
-            Last feed:{' '}
-            <span className="font-semibold text-stone-700 dark:text-stone-200">
-              {routineInsights.lastFeedLabel ?? 'None yet'}
-            </span>
-          </div>
-        </div>
-
-        {/* Diaper Output */}
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
+            <div className="flex items-center justify-between gap-2 text-xs font-bold text-stone-700 dark:text-stone-200">
               <span className="flex items-center gap-2">
-                <Baby className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                Diaper Output
+                <Clock className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+                <span>Feeding Rhythm</span>
               </span>
-              <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  routineInsights.todayBucket.wetDiapers +
-                    routineInsights.todayBucket.mixedDiapers >=
-                  6
-                    ? 'bg-emerald-100/80 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300'
-                    : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300'
-                }`}
-              >
-                {routineInsights.todayBucket.wetDiapers + routineInsights.todayBucket.mixedDiapers}/6
-                wet
+              <span className="text-[10px] font-normal text-stone-500 dark:text-stone-400 truncate max-w-[160px]">
+                Last:{' '}
+                <strong className="font-semibold text-stone-700 dark:text-stone-200">
+                  {routineInsights.lastFeedLabel ?? 'None yet'}
+                </strong>
               </span>
             </div>
-            <div className="text-3xl font-black text-stone-900 dark:text-white mt-2">
-              {routineInsights.todayBucket.totalDiapers}{' '}
-              <span className="text-base font-bold text-stone-400">changes</span>
+            <div className="flex flex-wrap items-baseline justify-between gap-2 mt-2">
+              <div className="text-3xl font-black text-stone-900 dark:text-white">
+                {routineInsights.todayBucket.feedCount}{' '}
+                <span className="text-base font-bold text-stone-400">
+                  feed{routineInsights.todayBucket.feedCount === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-stone-500 dark:text-stone-400">
+                <span>
+                  Avg:{' '}
+                  <strong className="text-stone-800 dark:text-stone-200">
+                    {routineInsights.avgMlPerFeed ? `${routineInsights.avgMlPerFeed} mL` : '—'}
+                  </strong>
+                </span>
+                <span>
+                  Dur:{' '}
+                  <strong className="text-stone-800 dark:text-stone-200">
+                    {routineInsights.todayBucket.avgDurationMin !== null
+                      ? `${routineInsights.todayBucket.avgDurationMin} min`
+                      : '—'}
+                  </strong>
+                </span>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-1.5 mt-2 text-[11px]">
-              <span className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/50 text-sky-800 dark:text-sky-300 font-semibold">
-                Wet: {routineInsights.todayBucket.wetDiapers}
-              </span>
-              <span className="px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 font-semibold">
-                Dirty: {routineInsights.todayBucket.dirtyDiapers}
-              </span>
-              <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 font-semibold">
-                Mixed: {routineInsights.todayBucket.mixedDiapers}
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-3 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[10px] text-stone-500 dark:text-stone-400">
-            Pediatric hydration benchmark: ≥6 wet diapers/day
-          </div>
-        </div>
-
-        {/* 7-Day Volume Trend */}
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
-            <span>7-Day Volume Trend</span>
-            <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400">
-              Avg {routineInsights.sevenDayAvgMl ?? 0} mL
-            </span>
-          </div>
-
-          <div className="flex items-end justify-between gap-1.5 h-24 pt-3">
-            {routineInsights.dailySeries.map((bucket) => {
-              const ebmHeight = Math.round((bucket.ebmMl / maxSeriesMl) * 100);
-              const formulaHeight = Math.round((bucket.formulaMl / maxSeriesMl) * 100);
-              const dayLabel = bucket.date.slice(5);
-              return (
-                <div
-                  key={bucket.date}
-                  className="flex-1 flex flex-col items-center gap-1 h-full justify-end"
-                  title={`${bucket.date}: ${bucket.totalMl} mL (EBM ${bucket.ebmMl} / Formula ${bucket.formulaMl})`}
-                >
-                  <div className="w-full max-w-[22px] flex-1 flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
-                    {formulaHeight > 0 && (
-                      <div
-                        className="w-full bg-amber-400 dark:bg-amber-500 transition-all"
-                        style={{ height: `${formulaHeight}%` }}
-                      />
-                    )}
-                    {ebmHeight > 0 && (
-                      <div
-                        className="w-full bg-emerald-500 dark:bg-emerald-400 transition-all"
-                        style={{ height: `${ebmHeight}%` }}
-                      />
-                    )}
-                  </div>
-                  <span className="text-[9px] font-mono text-stone-400 dark:text-stone-500">
-                    {dayLabel}
+            {routineInsights.recommendedFeedMl !== null &&
+              routineInsights.perFeedMinMl !== null &&
+              routineInsights.perFeedMaxMl !== null && (
+                <div className="text-[11px] text-stone-500 dark:text-stone-400 mt-1">
+                  Rec. target:{' '}
+                  <strong className="text-emerald-700 dark:text-emerald-400">
+                    {routineInsights.recommendedFeedMl} mL
+                  </strong>{' '}
+                  <span className="text-stone-400">
+                    ({routineInsights.perFeedMinMl}–{routineInsights.perFeedMaxMl})
                   </span>
                 </div>
-              );
-            })}
+              )}
+          </div>
+
+          {/* 7-Day Volume Trend */}
+          <div className="pt-3 border-t border-stone-100 dark:border-stone-800">
+            <div className="flex items-center justify-between text-[11px] font-bold text-stone-600 dark:text-stone-300 mb-2">
+              <span>7-Day Volume Trend</span>
+              <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400">
+                Avg {routineInsights.sevenDayAvgMl ?? 0} mL
+              </span>
+            </div>
+
+            <div className="flex items-end justify-between gap-1.5 h-24 pt-2">
+              {routineInsights.dailySeries.map((bucket) => {
+                const ebmHeight = Math.round((bucket.ebmMl / maxSeriesMl) * 100);
+                const formulaHeight = Math.round((bucket.formulaMl / maxSeriesMl) * 100);
+                const dayLabel = bucket.date.slice(5);
+                return (
+                  <div
+                    key={bucket.date}
+                    className="flex-1 flex flex-col items-center gap-1 h-full justify-end"
+                    title={`${bucket.date}: ${bucket.totalMl} mL (EBM ${bucket.ebmMl} / Formula ${bucket.formulaMl})`}
+                  >
+                    <div className="w-full max-w-[22px] flex-1 flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
+                      {formulaHeight > 0 && (
+                        <div
+                          className="w-full bg-amber-400 dark:bg-amber-500 transition-all"
+                          style={{ height: `${formulaHeight}%` }}
+                        />
+                      )}
+                      {ebmHeight > 0 && (
+                        <div
+                          className="w-full bg-emerald-500 dark:bg-emerald-400 transition-all"
+                          style={{ height: `${ebmHeight}%` }}
+                        />
+                      )}
+                    </div>
+                    <span className="text-[9px] font-mono text-stone-400 dark:text-stone-500">
+                      {dayLabel}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-2 flex items-center gap-3 text-[10px] text-stone-500 dark:text-stone-400">
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2 h-2 rounded-xs bg-emerald-500 dark:bg-emerald-400" />
+                EBM
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2 h-2 rounded-xs bg-amber-400 dark:bg-amber-500" />
+                Formula
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Diaper Output & 7-Day Chart */}
+        <div className="md:col-span-2 bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden">
+          <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-stone-100 dark:divide-stone-800 h-full">
+            {/* Diaper Output Summary */}
+            <div className="p-5 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
+                  <span className="flex items-center gap-2">
+                    <Baby className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    Diaper Output
+                  </span>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      routineInsights.todayBucket.wetDiapers +
+                        routineInsights.todayBucket.mixedDiapers >=
+                      6
+                        ? 'bg-emerald-100/80 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300'
+                        : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300'
+                    }`}
+                  >
+                    {routineInsights.todayBucket.wetDiapers + routineInsights.todayBucket.mixedDiapers}/6
+                    wet
+                  </span>
+                </div>
+                <div className="text-3xl font-black text-stone-900 dark:text-white mt-2">
+                  {routineInsights.todayBucket.totalDiapers}{' '}
+                  <span className="text-base font-bold text-stone-400">changes</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 mt-2 text-[11px]">
+                  <span className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/50 text-sky-800 dark:text-sky-300 font-semibold">
+                    Wet: {routineInsights.todayBucket.wetDiapers}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 font-semibold">
+                    Dirty: {routineInsights.todayBucket.dirtyDiapers}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 font-semibold">
+                    Mixed: {routineInsights.todayBucket.mixedDiapers}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-3 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[10px] text-stone-500 dark:text-stone-400">
+                Pediatric hydration benchmark: ≥6 wet diapers/day
+              </div>
+            </div>
+
+            {/* 7-Day Diaper Output Stacked Bar Chart */}
+            <div className="p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
+                <span>7-Day Diaper Output</span>
+                <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400">
+                  Avg {sevenDayAvgDiapers}/day
+                </span>
+              </div>
+
+              <div className="relative flex items-end justify-between gap-1.5 h-28 pt-3">
+                {/* 6-diaper pediatric hydration reference line */}
+                <div
+                  className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-emerald-400/70 dark:border-emerald-600/60"
+                  style={{
+                    bottom: `calc(${Math.round((6 / maxSeriesDiapers) * 100)}% * 0.72 + 14px)`,
+                  }}
+                  title="Pediatric hydration benchmark: 6 wet diapers/day"
+                />
+                {routineInsights.dailySeries.map((bucket) => {
+                  const wetHeight = Math.round((bucket.wetDiapers / maxSeriesDiapers) * 100);
+                  const mixedHeight = Math.round((bucket.mixedDiapers / maxSeriesDiapers) * 100);
+                  const dirtyHeight = Math.round((bucket.dirtyDiapers / maxSeriesDiapers) * 100);
+                  const otherDiapers = Math.max(
+                    0,
+                    bucket.totalDiapers -
+                      (bucket.wetDiapers + bucket.mixedDiapers + bucket.dirtyDiapers)
+                  );
+                  const otherHeight = Math.round((otherDiapers / maxSeriesDiapers) * 100);
+                  const dayLabel = bucket.date.slice(5);
+                  return (
+                    <div
+                      key={bucket.date}
+                      className="relative z-10 flex-1 flex flex-col items-center gap-1 h-full justify-end"
+                      title={`${bucket.date}: ${bucket.totalDiapers} changes (Wet ${bucket.wetDiapers}, Mixed ${bucket.mixedDiapers}, Dirty ${bucket.dirtyDiapers})`}
+                    >
+                      <span className="text-[9px] font-mono font-semibold text-stone-500 dark:text-stone-400 leading-none h-2.5">
+                        {bucket.totalDiapers > 0 ? bucket.totalDiapers : ''}
+                      </span>
+                      <div className="w-full max-w-[22px] flex-1 flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
+                        {otherHeight > 0 && (
+                          <div
+                            className="w-full bg-stone-400 dark:bg-stone-500 transition-all"
+                            style={{ height: `${otherHeight}%` }}
+                          />
+                        )}
+                        {dirtyHeight > 0 && (
+                          <div
+                            className="w-full bg-amber-400 dark:bg-amber-500 transition-all"
+                            style={{ height: `${dirtyHeight}%` }}
+                          />
+                        )}
+                        {mixedHeight > 0 && (
+                          <div
+                            className="w-full bg-emerald-500 dark:bg-emerald-400 transition-all"
+                            style={{ height: `${mixedHeight}%` }}
+                          />
+                        )}
+                        {wetHeight > 0 && (
+                          <div
+                            className="w-full bg-sky-500 dark:bg-sky-400 transition-all"
+                            style={{ height: `${wetHeight}%` }}
+                          />
+                        )}
+                      </div>
+                      <span className="text-[9px] font-mono text-stone-400 dark:text-stone-500">
+                        {dayLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-2 pt-2 border-t border-stone-100 dark:border-stone-800 flex flex-wrap items-center justify-between gap-2 text-[10px] text-stone-500 dark:text-stone-400">
+                <div className="flex items-center gap-2.5">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-xs bg-sky-500 dark:bg-sky-400" />
+                    Wet
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-xs bg-emerald-500 dark:bg-emerald-400" />
+                    Mixed
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-xs bg-amber-400 dark:bg-amber-500" />
+                    Dirty
+                  </span>
+                </div>
+                <span>Benchmark: ≥6 wet/day</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1037,10 +1192,26 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
 
       {/* Recent Routine Entries Table */}
       <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between">
+        <div className="px-5 py-3.5 border-b border-stone-100 dark:border-stone-800 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs font-bold text-stone-800 dark:text-stone-200 uppercase tracking-wider">
             Logged Routine Entries ({filteredRoutine.length})
           </h3>
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs">
+            <Filter className="w-3.5 h-3.5 text-stone-400" />
+            <select
+              aria-label="Filter routine records by person who logged them"
+              value={loggerFilter}
+              onChange={(e) => setLoggerFilter(e.target.value)}
+              className="bg-transparent text-stone-700 dark:text-stone-200 font-semibold focus:outline-hidden cursor-pointer"
+            >
+              <option value="all">All Loggers</option>
+              {availableLoggers.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         {filteredRoutine.length === 0 ? (
           <div className="p-10 text-center text-xs text-stone-500 dark:text-stone-400">
