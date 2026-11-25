@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { calculatePercentile, UnitConverter } from '../../data/growthStandards';
+import {
+  DAYS_PER_MONTH,
+  computeExactAgeFromBirth,
+  formatAdaptiveAgeFromDays,
+} from '../../utils/ageCalculator';
 import { X, Printer, Download, Upload, Check, Copy } from 'lucide-react';
 
 interface ExportReportModalProps {
@@ -145,13 +150,23 @@ export const ExportReportModal: React.FC<ExportReportModalProps> = ({
                       </thead>
                       <tbody className="divide-y divide-stone-200/60 dark:divide-stone-700/60 font-mono text-[11px] text-stone-700 dark:text-stone-300">
                         {activeBabyMeasurements.map((m) => {
+                          const exactAge = computeExactAgeFromBirth(activeProfile.dateOfEvent, m.date);
+                          const exactMonths = exactAge ? exactAge.exactMonths : m.ageInMonths;
+                          const exactDays = exactAge
+                            ? exactAge.totalDays
+                            : m.ageInDays ?? m.ageInMonths * DAYS_PER_MONTH;
+                          const ageLabel = formatAdaptiveAgeFromDays(exactDays, {
+                            birthDateStr: activeProfile.dateOfEvent,
+                            recordDateStr: m.date,
+                            compact: true,
+                          });
                           const wPct = m.weightKg
-                            ? calculatePercentile(m.weightKg, m.ageInMonths, 'weight', activeProfile.gender).percentile
+                            ? calculatePercentile(m.weightKg, exactMonths, 'weight', activeProfile.gender).percentile
                             : null;
                           return (
                             <tr key={m.id} className="py-1">
                               <td className="py-1">{m.date}</td>
-                              <td className="py-1">{m.ageInMonths} mo</td>
+                              <td className="py-1">{ageLabel}</td>
                               <td className="py-1">{m.weightKg ? UnitConverter.formatWeight(m.weightKg, unitSystem) : '—'}</td>
                               <td className="py-1">{wPct ? `${wPct}th` : '—'}</td>
                               <td className="py-1">{m.lengthCm ? UnitConverter.formatLength(m.lengthCm, unitSystem) : '—'}</td>

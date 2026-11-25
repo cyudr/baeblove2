@@ -1,7 +1,11 @@
 import React from 'react';
 import { BabyMeasurement, UnitSystem } from '../../types';
-import { UnitConverter } from '../../data/growthStandards';
-import { Activity, ArrowUpRight, Scale, Ruler, Sparkles } from 'lucide-react';
+import {
+  DAYS_PER_MONTH,
+  formatAdaptiveAgeFromDays,
+  parseCalendarDateUTC,
+} from '../../utils/ageCalculator';
+import { Activity, ArrowUpRight, Scale, Ruler } from 'lucide-react';
 
 interface GrowthVelocityCardProps {
   measurements: BabyMeasurement[];
@@ -12,7 +16,11 @@ export const GrowthVelocityCard: React.FC<GrowthVelocityCardProps> = ({
   measurements,
   unitSystem,
 }) => {
-  const sorted = [...measurements].sort((a, b) => a.ageInMonths - b.ageInMonths);
+  const sorted = [...measurements].sort((a, b) => {
+    const aDays = a.ageInDays ?? a.ageInMonths * DAYS_PER_MONTH;
+    const bDays = b.ageInDays ?? b.ageInMonths * DAYS_PER_MONTH;
+    return aDays - bDays;
+  });
 
   if (sorted.length < 2) {
     return (
@@ -31,10 +39,19 @@ export const GrowthVelocityCard: React.FC<GrowthVelocityCardProps> = ({
   const latest = sorted[sorted.length - 1];
   const previous = sorted[sorted.length - 2];
 
-  const dateLatest = new Date(latest.date);
-  const datePrev = new Date(previous.date);
-  const diffDays = Math.max(1, Math.round((dateLatest.getTime() - datePrev.getTime()) / (1000 * 60 * 60 * 24)));
-  const diffMonths = diffDays / 30.4375;
+  const latestUtc = parseCalendarDateUTC(latest.date);
+  const prevUtc = parseCalendarDateUTC(previous.date);
+  const diffDays =
+    latestUtc !== null && prevUtc !== null
+      ? Math.max(1, Math.round((latestUtc - prevUtc) / 86_400_000))
+      : Math.max(
+          1,
+          Math.round(
+            (latest.ageInDays ?? latest.ageInMonths * DAYS_PER_MONTH) -
+              (previous.ageInDays ?? previous.ageInMonths * DAYS_PER_MONTH)
+          )
+        );
+  const diffMonths = diffDays / DAYS_PER_MONTH;
 
   // Weight gain
   let weightVelocityGramsPerDay = 0;
@@ -70,7 +87,8 @@ export const GrowthVelocityCard: React.FC<GrowthVelocityCardProps> = ({
           <h4 className="text-sm font-semibold text-stone-900">Growth Velocity Rate</h4>
         </div>
         <span className="text-xs text-stone-500">
-          Between {previous.ageInMonths}m and {latest.ageInMonths}m ({diffDays} days)
+          Between {formatAdaptiveAgeFromDays(previous.ageInDays ?? previous.ageInMonths * DAYS_PER_MONTH, { compact: true })} and{' '}
+          {formatAdaptiveAgeFromDays(latest.ageInDays ?? latest.ageInMonths * DAYS_PER_MONTH, { compact: true })} ({diffDays} days)
         </span>
       </div>
 

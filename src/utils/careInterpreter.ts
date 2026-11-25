@@ -1,5 +1,6 @@
 import { calculatePercentile } from '../data/growthStandards';
 import { getProfileNumericId } from '../lib/entriesStorage';
+import { computeExactAgeFromBirth, DAYS_PER_MONTH, DAYS_PER_WEEK } from './ageCalculator';
 import type { BabyMeasurement, ChildProfile, GrowthRecord, NoteRecord, RoutineRecord } from '../types';
 
 export function doesRecordMatchProfile(
@@ -57,15 +58,27 @@ export function mergeProfileGrowthMeasurements(
 ): BabyMeasurement[] {
   if (!profile || profile.type !== 'baby') return babyMeasurements;
 
-  const birthMs = new Date(profile.dateOfEvent).getTime();
-  if (Number.isNaN(birthMs)) return babyMeasurements;
+  // Recalculate exact age from birthday for all retrieved baby measurements when date is valid
+  const merged: BabyMeasurement[] = babyMeasurements.map((m) => {
+    const exact = computeExactAgeFromBirth(profile.dateOfEvent, m.date);
+    if (!exact) {
+      return {
+        ...m,
+        ageInDays: m.ageInDays ?? m.ageInMonths * DAYS_PER_MONTH,
+      };
+    }
+    return {
+      ...m,
+      ageInDays: exact.totalDays,
+      ageInMonths: exact.exactMonths,
+      ageInWeeks: exact.exactWeeks,
+    };
+  });
 
   const matchingGrowth = growthRecords.filter((g) => {
     if (g.daily_weight === null && g.daily_length === null) return false;
     return doesRecordMatchProfile(g, profile);
   });
-
-  const merged: BabyMeasurement[] = [...babyMeasurements];
 
   for (const g of matchingGrowth) {
     const dateStr = getGrowthRecordDate(g);
@@ -77,26 +90,28 @@ export function mergeProfileGrowthMeasurements(
     );
     if (alreadyExists) continue;
 
-    const recMs = new Date(`${dateStr}T12:00:00`).getTime();
-    const diffDays = Number.isNaN(recMs)
-      ? 0
-      : Math.max(0, Math.floor((recMs - birthMs) / (1000 * 60 * 60 * 24)));
-    const ageInMonths = Math.round((diffDays / 30.4375) * 10) / 10;
-    const ageInWeeks = Math.round((diffDays / 7) * 10) / 10;
+    const exact = computeExactAgeFromBirth(profile.dateOfEvent, dateStr);
+    const totalDays = exact ? exact.totalDays : 0;
 
     merged.push({
       id: `supabase-growth-${g.id}`,
       profileId: profile.id,
       date: dateStr,
-      ageInMonths,
-      ageInWeeks,
+      ageInDays: totalDays,
+      ageInMonths: totalDays / DAYS_PER_MONTH,
+      ageInWeeks: totalDays / DAYS_PER_WEEK,
       weightKg: g.daily_weight ?? undefined,
       lengthCm: g.daily_length ?? undefined,
       notes: g.remark ?? undefined,
     });
   }
 
-  return merged.sort((a, b) => a.ageInMonths - b.ageInMonths);
+  return merged.sort((a, b) => {
+    const aDays = a.ageInDays ?? a.ageInMonths * DAYS_PER_MONTH;
+    const bDays = b.ageInDays ?? b.ageInMonths * DAYS_PER_MONTH;
+    if (aDays !== bDays) return aDays - bDays;
+    return a.date.localeCompare(b.date);
+  });
 }
 
 export type TempSeverity = 'low' | 'normal' | 'elevated' | 'fever';
@@ -164,11 +179,8 @@ export interface GrowthInterpretation {
 
 function getProfileAgeMonths(profile: ChildProfile | undefined, referenceIso?: string): number | null {
   if (!profile || profile.type !== 'baby') return null;
-  const birth = new Date(profile.dateOfEvent);
-  const ref = referenceIso ? new Date(referenceIso) : new Date();
-  if (Number.isNaN(birth.getTime()) || Number.isNaN(ref.getTime())) return null;
-  const diffDays = Math.max(0, (ref.getTime() - birth.getTime()) / (1000 * 60 * 60 * 24));
-  return Math.round((diffDays / 30.4375) * 10) / 10;
+  const exact = computeExactAgeFromBirth(profile.dateOfEvent, referenceIso);
+  return exact ? exact.exactMonths : null;
 }
 
 export function interpretGrowthTable(

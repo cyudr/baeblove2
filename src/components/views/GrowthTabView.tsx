@@ -8,6 +8,7 @@ import {
   interpretGrowthTable,
   mergeProfileGrowthMeasurements,
 } from '../../utils/careInterpreter';
+import { formatAgeFromBirthDate } from '../../utils/ageCalculator';
 import { InteractiveGrowthChart } from '../charts/InteractiveGrowthChart';
 import { FetalBiometricsChart } from '../charts/FetalBiometricsChart';
 import { EditAuthModal } from '../modals/EditAuthModal';
@@ -722,6 +723,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               <thead>
                 <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                   <th className="py-3 px-4">Date</th>
+                  {activeProfile?.type === 'baby' && <th className="py-3 px-4">Age</th>}
                   <th className="py-3 px-4">Logged By</th>
                   <th className="py-3 px-4">Daily Weight</th>
                   <th className="py-3 px-4">Daily Length</th>
@@ -734,17 +736,27 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                 {filteredGrowth.map((row) => {
                   const tempInfo =
                     row.temperature !== null ? classifyTemperature(row.temperature) : null;
+                  const recordDateStr = getGrowthRecordDate(row);
+                  const autoAgeLabel =
+                    activeProfile?.type === 'baby'
+                      ? formatAgeFromBirthDate(activeProfile.dateOfEvent, recordDateStr)
+                      : null;
                   return (
                     <tr
                       key={row.id}
                       className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors"
                     >
                       <td className="py-3 px-4 whitespace-nowrap font-bold text-stone-900 dark:text-white">
-                        <div>{getGrowthRecordDate(row)}</div>
+                        <div>{recordDateStr}</div>
                         <div className="text-[10px] font-normal text-stone-400 dark:text-stone-500">
                           {formatDateTime(row.created_at)}
                         </div>
                       </td>
+                      {activeProfile?.type === 'baby' && (
+                        <td className="py-3 px-4 whitespace-nowrap font-mono text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                          {autoAgeLabel ?? '—'}
+                        </td>
+                      )}
                       <td className="py-3 px-4 whitespace-nowrap">{row.name || '—'}</td>
                       <td className="py-3 px-4 font-mono font-bold whitespace-nowrap">
                         {row.daily_weight !== null

@@ -4,6 +4,7 @@ import { calculatePercentile, UnitConverter } from '../../data/growthStandards';
 import { calculateGestationalAge } from '../../data/fetalStandards';
 import { calculateDynamicEFW, FORMULA_CATALOG } from '../../data/formulaSources';
 import { X, Calendar, Scale, Ruler, Sparkles, Stethoscope, AlertCircle, BookOpen } from 'lucide-react';
+import { computeExactAgeFromBirth, WEEKS_PER_MONTH } from '../../utils/ageCalculator';
 import type { BabyMeasurement, FetalMeasurement } from '../../types';
 
 interface LogMeasurementModalProps {
@@ -169,14 +170,11 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
   useEffect(() => {
     if (!activeProfile || editingBabyMeasurement || editingFetalMeasurement) return;
     if (activeProfile.type === 'baby') {
-      const birth = new Date(activeProfile.dateOfEvent);
-      const current = new Date(date);
-      const diffMs = current.getTime() - birth.getTime();
-      const totalDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-      const months = Math.round((totalDays / 30.4375) * 10) / 10;
-      const weeks = Math.round((totalDays / 7) * 10) / 10;
-      setAgeMonths(months);
-      setAgeWeeks(weeks);
+      const exact = computeExactAgeFromBirth(activeProfile.dateOfEvent, date);
+      if (exact) {
+        setAgeMonths(Math.round(exact.exactMonths * 100) / 100);
+        setAgeWeeks(Math.round(exact.exactWeeks * 100) / 100);
+      }
     } else {
       const ga = calculateGestationalAge(activeProfile.dateOfEvent);
       setGestationalWeeks(ga.weeks);
@@ -188,12 +186,12 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
 
   const handleMonthsChange = (val: number) => {
     setAgeMonths(val);
-    setAgeWeeks(Math.round(val * 4.345 * 10) / 10);
+    setAgeWeeks(Math.round(val * WEEKS_PER_MONTH * 100) / 100);
   };
 
   const handleWeeksChange = (val: number) => {
     setAgeWeeks(val);
-    setAgeMonths(Math.round((val / 4.345) * 10) / 10);
+    setAgeMonths(Math.round((val / WEEKS_PER_MONTH) * 100) / 100);
   };
 
   // Live percentile preview for baby

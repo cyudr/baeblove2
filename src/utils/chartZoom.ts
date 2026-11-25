@@ -12,6 +12,14 @@ export interface AutoZoomOptions {
   singlePointFallbackSpan?: number;
 }
 
+export interface NiceAxisScale {
+  min: number;
+  max: number;
+  step: number;
+  decimals: number;
+  ticks: number[];
+}
+
 /**
  * Computes an auto-zoomed [min, max] axis range equal to 200% of the time range
  * of the currently available data, clamped cleanly within [domainMin, domainMax].
@@ -96,16 +104,109 @@ export function computeAutoZoomRange(
 }
 
 /**
- * Generates clean, evenly spaced axis ticks strictly inside [min, max].
+ * Counts the exact decimal places needed to display a tick step without rounding error.
  */
-export function buildNiceTicks(
+export function getStepDecimals(step: number): number {
+  if (!Number.isFinite(step) || step <= 0) return 0;
+  const normalized = Number(step.toPrecision(6)).toString();
+  if (normalized.includes('e-')) {
+    const exp = Number(normalized.split('e-')[1]);
+    return Number.isFinite(exp) ? Math.min(4, exp) : 2;
+  }
+  const dotIdx = normalized.indexOf('.');
+  return dotIdx === -1 ? 0 : Math.min(4, normalized.length - dotIdx - 1);
+}
+
+/**
+ * Computes exact, aligned axis bounds [min, max] and round tick marks using the 1-2-2.5-5
+ * step sequence so every gridline matches its printed tick label with zero rounding drift.
+ */
+export function computeNiceAxisScale(
+  rawMin: number,
+  rawMax: number,
+  options?: {
+    targetTicks?: number;
+    paddingRatio?: number;
+    clampMinZero?: boolean;
+    minSpan?: number;
+  }
+): NiceAxisScale {
+  const targetTicks = Math.max(3, options?.targetTicks ?? 6);
+  const paddingRatio = options?.paddingRatio ?? 0.08;
+  const clampMinZero = options?.clampMinZero ?? true;
+  const minSpan = options?.minSpan ?? 0.2;
+
+  if (!Number.isFinite(rawMin) || !Number.isFinite(rawMax)) {
+    return { min: 0, max: 10, step: 2, decimals: 0, ticks: [0, 2, 4, 6, 8, 10] };
+  }
+
+  let lo = Math.min(rawMin, rawMax);
+  let hi = Math.max(rawMin, rawMax);
+  const rawSpan = Math.max(minSpan, hi - lo);
+  const pad = rawSpan * paddingRatio;
+
+  lo = lo - pad;
+  hi = hi + pad;
+  if (clampMinZero && lo < 0) {
+    lo = 0;
+  }
+  if (hi - lo < minSpan) {
+    hi = lo + minSpan;
+  }
+
+  const roughStep = (hi - lo) / (targetTicks - 1);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep)));
+  const niceMultipliers = [1, 2, 2.5, 5, 10];
+
+  let step = niceMultipliers[niceMultipliers.length - 1] * magnitude;
+  for (const mult of niceMultipliers) {
+    const candidate = mult * magnitude;
+    const minCandidate = Math.floor((lo + 1e-9) / candidate) * candidate;
+    const clampedMin = clampMinZero ? Math.max(0, minCandidate) : minCandidate;
+    const maxCandidate = Math.ceil((hi - 1e-9) / candidate) * candidate;
+    const tickCount = Math.round((maxCandidate - clampedMin) / candidate) + 1;
+    if (tickCount <= targetTicks + 1) {
+      step = candidate;
+      break;
+    }
+  }
+
+  const axisMinRaw = Math.floor((lo + 1e-9) / step) * step;
+  const axisMin = Number((clampMinZero ? Math.max(0, axisMinRaw) : axisMinRaw).toFixed(6));
+  const axisMax = Number((Math.ceil((hi - 1e-9) / step) * step).toFixed(6));
+  const safeMax = axisMax > axisMin ? axisMax : Number((axisMin + step).toFixed(6));
+  const decimals = getStepDecimals(step);
+
+  const ticks: number[] = [];
+  const maxIterations = 25;
+  for (let i = 0; i <= maxIterations; i++) {
+    const val = Number((axisMin + i * step).toFixed(6));
+    if (val > safeMax + step * 1e-4) break;
+    ticks.push(val);
+  }
+
+  return {
+    min: ticks[0] ?? axisMin,
+    max: ticks[ticks.length - 1] ?? safeMax,
+    step,
+    decimals,
+    ticks,
+  };
+}
+
+/**
+ * Generates clean, evenly spaced axis ticks strictly inside [min, max] along with the chosen step.
+ */
+export function buildNiceTicksWithStep(
   min: number,
   max: number,
   candidateSteps: number[],
   maxTicks = 8
-): number[] {
+): { ticks: number[]; step: number; decimals: number } {
   const span = max - min;
-  if (span <= 0) return [min];
+  if (span <= 0) {
+    return { ticks: [Number(min.toFixed(4))], step: 1, decimals: 0 };
+  }
 
   const chosenStep =
     candidateSteps.find((step) => span / step <= maxTicks) ??
@@ -115,17 +216,37 @@ export function buildNiceTicks(
   const ticks: number[] = [];
 
   for (let val = firstTick; val <= max + 1e-9; val += chosenStep) {
-    const clean = Number(val.toFixed(4));
+    const clean = Number(val.toFixed(6));
     if (clean >= min - 1e-6 && clean <= max + 1e-6) {
       ticks.push(clean);
     }
   }
 
   if (ticks.length < 2) {
-    return [Number(min.toFixed(2)), Number(max.toFixed(2))];
+    return {
+      ticks: [Number(min.toFixed(2)), Number(max.toFixed(2))],
+      step: chosenStep,
+      decimals: 2,
+    };
   }
 
-  return ticks;
+  return {
+    ticks,
+    step: chosenStep,
+    decimals: getStepDecimals(chosenStep),
+  };
+}
+
+/**
+ * Generates clean, evenly spaced axis ticks strictly inside [min, max].
+ */
+export function buildNiceTicks(
+  min: number,
+  max: number,
+  candidateSteps: number[],
+  maxTicks = 8
+): number[] {
+  return buildNiceTicksWithStep(min, max, candidateSteps, maxTicks).ticks;
 }
 
 export function formatCompactNumber(val: number, maxDecimals = 1): string {

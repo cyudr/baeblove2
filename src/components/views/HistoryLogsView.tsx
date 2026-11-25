@@ -9,6 +9,12 @@ import {
   getRoutineRecordDate,
 } from '../../utils/careInterpreter';
 import {
+  DAYS_PER_MONTH,
+  computeExactAgeFromBirth,
+  formatAdaptiveAgeFromDays,
+  formatAgeFromBirthDate,
+} from '../../utils/ageCalculator';
+import {
   ClipboardList,
   Plus,
   Trash2,
@@ -380,6 +386,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
             <thead>
               <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                 <th className="py-3 px-4">Date</th>
+                {isBaby && <th className="py-3 px-4">Age</th>}
                 <th className="py-3 px-4">Logged By</th>
                 <th className="py-3 px-4">Daily Weight</th>
                 <th className="py-3 px-4">Daily Length</th>
@@ -393,17 +400,27 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                 const tempInfo =
                   row.temperature !== null ? classifyTemperature(row.temperature) : null;
                 const deleteKey = `growth-${row.id}`;
+                const recordDateStr = getGrowthRecordDate(row);
+                const autoAgeLabel =
+                  isBaby && activeProfile
+                    ? formatAgeFromBirthDate(activeProfile.dateOfEvent, recordDateStr)
+                    : null;
                 return (
                   <tr
                     key={row.id}
                     className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors"
                   >
                     <td className="py-3 px-4 whitespace-nowrap font-bold text-stone-900 dark:text-white">
-                      <div>{getGrowthRecordDate(row)}</div>
+                      <div>{recordDateStr}</div>
                       <div className="text-[10px] font-normal text-stone-400 dark:text-stone-500">
                         {formatDateTime(row.created_at)}
                       </div>
                     </td>
+                    {isBaby && (
+                      <td className="py-3 px-4 whitespace-nowrap font-mono text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                        {autoAgeLabel ?? '—'}
+                      </td>
+                    )}
                     <td className="py-3 px-4 whitespace-nowrap">{row.name || '—'}</td>
                     <td className="py-3 px-4 font-mono font-bold whitespace-nowrap">
                       {row.daily_weight !== null
@@ -534,8 +551,17 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                 </thead>
                 <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
                   {filteredBabyMeasurements.map((m) => {
+                    const exactAge = computeExactAgeFromBirth(activeProfile.dateOfEvent, m.date);
+                    const exactMonths = exactAge ? exactAge.exactMonths : m.ageInMonths;
+                    const exactDays = exactAge
+                      ? exactAge.totalDays
+                      : m.ageInDays ?? m.ageInMonths * DAYS_PER_MONTH;
+                    const ageLabel = formatAdaptiveAgeFromDays(exactDays, {
+                      birthDateStr: activeProfile.dateOfEvent,
+                      recordDateStr: m.date,
+                    });
                     const weightPct = m.weightKg
-                      ? calculatePercentile(m.weightKg, m.ageInMonths, 'weight', activeProfile.gender)
+                      ? calculatePercentile(m.weightKg, exactMonths, 'weight', activeProfile.gender)
                       : null;
                     const deleteKey = `baby-m-${m.id}`;
 
@@ -553,7 +579,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                           )}
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap">{m.loggedBy || '—'}</td>
-                        <td className="py-3.5 px-4 whitespace-nowrap font-mono">{m.ageInMonths} mo</td>
+                        <td className="py-3.5 px-4 whitespace-nowrap font-mono">{ageLabel}</td>
                         <td className="py-3.5 px-4 font-mono font-bold whitespace-nowrap">
                           {m.weightKg ? UnitConverter.formatWeight(m.weightKg, unitSystem) : '—'}
                         </td>

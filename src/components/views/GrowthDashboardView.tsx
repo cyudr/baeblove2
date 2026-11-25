@@ -76,6 +76,12 @@ import {
 import { InteractiveGrowthChart } from '../charts/InteractiveGrowthChart';
 import { FetalBiometricsChart } from '../charts/FetalBiometricsChart';
 import { mergeProfileGrowthMeasurements } from '../../utils/careInterpreter';
+import {
+  DAYS_PER_MONTH,
+  computeExactAgeFromBirth,
+  formatAdaptiveAgeFromDays,
+  getLocalTodayDateStr,
+} from '../../utils/ageCalculator';
 import confetti from 'canvas-confetti';
 
 interface GrowthDashboardViewProps {
@@ -150,8 +156,8 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
   useEffect(() => {
     if (!activeProfile) return;
     if (activeProfile.type === 'baby') {
-      const diffTime = Date.now() - new Date(activeProfile.dateOfEvent).getTime();
-      const totalDays = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
+      const exact = computeExactAgeFromBirth(activeProfile.dateOfEvent, getLocalTodayDateStr());
+      const totalDays = exact?.totalDays ?? 0;
       setPreviewWeekNum(Math.max(1, Math.min(52, Math.floor(totalDays / 7) || 1)));
     } else {
       const ga = calculateGestationalAge(activeProfile.dateOfEvent);
@@ -233,21 +239,22 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
 
   const isBaby = activeProfile.type === 'baby';
 
-  // Calculate current age
-  const today = new Date();
-  const eventDate = new Date(activeProfile.dateOfEvent);
-
+  // Calculate current calendar-accurate age from birthday
+  const todayDateStr = getLocalTodayDateStr();
   let currentBabyMonth = 0;
-  let currentBabyWeeks = 0;
-  let currentBabyDays = 0;
+  let currentBabyWeeks = 1;
+  let currentBabyAgeLabel = 'Day 0';
   let gestationalAgeInfo: { weeks: number; days: number; totalDays: number } | null = null;
 
   if (isBaby) {
-    const diffTime = today.getTime() - eventDate.getTime();
-    const totalDays = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
-    currentBabyMonth = Math.floor(totalDays / 30.4375);
-    currentBabyWeeks = Math.max(1, Math.min(52, Math.floor(totalDays / 7)));
-    currentBabyDays = totalDays % 7;
+    const exact = computeExactAgeFromBirth(activeProfile.dateOfEvent, todayDateStr);
+    const totalDays = exact?.totalDays ?? 0;
+    currentBabyMonth = exact ? exact.calendarYears * 12 + exact.calendarMonths : 0;
+    currentBabyWeeks = Math.max(1, Math.min(52, Math.floor(totalDays / 7) || 1));
+    currentBabyAgeLabel = formatAdaptiveAgeFromDays(totalDays, {
+      birthDateStr: activeProfile.dateOfEvent,
+      recordDateStr: todayDateStr,
+    });
   } else {
     gestationalAgeInfo = calculateGestationalAge(activeProfile.dateOfEvent);
   }
@@ -458,7 +465,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                           className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-300 font-bold hover:bg-emerald-200 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
                         >
                           <Sparkles className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
-                          <span>Week {currentBabyWeeks} ({currentBabyMonth}m {currentBabyDays}d)</span>
+                          <span>{currentBabyAgeLabel} (Week {currentBabyWeeks})</span>
                           <span className="text-[10px] opacity-70">➔</span>
                         </button>
                         <button
@@ -1729,7 +1736,15 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                       className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 cursor-pointer transition-colors"
                     >
                       <td className="py-3.5 font-bold text-stone-900 dark:text-white">{m.date}</td>
-                      <td className="py-3.5 font-medium">Month {m.ageInMonths} ({m.ageInWeeks || Math.floor(m.ageInMonths * 4.345)}w)</td>
+                      <td className="py-3.5 font-medium">
+                        {formatAdaptiveAgeFromDays(
+                          m.ageInDays ?? m.ageInMonths * DAYS_PER_MONTH,
+                          {
+                            birthDateStr: activeProfile.dateOfEvent,
+                            recordDateStr: m.date,
+                          }
+                        )}
+                      </td>
                       <td className="py-3.5 font-black text-emerald-800 dark:text-emerald-400">
                         {m.weightKg ? UnitConverter.formatWeight(m.weightKg, unitSystem) : '—'}
                       </td>

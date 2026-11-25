@@ -45,6 +45,7 @@ export interface BabyMeasurement {
   id: string;
   profileId: string;
   date: string;
+  ageInDays?: number;
   ageInMonths: number;
   ageInWeeks?: number;
   weightKg?: number;

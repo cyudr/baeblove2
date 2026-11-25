@@ -9,12 +9,29 @@ import {
 import { BabyMeasurement, ChildProfile, UnitSystem } from '../../types';
 import {
   computeAutoZoomRange,
-  buildNiceTicks,
+  computeNiceAxisScale,
+  buildNiceTicksWithStep,
   formatCompactNumber,
 } from '../../utils/chartZoom';
+import {
+  AgeAxisScaleMode,
+  AgeAxisUnit,
+  DAYS_PER_MONTH,
+  DAYS_PER_WEEK,
+  ageUnitToDays,
+  computeExactAgeFromBirth,
+  daysToAgeUnit,
+  formatAdaptiveAgeFromDays,
+  formatAgeAxisTick,
+  getAgeAxisLabel,
+  selectAutoAgeUnit,
+} from '../../utils/ageCalculator';
 import { Info, TrendingUp, Sliders, BookOpen, Calendar } from 'lucide-react';
 
 type GrowthZoomMode = 'auto' | 12 | 24 | 36;
+
+const DOMAIN_MAX_MONTHS = 36;
+const DOMAIN_MAX_DAYS = DOMAIN_MAX_MONTHS * DAYS_PER_MONTH;
 
 function interpolateWHOPoint(rawCurve: WHODataPoint[], month: number): WHODataPoint {
   if (rawCurve.length === 0) {
@@ -66,10 +83,12 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
 }) => {
   const [metric, setMetric] = useState<MetricType>('weight');
   const [zoomMode, setZoomMode] = useState<GrowthZoomMode>('auto');
-  const [timeScale, setTimeScale] = useState<'months' | 'weeks'>('months');
+  const [timeScaleMode, setTimeScaleMode] = useState<AgeAxisScaleMode>('auto');
   const [showBands, setShowBands] = useState<boolean>(true);
   const [hoveredPoint, setHoveredPoint] = useState<{
-    age: number;
+    id: string;
+    exactDays: number;
+    ageLabel: string;
     value: number;
     percentile: number;
     zScore: number;
@@ -79,9 +98,9 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     y: number;
   } | null>(null);
 
-  // Interactive scrubber state for mouse/touch tracking across the entire curve
+  // Interactive scrubber state tracking continuously across exact age in days
   const [scrubberState, setScrubberState] = useState<{
-    month: number;
+    days: number;
     svgX: number;
     p3: number;
     p15: number;
@@ -89,7 +108,9 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     p85: number;
     p97: number;
     nearestMeasurement?: {
-      ageInMonths: number;
+      id: string;
+      exactDays: number;
+      ageLabel: string;
       val: number;
       percentile: number;
       zScore: number;
@@ -104,75 +125,126 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     return getWHOCurve(metric, profile.gender);
   }, [metric, profile.gender]);
 
-  // Compute visible X-axis range in months (Auto = 200% of current available data time range)
-  const [xMin, xMax] = useMemo<[number, number]>(() => {
+  // Recalculate exact age (days / months) for every retrieved measurement taking reference from birthday
+  const enrichedMeasurements = useMemo(() => {
+    return measurements.map((m) => {
+      const exact = computeExactAgeFromBirth(profile.dateOfEvent, m.date);
+      const exactDays = exact
+        ? exact.totalDays
+        : m.ageInDays !== undefined && Number.isFinite(m.ageInDays)
+        ? Math.max(0, m.ageInDays)
+        : Math.max(0, m.ageInMonths * DAYS_PER_MONTH);
+      const exactMonths = exactDays / DAYS_PER_MONTH;
+      const ageLabel = formatAdaptiveAgeFromDays(exactDays, {
+        birthDateStr: profile.dateOfEvent,
+        recordDateStr: m.date,
+      });
+      return {
+        ...m,
+        exactDays,
+        exactMonths,
+        ageLabel,
+      };
+    });
+  }, [measurements, profile.dateOfEvent]);
+
+  // Compute visible X-axis range in exact days (Auto = 200% of current available data time range)
+  const [xMinDays, xMaxDays] = useMemo<[number, number]>(() => {
     if (zoomMode !== 'auto') {
-      return [0, zoomMode];
+      return [0, zoomMode * DAYS_PER_MONTH];
     }
 
-    const metricAges = measurements
+    const metricDays = enrichedMeasurements
       .filter((m) => {
         if (metric === 'weight') return m.weightKg !== undefined;
         if (metric === 'length') return m.lengthCm !== undefined;
         if (metric === 'headCircumference') return m.headCircumferenceCm !== undefined;
         return false;
       })
-      .map((m) => m.ageInMonths);
+      .map((m) => m.exactDays);
 
-    const sourceAges =
-      metricAges.length > 0 ? metricAges : measurements.map((m) => m.ageInMonths);
+    const sourceDays =
+      metricDays.length > 0 ? metricDays : enrichedMeasurements.map((m) => m.exactDays);
 
-    return computeAutoZoomRange(sourceAges, {
+    return computeAutoZoomRange(sourceDays, {
       domainMin: 0,
-      domainMax: 36,
-      minSpan: 0.2,
-      emptyRange: [0, 12],
+      domainMax: DOMAIN_MAX_DAYS,
+      minSpan: 2,
+      emptyRange: [0, 12 * DAYS_PER_MONTH],
       singlePointAnchorAtOrigin: true,
-      singlePointFallbackSpan: 1,
+      singlePointFallbackSpan: 7,
     });
-  }, [zoomMode, measurements, metric]);
+  }, [zoomMode, enrichedMeasurements, metric]);
 
-  const xSpan = Math.max(0.0001, xMax - xMin);
+  const xSpanDays = Math.max(0.0001, xMaxDays - xMinDays);
 
-  // Build interpolated WHO reference curve spanning exactly [xMin, xMax]
-  const curve = useMemo<WHODataPoint[]>(() => {
+  // Auto-select Days / Weeks / Months / Years based on the visible/retrieved age range
+  const effectiveUnit = useMemo<AgeAxisUnit>(() => {
+    if (timeScaleMode !== 'auto') return timeScaleMode;
+    return selectAutoAgeUnit(xMaxDays, xSpanDays);
+  }, [timeScaleMode, xMaxDays, xSpanDays]);
+
+  // Build smooth interpolated WHO reference curve spanning exactly [xMinDays, xMaxDays]
+  const curve = useMemo<Array<WHODataPoint & { day: number }>>(() => {
     if (rawCurve.length === 0) return [];
-    const sampleMonths = new Set<number>([xMin, xMax]);
+    const xMinMonths = xMinDays / DAYS_PER_MONTH;
+    const xMaxMonths = xMaxDays / DAYS_PER_MONTH;
+    const sampleDays = new Set<number>([xMinDays, xMaxDays]);
 
-    // Include integer WHO reference points inside the window
     rawCurve.forEach((pt) => {
-      if (pt.month > xMin && pt.month < xMax) {
-        sampleMonths.add(pt.month);
+      if (pt.month > xMinMonths && pt.month < xMaxMonths) {
+        sampleDays.add(pt.month * DAYS_PER_MONTH);
       }
     });
 
-    // Ensure smooth rendering when zoomed tightly into short windows
-    const minSteps = 20;
-    if (sampleMonths.size < minSteps) {
+    const minSteps = 28;
+    if (sampleDays.size < minSteps) {
       for (let i = 1; i < minSteps; i++) {
-        sampleMonths.add(xMin + (xSpan * i) / minSteps);
+        sampleDays.add(xMinDays + (xSpanDays * i) / minSteps);
       }
     }
 
-    return Array.from(sampleMonths)
+    return Array.from(sampleDays)
       .sort((a, b) => a - b)
-      .map((m) => interpolateWHOPoint(rawCurve, m));
-  }, [rawCurve, xMin, xMax, xSpan]);
+      .map((day) => ({
+        ...interpolateWHOPoint(rawCurve, day / DAYS_PER_MONTH),
+        day,
+      }));
+  }, [rawCurve, xMinDays, xMaxDays, xSpanDays]);
 
-  // SVG dimensions & coordinate scales
+  // SVG dimensions & coordinate padding
   const width = 800;
   const height = 450;
-  const padding = { top: 35, right: 35, bottom: 45, left: 55 };
+  const padding = { top: 35, right: 38, bottom: 48, left: 62 };
 
-  // Calculate Y-axis bounds scaled to the visible zoomed window
-  const { yMin, yMax } = useMemo(() => {
-    const visibleValues: number[] = [];
-    curve.forEach((d) => {
-      visibleValues.push(d.p3, d.p97);
-    });
+  // Convert underlying metric value (kg or cm) into the active Y-axis display unit
+  const toDisplayY = useCallback(
+    (metricVal: number): number => {
+      if (metric === 'weight') {
+        return unitSystem === 'imperial' ? metricVal * 2.20462 : metricVal;
+      }
+      return unitSystem === 'imperial' ? metricVal / 2.54 : metricVal;
+    },
+    [metric, unitSystem]
+  );
 
-    measurements.forEach((m) => {
-      if (m.ageInMonths < xMin - 1e-6 || m.ageInMonths > xMax + 1e-6) return;
+  const yUnitSuffix = useMemo(() => {
+    if (metric === 'weight') return unitSystem === 'imperial' ? 'lb' : 'kg';
+    return unitSystem === 'imperial' ? 'in' : 'cm';
+  }, [metric, unitSystem]);
+
+  // Compute exact, round Y-axis scale in display units so gridlines & tick labels match 100%
+  const yScale = useMemo(() => {
+    const visibleDisplayValues: number[] = [];
+
+    if (showBands) {
+      curve.forEach((d) => {
+        visibleDisplayValues.push(toDisplayY(d.p3), toDisplayY(d.p97));
+      });
+    }
+
+    enrichedMeasurements.forEach((m) => {
+      if (m.exactDays < xMinDays - 1e-6 || m.exactDays > xMaxDays + 1e-6) return;
       const val =
         metric === 'weight'
           ? m.weightKg
@@ -180,60 +252,80 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
           ? m.lengthCm
           : m.headCircumferenceCm;
       if (val !== undefined && Number.isFinite(val)) {
-        visibleValues.push(val);
+        visibleDisplayValues.push(toDisplayY(val));
       }
     });
 
-    if (visibleValues.length === 0) {
-      return { yMin: 0, yMax: 10 };
+    // If bands are hidden and there are no points in view, fall back to WHO median range
+    if (visibleDisplayValues.length === 0 && curve.length > 0) {
+      curve.forEach((d) => {
+        visibleDisplayValues.push(toDisplayY(d.p3), toDisplayY(d.p97));
+      });
     }
 
-    const rawMin = Math.min(...visibleValues);
-    const rawMax = Math.max(...visibleValues);
-    const rawSpan = Math.max(0.5, rawMax - rawMin);
-    const step = rawSpan <= 4 ? 0.5 : 1;
+    if (visibleDisplayValues.length === 0) {
+      return computeNiceAxisScale(0, 10, { targetTicks: 6, clampMinZero: true });
+    }
 
-    const paddedMin = Math.max(0, Math.floor((rawMin - rawSpan * 0.1) / step) * step);
-    const paddedMax = Math.ceil((rawMax + rawSpan * 0.1) / step) * step;
+    const rawMin = Math.min(...visibleDisplayValues);
+    const rawMax = Math.max(...visibleDisplayValues);
+    const minSpan =
+      metric === 'weight'
+        ? unitSystem === 'imperial'
+          ? 1
+          : 0.4
+        : unitSystem === 'imperial'
+        ? 1
+        : 2;
 
-    return {
-      yMin: paddedMin,
-      yMax: paddedMax > paddedMin ? paddedMax : paddedMin + step,
-    };
-  }, [curve, measurements, metric, xMin, xMax]);
+    return computeNiceAxisScale(rawMin, rawMax, {
+      targetTicks: 6,
+      paddingRatio: 0.08,
+      clampMinZero: true,
+      minSpan,
+    });
+  }, [curve, enrichedMeasurements, metric, xMinDays, xMaxDays, showBands, toDisplayY, unitSystem]);
 
   const scaleX = useCallback(
-    (month: number) => {
+    (day: number) => {
       const usableW = width - padding.left - padding.right;
-      return padding.left + ((month - xMin) / xSpan) * usableW;
+      return padding.left + ((day - xMinDays) / xSpanDays) * usableW;
     },
-    [xMin, xSpan, width, padding.left, padding.right]
+    [xMinDays, xSpanDays, width, padding.left, padding.right]
+  );
+
+  const scaleYDisplay = useCallback(
+    (displayVal: number) => {
+      const usableH = height - padding.top - padding.bottom;
+      const norm = (displayVal - yScale.min) / Math.max(0.0001, yScale.max - yScale.min);
+      return height - padding.bottom - norm * usableH;
+    },
+    [yScale.min, yScale.max, height, padding.top, padding.bottom]
   );
 
   const scaleY = useCallback(
-    (val: number) => {
-      const usableH = height - padding.top - padding.bottom;
-      const norm = (val - yMin) / Math.max(0.0001, yMax - yMin);
-      return height - padding.bottom - norm * usableH;
-    },
-    [yMin, yMax, height, padding.top, padding.bottom]
+    (metricVal: number) => scaleYDisplay(toDisplayY(metricVal)),
+    [scaleYDisplay, toDisplayY]
   );
 
   // Convert for imperial display if needed
-  const displayValue = (metricVal: number) => {
-    if (metric === 'weight') {
-      return UnitConverter.formatWeight(metricVal, unitSystem);
-    }
-    return UnitConverter.formatLength(metricVal, unitSystem);
-  };
+  const displayValue = useCallback(
+    (metricVal: number) => {
+      if (metric === 'weight') {
+        return UnitConverter.formatWeight(metricVal, unitSystem);
+      }
+      return UnitConverter.formatLength(metricVal, unitSystem);
+    },
+    [metric, unitSystem]
+  );
 
-  // Build SVG path strings for percentile curves
+  // Build SVG path strings for percentile curves with sub-pixel precision
   const makePath = (key: keyof WHODataPoint) => {
     return curve
       .map((pt, i) => {
-        const x = scaleX(pt.month);
+        const x = scaleX(pt.day);
         const y = scaleY(pt[key] as number);
-        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
       })
       .join(' ');
   };
@@ -242,25 +334,25 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
   const makeAreaBand = (keyLow: keyof WHODataPoint, keyHigh: keyof WHODataPoint) => {
     if (curve.length === 0) return '';
     const topPoints = curve.map(
-      (pt) => `${scaleX(pt.month).toFixed(1)},${scaleY(pt[keyHigh] as number).toFixed(1)}`
+      (pt) => `${scaleX(pt.day).toFixed(2)},${scaleY(pt[keyHigh] as number).toFixed(2)}`
     );
     const bottomPoints = [...curve]
       .reverse()
-      .map((pt) => `${scaleX(pt.month).toFixed(1)},${scaleY(pt[keyLow] as number).toFixed(1)}`);
+      .map((pt) => `${scaleX(pt.day).toFixed(2)},${scaleY(pt[keyLow] as number).toFixed(2)}`);
     return `M ${topPoints.join(' L ')} L ${bottomPoints.join(' L ')} Z`;
   };
 
-  // Filter and sort user measurements within the visible [xMin, xMax] range
+  // Filter and sort user measurements within the visible [xMinDays, xMaxDays] range
   const validMeasurements = useMemo(() => {
-    return measurements
+    return enrichedMeasurements
       .filter((m) => {
-        if (m.ageInMonths < xMin - 1e-6 || m.ageInMonths > xMax + 1e-6) return false;
+        if (m.exactDays < xMinDays - 1e-6 || m.exactDays > xMaxDays + 1e-6) return false;
         if (metric === 'weight') return m.weightKg !== undefined;
         if (metric === 'length') return m.lengthCm !== undefined;
         if (metric === 'headCircumference') return m.headCircumferenceCm !== undefined;
         return false;
       })
-      .sort((a, b) => a.ageInMonths - b.ageInMonths)
+      .sort((a, b) => a.exactDays - b.exactDays)
       .map((m) => {
         const rawVal =
           metric === 'weight'
@@ -270,7 +362,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             : m.headCircumferenceCm!;
         const { percentile, zScore } = calculatePercentile(
           rawVal,
-          m.ageInMonths,
+          m.exactMonths,
           metric,
           profile.gender
         );
@@ -279,45 +371,35 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
           val: rawVal,
           percentile,
           zScore,
-          x: scaleX(m.ageInMonths),
+          x: scaleX(m.exactDays),
           y: scaleY(rawVal),
         };
       });
-  }, [measurements, xMin, xMax, metric, profile.gender, scaleX, scaleY]);
+  }, [enrichedMeasurements, xMinDays, xMaxDays, metric, profile.gender, scaleX, scaleY]);
 
-  // Connect user measurement points with a line
+  // Connect user measurement points with a precise polyline
   const userPath = useMemo(() => {
     if (validMeasurements.length < 2) return '';
     return validMeasurements
-      .map((m, i) => `${i === 0 ? 'M' : 'L'} ${m.x.toFixed(1)} ${m.y.toFixed(1)}`)
+      .map((m, i) => `${i === 0 ? 'M' : 'L'} ${m.x.toFixed(2)} ${m.y.toFixed(2)}`)
       .join(' ');
   }, [validMeasurements]);
 
   // Latest measurement stats
   const latest = validMeasurements[validMeasurements.length - 1];
 
-  // Dynamic grid tick marks fitted to [xMin, xMax]
-  const xTicks = useMemo(() => {
-    if (timeScale === 'weeks') {
-      return buildNiceTicks(
-        xMin * 4.345,
-        xMax * 4.345,
-        [0.5, 1, 2, 4, 6, 8, 12, 16, 24],
-        8
-      );
-    }
-    return buildNiceTicks(xMin, xMax, [0.1, 0.2, 0.25, 0.5, 1, 2, 3, 4, 6], 8);
-  }, [xMin, xMax, timeScale]);
-
-  const yTicks = useMemo(() => {
-    const count = 5;
-    const step = (yMax - yMin) / count;
-    const ticks = [];
-    for (let i = 0; i <= count; i++) {
-      ticks.push(yMin + step * i);
-    }
-    return ticks;
-  }, [yMin, yMax]);
+  // Dynamic X-axis ticks aligned precisely to the active unit (days / weeks / months / years)
+  const xTickSpec = useMemo(() => {
+    const minInUnit = daysToAgeUnit(xMinDays, effectiveUnit);
+    const maxInUnit = daysToAgeUnit(xMaxDays, effectiveUnit);
+    const candidateSteps: Record<AgeAxisUnit, number[]> = {
+      days: [1, 2, 3, 5, 7, 10, 14, 15, 20, 30, 60, 90, 180],
+      weeks: [0.5, 1, 2, 3, 4, 6, 8, 12, 16, 24, 26],
+      months: [0.1, 0.25, 0.5, 1, 2, 3, 4, 6],
+      years: [0.1, 0.25, 0.5, 1],
+    };
+    return buildNiceTicksWithStep(minInUnit, maxInUnit, candidateSteps[effectiveUnit], 8);
+  }, [xMinDays, xMaxDays, effectiveUnit]);
 
   const updateScrubberBySvgX = (svgX: number) => {
     const usableW = width - padding.left - padding.right;
@@ -326,35 +408,56 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
       return;
     }
     const ratio = (svgX - padding.left) / usableW;
-    const rawMonth = xMin + ratio * xSpan;
-    const snapStep = xSpan <= 3 ? 0.1 : xSpan <= 8 ? 0.25 : xSpan <= 18 ? 0.5 : 1;
-    const scrubbedMonth = Math.max(
-      xMin,
-      Math.min(xMax, Number((Math.round(rawMonth / snapStep) * snapStep).toFixed(2)))
+    const rawDays = xMinDays + ratio * xSpanDays;
+    // Snap cleanly in days for high precision
+    const snapDays =
+      xSpanDays <= 21
+        ? 0.5
+        : xSpanDays <= 120
+        ? 1
+        : xSpanDays <= 400
+        ? DAYS_PER_WEEK / 2
+        : DAYS_PER_WEEK;
+    const scrubbedDays = Math.max(
+      xMinDays,
+      Math.min(xMaxDays, Number((Math.round(rawDays / snapDays) * snapDays).toFixed(2)))
     );
-    const curvePt = interpolateWHOPoint(rawCurve, scrubbedMonth);
+    const curvePt = interpolateWHOPoint(rawCurve, scrubbedDays / DAYS_PER_MONTH);
 
     // Find closest measurement within proportional tolerance
-    const tolerance = Math.max(0.08, xSpan * 0.045);
+    const toleranceDays = Math.max(0.6, xSpanDays * 0.04);
     let nearest: (typeof validMeasurements)[number] | undefined;
     let bestDist = Infinity;
     for (const m of validMeasurements) {
-      const dist = Math.abs(m.ageInMonths - scrubbedMonth);
-      if (dist <= tolerance && dist < bestDist) {
+      const dist = Math.abs(m.exactDays - scrubbedDays);
+      if (dist <= toleranceDays && dist < bestDist) {
         bestDist = dist;
         nearest = m;
       }
     }
 
     setScrubberState({
-      month: scrubbedMonth,
-      svgX: scaleX(scrubbedMonth),
+      days: scrubbedDays,
+      svgX: scaleX(scrubbedDays),
       p3: curvePt.p3,
       p15: curvePt.p15,
       p50: curvePt.p50,
       p85: curvePt.p85,
       p97: curvePt.p97,
-      nearestMeasurement: nearest,
+      nearestMeasurement: nearest
+        ? {
+            id: nearest.id,
+            exactDays: nearest.exactDays,
+            ageLabel: nearest.ageLabel,
+            val: nearest.val,
+            percentile: nearest.percentile,
+            zScore: nearest.zScore,
+            date: nearest.date,
+            notes: nearest.notes,
+            x: nearest.x,
+            y: nearest.y,
+          }
+        : undefined,
     });
   };
 
@@ -376,6 +479,20 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     updateScrubberBySvgX(svgX);
   };
 
+  const rangeSummaryLabel = useMemo(() => {
+    const minU = daysToAgeUnit(xMinDays, effectiveUnit);
+    const maxU = daysToAgeUnit(xMaxDays, effectiveUnit);
+    const dec = effectiveUnit === 'days' ? 0 : effectiveUnit === 'years' ? 2 : 1;
+    return `${formatAgeAxisTick(minU, effectiveUnit, dec)}–${formatAgeAxisTick(maxU, effectiveUnit, dec)}`;
+  }, [xMinDays, xMaxDays, effectiveUnit]);
+
+  const scrubberAgeLabel = useMemo(() => {
+    if (!scrubberState) return '';
+    return formatAdaptiveAgeFromDays(scrubberState.days, {
+      forcedUnit: timeScaleMode === 'auto' ? undefined : timeScaleMode,
+    });
+  }, [scrubberState, timeScaleMode]);
+
   return (
     <div className="bg-white dark:bg-stone-900 rounded-2xl md:rounded-3xl border border-stone-200 dark:border-stone-800 p-4 md:p-6 shadow-xs transition-colors">
       {/* Header controls & segmented buttons */}
@@ -386,10 +503,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               WHO Growth Standards & Percentiles
             </h3>
             <span className="text-xs text-stone-500 dark:text-stone-400">
-              {profile.gender === 'boy' ? 'Boys' : 'Girls'} ·{' '}
-              {timeScale === 'weeks'
-                ? `W${formatCompactNumber(xMin * 4.345, 1)}–W${formatCompactNumber(xMax * 4.345, 1)}`
-                : `${formatCompactNumber(xMin, 1)}–${formatCompactNumber(xMax, 1)}m`}
+              {profile.gender === 'boy' ? 'Boys' : 'Girls'} · {rangeSummaryLabel}
               {zoomMode === 'auto' ? ' · Auto' : ''}
             </span>
             {onOpenFormulaModal ? (
@@ -408,35 +522,41 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             )}
           </div>
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-            Compare measurements against World Health Organization Multicentre child growth references.
+            Age calculated from birthday ({profile.dateOfEvent}) against WHO Multicentre child growth references.
           </p>
         </div>
 
-        {/* Metric Segmented Control & Time Scale */}
+        {/* Metric Segmented Control & Age Scale */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Time scale toggle: Months vs Weeks */}
+          {/* Age unit selector: Auto / Days / Weeks / Months / Years */}
           <div className="inline-flex p-0.5 bg-stone-100 dark:bg-stone-800 rounded-xl border border-stone-200/60 dark:border-stone-700/60">
-            <button
-              onClick={() => setTimeScale('months')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
-                timeScale === 'months'
-                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
-                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-              }`}
-            >
-              Months
-            </button>
-            <button
-              onClick={() => setTimeScale('weeks')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 ${
-                timeScale === 'weeks'
-                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
-                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-              }`}
-            >
-              <Calendar className="w-3 h-3" />
-              <span>Weeks</span>
-            </button>
+            {(
+              [
+                { id: 'auto', label: 'Auto' },
+                { id: 'days', label: 'Days' },
+                { id: 'weeks', label: 'Weeks' },
+                { id: 'months', label: 'Months' },
+                { id: 'years', label: 'Years' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setTimeScaleMode(opt.id)}
+                title={
+                  opt.id === 'auto'
+                    ? `Automatically picks Days/Weeks/Months/Years (currently ${effectiveUnit})`
+                    : `Show X-axis in ${opt.label}`
+                }
+                className={`px-2 py-1 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 ${
+                  timeScaleMode === opt.id
+                    ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
+                    : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                }`}
+              >
+                {opt.id === 'auto' && <Calendar className="w-3 h-3" />}
+                <span>{opt.label}</span>
+              </button>
+            ))}
           </div>
 
           <div className="inline-flex p-1 bg-stone-100 dark:bg-stone-800 rounded-xl border border-stone-200/60 dark:border-stone-700/60">
@@ -539,10 +659,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Scrubbing Age:{' '}
-              {timeScale === 'weeks'
-                ? `Week ${formatCompactNumber(scrubberState.month * 4.345, 1)}`
-                : `Month ${formatCompactNumber(scrubberState.month, 1)}`}
+              Scrubbing Age: {scrubberAgeLabel}
             </span>
             <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">|</span>
             <span>WHO 50th (Median): <strong>{displayValue(scrubberState.p50)}</strong></span>
@@ -557,7 +674,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 Logged: {displayValue(scrubberState.nearestMeasurement.val)} ({scrubberState.nearestMeasurement.percentile}th %)
               </span>
               <span className="text-[11px] text-stone-500 dark:text-stone-400">
-                {scrubberState.nearestMeasurement.date}
+                {scrubberState.nearestMeasurement.date} · {scrubberState.nearestMeasurement.ageLabel}
               </span>
             </div>
           ) : (
@@ -572,7 +689,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             <span className="font-bold text-stone-900 dark:text-white">Latest Recorded:</span>
             <span className="font-mono font-bold text-stone-900 dark:text-white">{displayValue(latest.val)}</span>
             <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
-            <span>Age: {latest.ageInMonths} mo</span>
+            <span>Age: <strong>{latest.ageLabel}</strong></span>
             <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
             <span>Date: {latest.date}</span>
           </div>
@@ -593,7 +710,10 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
           className="w-full h-auto cursor-crosshair"
           style={{ maxHeight: '420px' }}
           onMouseMove={handleSvgMouseMove}
-          onMouseLeave={() => setScrubberState(null)}
+          onMouseLeave={() => {
+            setScrubberState(null);
+            setHoveredPoint(null);
+          }}
           onTouchMove={handleSvgTouchMove}
           onTouchEnd={() => setScrubberState(null)}
         >
@@ -608,11 +728,19 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               <stop offset="0%" stopColor="#f4f4f5" stopOpacity="0.8" />
               <stop offset="100%" stopColor="#f4f4f5" stopOpacity="0.4" />
             </linearGradient>
+            <clipPath id="whoPlotAreaClip">
+              <rect
+                x={padding.left}
+                y={padding.top}
+                width={width - padding.left - padding.right}
+                height={height - padding.top - padding.bottom}
+              />
+            </clipPath>
           </defs>
 
-          {/* Background Grid Lines */}
-          {yTicks.map((tickVal, i) => {
-            const y = scaleY(tickVal);
+          {/* Exact Y-axis Grid Lines & Ticks (1:1 aligned in display unit) */}
+          {yScale.ticks.map((tickVal, i) => {
+            const y = scaleYDisplay(tickVal);
             return (
               <g key={`y-${i}`}>
                 <line
@@ -624,29 +752,32 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   strokeDasharray="3 3"
                   strokeWidth="1"
                 />
+                <line
+                  x1={padding.left - 4}
+                  y1={y}
+                  x2={padding.left}
+                  y2={y}
+                  stroke="#a8a29e"
+                  strokeWidth="1"
+                />
                 <text
                   x={padding.left - 8}
                   y={y + 3.5}
                   textAnchor="end"
-                  className="text-[10px] fill-stone-400 font-sans"
+                  className="text-[10px] fill-stone-500 font-mono"
                 >
-                  {metric === 'weight'
-                    ? unitSystem === 'imperial'
-                      ? `${(tickVal * 2.20462).toFixed(yMax - yMin < 5 ? 1 : 0)} lb`
-                      : `${tickVal.toFixed(1)} kg`
-                    : unitSystem === 'imperial'
-                    ? `${(tickVal / 2.54).toFixed(yMax - yMin < 15 ? 1 : 0)} in`
-                    : `${tickVal.toFixed(yMax - yMin < 10 ? 1 : 0)} cm`}
+                  {tickVal.toFixed(yScale.decimals)} {yUnitSuffix}
                 </text>
               </g>
             );
           })}
 
-          {xTicks.map((val) => {
-            const monthVal = timeScale === 'weeks' ? val / 4.345 : val;
-            const x = scaleX(monthVal);
+          {/* Exact X-axis Grid Lines & Ticks (1:1 aligned to Days / Weeks / Months / Years) */}
+          {xTickSpec.ticks.map((tickVal) => {
+            const tickDay = ageUnitToDays(tickVal, effectiveUnit);
+            const x = scaleX(tickDay);
             return (
-              <g key={`x-${val}`}>
+              <g key={`x-${tickVal}`}>
                 <line
                   x1={x}
                   y1={padding.top}
@@ -655,68 +786,90 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   stroke="#f5f5f4"
                   strokeWidth="1"
                 />
+                <line
+                  x1={x}
+                  y1={height - padding.bottom}
+                  x2={x}
+                  y2={height - padding.bottom + 4}
+                  stroke="#a8a29e"
+                  strokeWidth="1"
+                />
                 <text
                   x={x}
                   y={height - padding.bottom + 18}
                   textAnchor="middle"
-                  className="text-[10px] fill-stone-500 font-sans"
+                  className="text-[10px] fill-stone-500 font-mono"
                 >
-                  {timeScale === 'weeks'
-                    ? `W${formatCompactNumber(val, 1)}`
-                    : `${formatCompactNumber(val, 2)}m`}
+                  {formatAgeAxisTick(tickVal, effectiveUnit, xTickSpec.decimals)}
                 </text>
               </g>
             );
           })}
 
-          {/* Percentile Bands (3rd-97th and 15th-85th) */}
-          {showBands && (
-            <>
-              {/* Outer 3rd-97th band */}
-              <path
-                d={makeAreaBand('p3', 'p97')}
-                fill="url(#bandOuterGrad)"
-                opacity="0.8"
-              />
-              {/* Inner 15th-85th band */}
-              <path
-                d={makeAreaBand('p15', 'p85')}
-                fill="url(#bandInnerGrad)"
-              />
+          {/* Crisp X and Y axis baseline rules */}
+          <line
+            x1={padding.left}
+            y1={padding.top}
+            x2={padding.left}
+            y2={height - padding.bottom}
+            stroke="#d6d3d1"
+            strokeWidth="1"
+          />
+          <line
+            x1={padding.left}
+            y1={height - padding.bottom}
+            x2={width - padding.right}
+            y2={height - padding.bottom}
+            stroke="#d6d3d1"
+            strokeWidth="1"
+          />
 
-              {/* Individual percentile curve boundary lines */}
-              <path
-                d={makePath('p97')}
-                fill="none"
-                stroke="#a8a29e"
-                strokeWidth="1"
-                strokeDasharray="2 3"
-              />
-              <path
-                d={makePath('p85')}
-                fill="none"
-                stroke="#86efac"
-                strokeWidth="1"
-              />
-              <path
-                d={makePath('p50')}
-                fill="none"
-                stroke="#15803d"
-                strokeWidth="2"
-              />
-              <path
-                d={makePath('p15')}
-                fill="none"
-                stroke="#86efac"
-                strokeWidth="1"
-              />
-              <path
-                d={makePath('p3')}
-                fill="none"
-                stroke="#a8a29e"
-                strokeWidth="1"
-                strokeDasharray="2 3"
-              />
+          {/* Percentile Bands (3rd-97th and 15th-85th) */}
+          {showBands && curve.length > 0 && (
+            <>
+              <g clipPath="url(#whoPlotAreaClip)">
+                <path
+                  d={makeAreaBand('p3', 'p97')}
+                  fill="url(#bandOuterGrad)"
+                  opacity="0.8"
+                />
+                <path
+                  d={makeAreaBand('p15', 'p85')}
+                  fill="url(#bandInnerGrad)"
+                />
+                <path
+                  d={makePath('p97')}
+                  fill="none"
+                  stroke="#a8a29e"
+                  strokeWidth="1"
+                  strokeDasharray="2 3"
+                />
+                <path
+                  d={makePath('p85')}
+                  fill="none"
+                  stroke="#86efac"
+                  strokeWidth="1"
+                />
+                <path
+                  d={makePath('p50')}
+                  fill="none"
+                  stroke="#15803d"
+                  strokeWidth="2"
+                />
+                <path
+                  d={makePath('p15')}
+                  fill="none"
+                  stroke="#86efac"
+                  strokeWidth="1"
+                />
+                <path
+                  d={makePath('p3')}
+                  fill="none"
+                  stroke="#a8a29e"
+                  strokeWidth="1"
+                  strokeDasharray="2 3"
+                />
+              </g>
 
               {/* End of curve labels (97th, 50th, 3rd) */}
               <text
@@ -743,7 +896,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             </>
           )}
 
-          {/* User Logged Measurements Spline */}
+          {/* User Logged Measurements Polyline */}
           {userPath && (
             <path
               d={userPath}
@@ -755,16 +908,44 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             />
           )}
 
+          {/* Hover Point Precision Crosshair Guides to X and Y axes */}
+          {hoveredPoint && (
+            <g className="pointer-events-none">
+              <line
+                x1={padding.left}
+                y1={hoveredPoint.y}
+                x2={hoveredPoint.x}
+                y2={hoveredPoint.y}
+                stroke="#0f766e"
+                strokeWidth="1"
+                strokeDasharray="3 3"
+                opacity="0.7"
+              />
+              <line
+                x1={hoveredPoint.x}
+                y1={hoveredPoint.y}
+                x2={hoveredPoint.x}
+                y2={height - padding.bottom}
+                stroke="#0f766e"
+                strokeWidth="1"
+                strokeDasharray="3 3"
+                opacity="0.7"
+              />
+            </g>
+          )}
+
           {/* User Data Points */}
           {validMeasurements.map((m) => {
-            const isHovered = hoveredPoint?.date === m.date;
+            const isHovered = hoveredPoint?.id === m.id;
             return (
               <g
                 key={m.id}
                 className="cursor-pointer"
                 onMouseEnter={() =>
                   setHoveredPoint({
-                    age: m.ageInMonths,
+                    id: m.id,
+                    exactDays: m.exactDays,
+                    ageLabel: m.ageLabel,
                     value: m.val,
                     percentile: m.percentile,
                     zScore: m.zScore,
@@ -774,9 +955,12 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                     y: m.y,
                   })
                 }
+                onMouseLeave={() => setHoveredPoint(null)}
                 onClick={() =>
                   setHoveredPoint({
-                    age: m.ageInMonths,
+                    id: m.id,
+                    exactDays: m.exactDays,
+                    ageLabel: m.ageLabel,
                     value: m.val,
                     percentile: m.percentile,
                     zScore: m.zScore,
@@ -822,33 +1006,34 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 strokeWidth="1.5"
                 strokeDasharray="4 3"
               />
-              {/* Highlight circle on WHO 50th line */}
-              <circle
-                cx={scrubberState.svgX}
-                cy={scaleY(scrubberState.p50)}
-                r="4.5"
-                fill="#15803d"
-                stroke="#ffffff"
-                strokeWidth="1.5"
-              />
-              {/* Highlight circle on WHO 97th line */}
-              <circle
-                cx={scrubberState.svgX}
-                cy={scaleY(scrubberState.p97)}
-                r="3"
-                fill="#a8a29e"
-                stroke="#ffffff"
-                strokeWidth="1"
-              />
-              {/* Highlight circle on WHO 3rd line */}
-              <circle
-                cx={scrubberState.svgX}
-                cy={scaleY(scrubberState.p3)}
-                r="3"
-                fill="#a8a29e"
-                stroke="#ffffff"
-                strokeWidth="1"
-              />
+              {showBands && (
+                <>
+                  <circle
+                    cx={scrubberState.svgX}
+                    cy={scaleY(scrubberState.p50)}
+                    r="4.5"
+                    fill="#15803d"
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                  />
+                  <circle
+                    cx={scrubberState.svgX}
+                    cy={scaleY(scrubberState.p97)}
+                    r="3"
+                    fill="#a8a29e"
+                    stroke="#ffffff"
+                    strokeWidth="1"
+                  />
+                  <circle
+                    cx={scrubberState.svgX}
+                    cy={scaleY(scrubberState.p3)}
+                    r="3"
+                    fill="#a8a29e"
+                    stroke="#ffffff"
+                    strokeWidth="1"
+                  />
+                </>
+              )}
 
               {/* If nearest logged measurement exists */}
               {scrubberState.nearestMeasurement && (
@@ -866,19 +1051,19 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               {/* Floating Rich Tooltip */}
               <g
                 transform={`translate(${
-                  scrubberState.svgX > width - 185
-                    ? scrubberState.svgX - 180
+                  scrubberState.svgX > width - 195
+                    ? scrubberState.svgX - 188
                     : scrubberState.svgX + 12
                 }, ${
                   scaleY(scrubberState.p50) < 110
-                    ? scaleY(scrubberState.p50) + 12
-                    : scaleY(scrubberState.p50) - 80
+                    ? Math.min(height - padding.bottom - 85, scaleY(scrubberState.p50) + 12)
+                    : Math.max(padding.top + 4, scaleY(scrubberState.p50) - 80)
                 })`}
                 className="drop-shadow-lg"
               >
                 <rect
-                  width="170"
-                  height={scrubberState.nearestMeasurement ? 76 : 60}
+                  width="178"
+                  height={scrubberState.nearestMeasurement ? 78 : 60}
                   rx="10"
                   fill="#18181b"
                   opacity="0.96"
@@ -890,9 +1075,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   y="16"
                   className="text-[10px] font-bold fill-emerald-400 font-sans tracking-wide uppercase"
                 >
-                  {timeScale === 'weeks'
-                    ? `Week ${formatCompactNumber(scrubberState.month * 4.345, 1)} · Month ${formatCompactNumber(scrubberState.month, 1)}`
-                    : `Age: Month ${formatCompactNumber(scrubberState.month, 1)}`}
+                  Age: {scrubberAgeLabel}
                 </text>
                 <text
                   x="10"
@@ -910,7 +1093,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 </text>
                 {scrubberState.nearestMeasurement && (
                   <>
-                    <line x1="8" y1="50" x2="162" y2="50" stroke="#3f3f46" strokeWidth="0.75" />
+                    <line x1="8" y1="50" x2="170" y2="50" stroke="#3f3f46" strokeWidth="0.75" />
                     <text
                       x="10"
                       y="62"
@@ -920,10 +1103,10 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                     </text>
                     <text
                       x="10"
-                      y="72"
+                      y="73"
                       className="text-[8px] fill-stone-400 font-sans"
                     >
-                      {scrubberState.nearestMeasurement.date} · Z: {scrubberState.nearestMeasurement.zScore}
+                      {scrubberState.nearestMeasurement.date} · {scrubberState.nearestMeasurement.ageLabel} · Z: {scrubberState.nearestMeasurement.zScore}
                     </text>
                   </>
                 )}
@@ -935,17 +1118,17 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
           {hoveredPoint && (
             <g
               transform={`translate(${
-                hoveredPoint.x > width - 160
-                  ? hoveredPoint.x - 150
+                hoveredPoint.x > width - 175
+                  ? hoveredPoint.x - 168
                   : hoveredPoint.x + 12
               }, ${
-                hoveredPoint.y < 80 ? hoveredPoint.y + 10 : hoveredPoint.y - 70
+                hoveredPoint.y < 85 ? hoveredPoint.y + 10 : hoveredPoint.y - 72
               })`}
               className="pointer-events-none drop-shadow-md"
             >
               <rect
-                width="145"
-                height="62"
+                width="160"
+                height="64"
                 rx="8"
                 fill="#1c1917"
                 opacity="0.95"
@@ -966,22 +1149,25 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               </text>
               <text
                 x="10"
-                y="49"
-                className="text-[9px] fill-stone-400 font-sans"
+                y="50"
+                className="text-[9px] fill-emerald-300 font-sans"
               >
-                {hoveredPoint.date} · {hoveredPoint.age} mo
+                {hoveredPoint.date} · {hoveredPoint.ageLabel}
               </text>
             </g>
           )}
 
-          {/* Axis Labels */}
+          {/* Axis Label */}
           <text
-            x={width / 2}
-            y={height - 8}
+            x={(padding.left + width - padding.right) / 2}
+            y={height - 10}
             textAnchor="middle"
             className="text-[11px] fill-stone-500 font-sans font-medium"
           >
-            {timeScale === 'weeks' ? 'Age (Weeks)' : 'Age (Months)'}
+            {getAgeAxisLabel(effectiveUnit)}
+            {effectiveUnit !== 'days' && xSpanDays <= 35
+              ? ` · ${formatCompactNumber(xSpanDays, 0)}d span`
+              : ''}
           </text>
         </svg>
       </div>

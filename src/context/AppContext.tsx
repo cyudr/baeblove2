@@ -18,6 +18,7 @@ import {
   NewNoteRecordInput,
 } from '../types';
 import { DEFAULT_FORMULA_SETTINGS } from '../data/formulaSources';
+import { computeExactAgeFromBirth } from '../utils/ageCalculator';
 import {
   fetchGrowthRecords,
   insertGrowthRecord,
@@ -703,21 +704,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         if (birthDateChanged) {
-          const birthMs = new Date(updated.dateOfEvent).getTime();
-          if (!Number.isNaN(birthMs)) {
-            for (const m of profileMeasurements) {
-              if (existingBirthRecord && m.id === existingBirthRecord.id) continue;
-              const measMs = new Date(m.date).getTime();
-              if (Number.isNaN(measMs)) continue;
-              const diffDays = Math.max(0, Math.floor((measMs - birthMs) / (1000 * 60 * 60 * 24)));
-              const recalculated: BabyMeasurement = {
-                ...m,
-                ageInMonths: Math.round((diffDays / 30.4375) * 10) / 10,
-                ageInWeeks: Math.round((diffDays / 7) * 10) / 10,
-              };
-              updatedMeasurementsById.set(recalculated.id, recalculated);
-              rowsToUpsert.push(toBabyMeasurementRow(recalculated, updated.name));
-            }
+          for (const m of profileMeasurements) {
+            if (existingBirthRecord && m.id === existingBirthRecord.id) continue;
+            const exact = computeExactAgeFromBirth(updated.dateOfEvent, m.date);
+            if (!exact) continue;
+            const recalculated: BabyMeasurement = {
+              ...m,
+              ageInDays: exact.totalDays,
+              ageInMonths: exact.exactMonths,
+              ageInWeeks: exact.exactWeeks,
+            };
+            updatedMeasurementsById.set(recalculated.id, recalculated);
+            rowsToUpsert.push(toBabyMeasurementRow(recalculated, updated.name));
           }
         }
       }
