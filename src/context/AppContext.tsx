@@ -1151,6 +1151,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return bKey.localeCompare(aKey);
         });
       });
+      void refreshCareTables();
     }
     return result;
   };
@@ -1240,6 +1241,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return bKey.localeCompare(aKey);
         });
       });
+      void refreshCareTables();
     }
     return result;
   };

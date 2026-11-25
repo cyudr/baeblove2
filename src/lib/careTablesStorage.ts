@@ -29,6 +29,56 @@ function toNullableText(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function toNullableDate(value: string | null | undefined): string | null {
+  const cleaned = toNullableText(value);
+  if (!cleaned) return null;
+  const match = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== m - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return null;
+  }
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function toNullableTime(value: string | null | undefined): string | null {
+  const cleaned = toNullableText(value);
+  if (!cleaned) return null;
+  const match = cleaned.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return null;
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  const ss = match[3] !== undefined ? Number(match[3]) : 0;
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59) return null;
+  const hhStr = String(hh).padStart(2, '0');
+  const mmStr = String(mm).padStart(2, '0');
+  return match[3] !== undefined ? `${hhStr}:${mmStr}:${String(ss).padStart(2, '0')}` : `${hhStr}:${mmStr}`;
+}
+
+let lastFallbackId = 0;
+function nextFallbackId(): number {
+  const now = Date.now();
+  lastFallbackId = now > lastFallbackId ? now : lastFallbackId + 1;
+  return lastFallbackId;
+}
+
+function isNotNullColumnError(
+  error: { message?: string; details?: string | null; code?: string | null } | null | undefined,
+  columnName: string
+): boolean {
+  if (!error || error.code !== '23502') return false;
+  const combined = `${error.message ?? ''} ${error.details ?? ''}`.toLowerCase();
+  return combined.includes(`"${columnName.toLowerCase()}"`) || combined.includes(`column ${columnName.toLowerCase()}`);
+}
+
 function normalizeGrowthRow(raw: Record<string, unknown>): GrowthRecord {
   return {
     id: Number(raw.id),
@@ -130,18 +180,23 @@ export async function fetchGrowthRecords(): Promise<GrowthRecord[] | null> {
   return ((data as Record<string, unknown>[]) ?? []).map(normalizeGrowthRow);
 }
 
-export async function insertGrowthRecord(
-  input: NewGrowthRecordInput
-): Promise<{ record: GrowthRecord | null; error?: string }> {
-  const payload = {
-    profile_id: toNullableText(input.profile_id),
-    date: toNullableText(input.date),
+function buildGrowthPayload(input: NewGrowthRecordInput, nonNullProfileId = false) {
+  const cleanedProfileId = toNullableText(input.profile_id);
+  return {
+    profile_id: nonNullProfileId ? (cleanedProfileId ?? '') : cleanedProfileId,
+    date: toNullableDate(input.date),
     daily_weight: toNullableFloat(input.daily_weight),
     daily_length: toNullableFloat(input.daily_length),
     temperature: toNullableFloat(input.temperature),
     remark: toNullableText(input.remark),
     name: toNullableText(input.name),
   };
+}
+
+export async function insertGrowthRecord(
+  input: NewGrowthRecordInput
+): Promise<{ record: GrowthRecord | null; error?: string }> {
+  const payload = buildGrowthPayload(input, false);
 
   if (!supabase) {
     return { record: null, error: MISSING_SUPABASE_ERROR };
@@ -160,11 +215,19 @@ export async function insertGrowthRecord(
     return { record: normalizeGrowthRow(firstRow) };
   }
 
-  // Fallback if the user's int8 primary key does not have an identity/sequence default
+  // Fallback for NOT NULL constraints (e.g. int8 primary key without identity default, or non-null profile_id)
   if (firstAttempt.error?.code === '23502') {
+    const needsNonNullProfile = isNotNullColumnError(firstAttempt.error, 'profile_id');
+    const needsExplicitId =
+      isNotNullColumnError(firstAttempt.error, 'id') || !needsNonNullProfile;
+    const retryPayload = buildGrowthPayload(input, needsNonNullProfile || payload.profile_id === null);
+    const retryRowInput = needsExplicitId
+      ? { id: nextFallbackId(), ...retryPayload }
+      : retryPayload;
+
     const retryAttempt = await supabase
       .from(GROWTH_TABLE)
-      .insert([{ id: Date.now(), ...payload }])
+      .insert([retryRowInput])
       .select('*');
 
     const retryRow = Array.isArray(retryAttempt.data)
@@ -197,42 +260,72 @@ export async function insertGrowthRecordsBulk(
 ): Promise<{ records: GrowthRecord[]; error?: string }> {
   if (inputs.length === 0) return { records: [] };
 
-  const payloads = inputs.map((input) => ({
-    profile_id: toNullableText(input.profile_id),
-    date: toNullableText(input.date),
-    daily_weight: toNullableFloat(input.daily_weight),
-    daily_length: toNullableFloat(input.daily_length),
-    temperature: toNullableFloat(input.temperature),
-    remark: toNullableText(input.remark),
-    name: toNullableText(input.name),
-  }));
+  const payloads = inputs.map((input) => buildGrowthPayload(input, false));
 
   if (!supabase) {
     return { records: [], error: MISSING_SUPABASE_ERROR };
   }
 
   const firstAttempt = await supabase.from(GROWTH_TABLE).insert(payloads).select('*');
-  if (!firstAttempt.error && Array.isArray(firstAttempt.data)) {
+  if (!firstAttempt.error && Array.isArray(firstAttempt.data) && firstAttempt.data.length > 0) {
     return {
       records: (firstAttempt.data as Record<string, unknown>[]).map(normalizeGrowthRow),
     };
   }
 
-  // Fallback if the user's int8 primary key does not have an identity/sequence default
+  if (!firstAttempt.error && (!Array.isArray(firstAttempt.data) || firstAttempt.data.length === 0)) {
+    return {
+      records: [],
+      error: 'Insert returned 0 rows from "growth". Check INSERT and SELECT RLS policies on "growth".',
+    };
+  }
+
+  // Fallback if int8 primary key has no identity default or profile_id is NOT NULL
   if (firstAttempt.error?.code === '23502') {
-    const baseId = Date.now();
-    const withIds = payloads.map((row, idx) => ({ id: baseId + idx, ...row }));
-    const retryAttempt = await supabase.from(GROWTH_TABLE).insert(withIds).select('*');
-    if (!retryAttempt.error && Array.isArray(retryAttempt.data)) {
+    const needsNonNullProfile = isNotNullColumnError(firstAttempt.error, 'profile_id');
+    const needsExplicitId =
+      isNotNullColumnError(firstAttempt.error, 'id') || !needsNonNullProfile;
+    const retryPayloads = inputs.map((input) => {
+      const base = buildGrowthPayload(input, needsNonNullProfile || !toNullableText(input.profile_id));
+      return needsExplicitId ? { id: nextFallbackId(), ...base } : base;
+    });
+    const retryAttempt = await supabase.from(GROWTH_TABLE).insert(retryPayloads).select('*');
+    if (!retryAttempt.error && Array.isArray(retryAttempt.data) && retryAttempt.data.length > 0) {
       return {
         records: (retryAttempt.data as Record<string, unknown>[]).map(normalizeGrowthRow),
       };
     }
+    if (retryAttempt.error?.code === '42501') {
+      return { records: [], error: formatSupabaseError(retryAttempt.error, GROWTH_TABLE) };
+    }
+  }
+
+  // If RLS explicitly blocked the table, fail fast with a clear message
+  if (firstAttempt.error?.code === '42501') {
+    return { records: [], error: formatSupabaseError(firstAttempt.error, GROWTH_TABLE) };
+  }
+
+  // Fallback for multi-row batches: save row-by-row via the proven single-row path so valid rows persist
+  if (inputs.length > 1) {
+    const saved: GrowthRecord[] = [];
+    const rowErrors: string[] = [];
+    for (let i = 0; i < inputs.length; i += 1) {
+      const res = await insertGrowthRecord(inputs[i]);
+      if (res.record) {
+        saved.push(res.record);
+      } else if (res.error) {
+        rowErrors.push(`Row ${i + 1}: ${res.error}`);
+      }
+    }
+    if (saved.length > 0 && rowErrors.length === 0) {
+      return { records: saved };
+    }
     return {
-      records: [],
-      error: retryAttempt.error
-        ? formatSupabaseError(retryAttempt.error, GROWTH_TABLE)
-        : 'Saved to "growth", but no rows were returned. Check SELECT RLS policy on "growth".',
+      records: saved,
+      error:
+        rowErrors.length > 0
+          ? rowErrors.slice(0, 3).join(' | ')
+          : formatSupabaseError(firstAttempt.error, GROWTH_TABLE),
     };
   }
 
@@ -346,13 +439,12 @@ export async function fetchRoutineRecords(): Promise<RoutineRecord[] | null> {
   return ((data as Record<string, unknown>[]) ?? []).map(normalizeRoutineRow);
 }
 
-export async function insertRoutineRecord(
-  input: NewRoutineRecordInput
-): Promise<{ record: RoutineRecord | null; error?: string }> {
-  const payload = {
-    profile_id: toNullableText(input.profile_id),
-    date: toNullableText(input.date),
-    time: toNullableText(input.time),
+function buildRoutinePayload(input: NewRoutineRecordInput, nonNullProfileId = false) {
+  const cleanedProfileId = toNullableText(input.profile_id);
+  return {
+    profile_id: nonNullProfileId ? (cleanedProfileId ?? '') : cleanedProfileId,
+    date: toNullableDate(input.date),
+    time: toNullableTime(input.time),
     'EBM (mL)': toNullableInt(input['EBM (mL)']),
     'Formula (mL)': toNullableInt(input['Formula (mL)']),
     Diaper: toNullableText(input.Diaper),
@@ -360,6 +452,12 @@ export async function insertRoutineRecord(
     remark: toNullableText(input.remark),
     'feed duration (min)': toNullableInt(input['feed duration (min)']),
   };
+}
+
+export async function insertRoutineRecord(
+  input: NewRoutineRecordInput
+): Promise<{ record: RoutineRecord | null; error?: string }> {
+  const payload = buildRoutinePayload(input, false);
 
   if (!supabase) {
     return { record: null, error: MISSING_SUPABASE_ERROR };
@@ -378,11 +476,19 @@ export async function insertRoutineRecord(
     return { record: normalizeRoutineRow(firstRow) };
   }
 
-  // Fallback if the user's int8 primary key does not have an identity/sequence default
+  // Fallback for NOT NULL constraints (e.g. int8 primary key without identity default, or non-null profile_id)
   if (firstAttempt.error?.code === '23502') {
+    const needsNonNullProfile = isNotNullColumnError(firstAttempt.error, 'profile_id');
+    const needsExplicitId =
+      isNotNullColumnError(firstAttempt.error, 'id') || !needsNonNullProfile;
+    const retryPayload = buildRoutinePayload(input, needsNonNullProfile || payload.profile_id === null);
+    const retryRowInput = needsExplicitId
+      ? { id: nextFallbackId(), ...retryPayload }
+      : retryPayload;
+
     const retryAttempt = await supabase
       .from(ROUTINE_TABLE)
-      .insert([{ id: Date.now(), ...payload }])
+      .insert([retryRowInput])
       .select('*');
 
     const retryRow = Array.isArray(retryAttempt.data)
@@ -415,44 +521,71 @@ export async function insertRoutineRecordsBulk(
 ): Promise<{ records: RoutineRecord[]; error?: string }> {
   if (inputs.length === 0) return { records: [] };
 
-  const payloads = inputs.map((input) => ({
-    profile_id: toNullableText(input.profile_id),
-    date: toNullableText(input.date),
-    time: toNullableText(input.time),
-    'EBM (mL)': toNullableInt(input['EBM (mL)']),
-    'Formula (mL)': toNullableInt(input['Formula (mL)']),
-    Diaper: toNullableText(input.Diaper),
-    name: toNullableText(input.name),
-    remark: toNullableText(input.remark),
-    'feed duration (min)': toNullableInt(input['feed duration (min)']),
-  }));
+  const payloads = inputs.map((input) => buildRoutinePayload(input, false));
 
   if (!supabase) {
     return { records: [], error: MISSING_SUPABASE_ERROR };
   }
 
   const firstAttempt = await supabase.from(ROUTINE_TABLE).insert(payloads).select('*');
-  if (!firstAttempt.error && Array.isArray(firstAttempt.data)) {
+  if (!firstAttempt.error && Array.isArray(firstAttempt.data) && firstAttempt.data.length > 0) {
     return {
       records: (firstAttempt.data as Record<string, unknown>[]).map(normalizeRoutineRow),
     };
   }
 
-  // Fallback if the user's int8 primary key does not have an identity/sequence default
+  if (!firstAttempt.error && (!Array.isArray(firstAttempt.data) || firstAttempt.data.length === 0)) {
+    return {
+      records: [],
+      error: 'Insert returned 0 rows from "routine". Check INSERT and SELECT RLS policies on "routine".',
+    };
+  }
+
+  // Fallback if int8 primary key has no identity default or profile_id is NOT NULL
   if (firstAttempt.error?.code === '23502') {
-    const baseId = Date.now();
-    const withIds = payloads.map((row, idx) => ({ id: baseId + idx, ...row }));
-    const retryAttempt = await supabase.from(ROUTINE_TABLE).insert(withIds).select('*');
-    if (!retryAttempt.error && Array.isArray(retryAttempt.data)) {
+    const needsNonNullProfile = isNotNullColumnError(firstAttempt.error, 'profile_id');
+    const needsExplicitId =
+      isNotNullColumnError(firstAttempt.error, 'id') || !needsNonNullProfile;
+    const retryPayloads = inputs.map((input) => {
+      const base = buildRoutinePayload(input, needsNonNullProfile || !toNullableText(input.profile_id));
+      return needsExplicitId ? { id: nextFallbackId(), ...base } : base;
+    });
+    const retryAttempt = await supabase.from(ROUTINE_TABLE).insert(retryPayloads).select('*');
+    if (!retryAttempt.error && Array.isArray(retryAttempt.data) && retryAttempt.data.length > 0) {
       return {
         records: (retryAttempt.data as Record<string, unknown>[]).map(normalizeRoutineRow),
       };
     }
+    if (retryAttempt.error?.code === '42501') {
+      return { records: [], error: formatSupabaseError(retryAttempt.error, ROUTINE_TABLE) };
+    }
+  }
+
+  if (firstAttempt.error?.code === '42501') {
+    return { records: [], error: formatSupabaseError(firstAttempt.error, ROUTINE_TABLE) };
+  }
+
+  // Fallback for multi-row batches: save row-by-row via the proven single-row path so valid rows persist
+  if (inputs.length > 1) {
+    const saved: RoutineRecord[] = [];
+    const rowErrors: string[] = [];
+    for (let i = 0; i < inputs.length; i += 1) {
+      const res = await insertRoutineRecord(inputs[i]);
+      if (res.record) {
+        saved.push(res.record);
+      } else if (res.error) {
+        rowErrors.push(`Row ${i + 1}: ${res.error}`);
+      }
+    }
+    if (saved.length > 0 && rowErrors.length === 0) {
+      return { records: saved };
+    }
     return {
-      records: [],
-      error: retryAttempt.error
-        ? formatSupabaseError(retryAttempt.error, ROUTINE_TABLE)
-        : 'Saved to "routine", but no rows were returned. Check SELECT RLS policy on "routine".',
+      records: saved,
+      error:
+        rowErrors.length > 0
+          ? rowErrors.slice(0, 3).join(' | ')
+          : formatSupabaseError(firstAttempt.error, ROUTINE_TABLE),
     };
   }
 

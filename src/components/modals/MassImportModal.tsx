@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   classifyTemperature,
@@ -538,21 +538,29 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     createEmptyGrowthRow(getTodayStr(), '', 0),
   ]);
 
+  const modalUid = useId();
+  const cameraInputId = `${modalUid}-camera`;
+  const photoInputId = `${modalUid}-photo`;
+  const fileInputId = `${modalUid}-file`;
+
   // Camera entry state
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraPhoto, setCameraPhoto] = useState<BinaryAttachment | null>(null);
+  const [cameraInputKey, setCameraInputKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   // Photo entry state
   const [selectedPhoto, setSelectedPhoto] = useState<BinaryAttachment | null>(null);
   const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
+  const [photoInputKey, setPhotoInputKey] = useState(0);
 
   // File upload entry state
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [uploadedTextContent, setUploadedTextContent] = useState<string>('');
   const [uploadedBinaryFile, setUploadedBinaryFile] = useState<BinaryAttachment | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
 
   // Gemini & Database status
   const [isReadingFile, setIsReadingFile] = useState(false);
@@ -581,8 +589,10 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       setDefaultDate(getTodayStr());
       setErrorMessage(null);
       setSuccessMessage(null);
+      setIsReadingFile(false);
     } else {
       stopCameraStream();
+      setIsReadingFile(false);
     }
   }, [isOpen, initialTable]);
 
@@ -733,101 +743,132 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
 
   const readImageFileAsAttachment = (
     file: File,
-    onLoaded: (att: BinaryAttachment) => void
+    onLoaded: (att: BinaryAttachment) => void,
+    onDone?: () => void
   ) => {
     if (file.size > 20 * 1024 * 1024) {
       setErrorMessage('Image is too large. Please choose an image smaller than 20 MB.');
+      onDone?.();
       return;
     }
+
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(watchdog);
+      setIsReadingFile(false);
+      onDone?.();
+    };
+    const watchdog = window.setTimeout(() => {
+      finish();
+    }, 12000);
+
     setIsReadingFile(true);
     setErrorMessage(null);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
-      const commaIdx = dataUrl.indexOf(',');
-      const rawBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
-      if (!rawBase64) {
-        setIsReadingFile(false);
-        setErrorMessage('Failed to read the selected image.');
-        return;
-      }
-      const detectedMime = detectImageMime(file);
-      const isStandardWebImage = IMAGE_MIMES.has(detectedMime);
 
-      // Resize/compress large photos (or convert non-standard formats) client-side so /api/gemini stays fast & reliable
-      if (detectedMime !== 'image/gif') {
-        const img = new Image();
-        img.onload = () => {
-          const maxDim = 1600;
-          const needsResize =
-            img.width > maxDim ||
-            img.height > maxDim ||
-            file.size > 1.5 * 1024 * 1024 ||
-            !isStandardWebImage;
-          if (!needsResize) {
-            setIsReadingFile(false);
+    try {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+        const commaIdx = dataUrl.indexOf(',');
+        const rawBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
+        if (!rawBase64) {
+          setErrorMessage('Failed to read the selected image.');
+          finish();
+          return;
+        }
+        const detectedMime = detectImageMime(file);
+        const isStandardWebImage = IMAGE_MIMES.has(detectedMime);
+
+        // Resize/compress large photos (or convert non-standard formats) client-side so /api/gemini stays fast & reliable
+        if (detectedMime !== 'image/gif') {
+          const img = new Image();
+          img.onload = () => {
+            try {
+              const maxDim = 1600;
+              const needsResize =
+                img.width > maxDim ||
+                img.height > maxDim ||
+                file.size > 1.5 * 1024 * 1024 ||
+                !isStandardWebImage;
+              if (!needsResize) {
+                onLoaded({
+                  mimeType: detectedMime,
+                  data: rawBase64,
+                  fileName: file.name || 'photo.jpg',
+                  previewUrl: dataUrl,
+                });
+                finish();
+                return;
+              }
+              const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+              const width = Math.max(1, Math.round(img.width * scale));
+              const height = Math.max(1, Math.round(img.height * scale));
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                onLoaded({
+                  mimeType: isStandardWebImage ? detectedMime : 'image/jpeg',
+                  data: rawBase64,
+                  fileName: file.name || 'photo.jpg',
+                  previewUrl: isStandardWebImage ? dataUrl : undefined,
+                });
+                finish();
+                return;
+              }
+              ctx.drawImage(img, 0, 0, width, height);
+              const compressedUrl = canvas.toDataURL('image/jpeg', 0.85);
+              const compressedBase64 = compressedUrl.slice(compressedUrl.indexOf(',') + 1);
+              onLoaded({
+                mimeType: 'image/jpeg',
+                data: compressedBase64,
+                fileName: file.name || 'photo.jpg',
+                previewUrl: compressedUrl,
+              });
+              finish();
+            } catch {
+              onLoaded({
+                mimeType: detectedMime,
+                data: rawBase64,
+                fileName: file.name || 'photo.jpg',
+                previewUrl: isStandardWebImage ? dataUrl : undefined,
+              });
+              finish();
+            }
+          };
+          img.onerror = () => {
             onLoaded({
               mimeType: detectedMime,
               data: rawBase64,
               fileName: file.name || 'photo.jpg',
-              previewUrl: dataUrl,
-            });
-            return;
-          }
-          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-          const width = Math.max(1, Math.round(img.width * scale));
-          const height = Math.max(1, Math.round(img.height * scale));
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            setIsReadingFile(false);
-            onLoaded({
-              mimeType: isStandardWebImage ? detectedMime : 'image/jpeg',
-              data: rawBase64,
-              fileName: file.name || 'photo.jpg',
               previewUrl: isStandardWebImage ? dataUrl : undefined,
             });
-            return;
-          }
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressedUrl = canvas.toDataURL('image/jpeg', 0.85);
-          const compressedBase64 = compressedUrl.slice(compressedUrl.indexOf(',') + 1);
-          setIsReadingFile(false);
-          onLoaded({
-            mimeType: 'image/jpeg',
-            data: compressedBase64,
-            fileName: file.name || 'photo.jpg',
-            previewUrl: compressedUrl,
-          });
-        };
-        img.onerror = () => {
-          setIsReadingFile(false);
-          onLoaded({
-            mimeType: detectedMime,
-            data: rawBase64,
-            fileName: file.name || 'photo.jpg',
-            previewUrl: isStandardWebImage ? dataUrl : undefined,
-          });
-        };
-        img.src = dataUrl;
-        return;
-      }
+            finish();
+          };
+          img.src = dataUrl;
+          return;
+        }
 
-      setIsReadingFile(false);
-      onLoaded({
-        mimeType: detectedMime,
-        data: rawBase64,
-        fileName: file.name || 'photo.gif',
-        previewUrl: dataUrl,
-      });
-    };
-    reader.onerror = () => {
-      setIsReadingFile(false);
+        onLoaded({
+          mimeType: detectedMime,
+          data: rawBase64,
+          fileName: file.name || 'photo.gif',
+          previewUrl: dataUrl,
+        });
+        finish();
+      };
+      reader.onerror = () => {
+        setErrorMessage('Unable to read the selected image file.');
+        finish();
+      };
+      reader.readAsDataURL(file);
+    } catch {
       setErrorMessage('Unable to read the selected image file.');
-    };
-    reader.readAsDataURL(file);
+      finish();
+    }
   };
 
   const handleCameraFallbackChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -835,14 +876,22 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     if (!file) return;
     setErrorMessage(null);
     setCameraError(null);
-    readImageFileAsAttachment(file, (att) => setCameraPhoto(att));
+    readImageFileAsAttachment(
+      file,
+      (att) => setCameraPhoto(att),
+      () => setCameraInputKey((k) => k + 1)
+    );
   };
 
   const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setErrorMessage(null);
-    readImageFileAsAttachment(file, (att) => setSelectedPhoto(att));
+    readImageFileAsAttachment(
+      file,
+      (att) => setSelectedPhoto(att),
+      () => setPhotoInputKey((k) => k + 1)
+    );
   };
 
   const handlePhotoDrop = (e: React.DragEvent<HTMLElement>) => {
@@ -874,6 +923,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
   const handleUploadFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const resetFileInput = () => setFileInputKey((k) => k + 1);
 
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -884,16 +934,21 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(lowerName);
 
     if (isImageFile) {
-      readImageFileAsAttachment(file, (att) => {
-        setUploadedFileName(att.fileName);
-        setUploadedBinaryFile(att);
-        setUploadedTextContent('');
-      });
+      readImageFileAsAttachment(
+        file,
+        (att) => {
+          setUploadedFileName(att.fileName);
+          setUploadedBinaryFile(att);
+          setUploadedTextContent('');
+        },
+        resetFileInput
+      );
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
       setErrorMessage('File is too large. Please upload a file smaller than 10 MB.');
+      resetFileInput();
       return;
     }
 
@@ -916,10 +971,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         setUploadedFileName(file.name);
         setUploadedTextContent(content);
         setUploadedBinaryFile(null);
+        resetFileInput();
       };
       reader.onerror = () => {
         setIsReadingFile(false);
         setErrorMessage('Unable to read the selected file.');
+        resetFileInput();
       };
       reader.readAsText(file);
       return;
@@ -936,6 +993,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
         if (!base64) {
           setErrorMessage('Failed to encode the uploaded file.');
+          resetFileInput();
           return;
         }
         setUploadedFileName(file.name);
@@ -945,10 +1003,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
           fileName: file.name,
           previewUrl: file.type.startsWith('image/') ? dataUrl : undefined,
         });
+        resetFileInput();
       };
       reader.onerror = () => {
         setIsReadingFile(false);
         setErrorMessage('Unable to read the selected file.');
+        resetFileInput();
       };
       reader.readAsDataURL(file);
       return;
@@ -957,6 +1017,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     setErrorMessage(
       'Unsupported file type. Upload a CSV, TSV, TXT, JSON, PDF, or image file.'
     );
+    resetFileInput();
   };
 
   // Process Camera / Photo / File Upload through Gemini API and fit recognized data into Tabular Data Entry
@@ -1297,6 +1358,20 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     }
   };
 
+  const parseSafeInt = (raw: string): number | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? Math.round(n) : null;
+  };
+
+  const parseSafeFloat = (raw: string): number | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : null;
+  };
+
   // Direct write to Supabase ONLY from Tabular Data Entry
   const handleSaveTabularToDatabase = async () => {
     setErrorMessage(null);
@@ -1326,10 +1401,9 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
               name: r.name.trim() || null,
               date: r.date.trim() || null,
               time: r.time.trim() || null,
-              'feed duration (min)':
-                r.feedDurationMin.trim() !== '' ? parseInt(r.feedDurationMin, 10) : null,
-              'EBM (mL)': r.ebmMl.trim() !== '' ? parseInt(r.ebmMl, 10) : null,
-              'Formula (mL)': r.formulaMl.trim() !== '' ? parseInt(r.formulaMl, 10) : null,
+              'feed duration (min)': parseSafeInt(r.feedDurationMin),
+              'EBM (mL)': parseSafeInt(r.ebmMl),
+              'Formula (mL)': parseSafeInt(r.formulaMl),
               Diaper: r.diaper.trim() || null,
               remark: r.remark.trim() || null,
             }))
@@ -1350,9 +1424,9 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
               profile_id: activeProfile?.id ?? null,
               name: r.name.trim() || null,
               date: r.date.trim() || null,
-              daily_weight: r.dailyWeight.trim() !== '' ? parseFloat(r.dailyWeight) : null,
-              daily_length: r.dailyLength.trim() !== '' ? parseFloat(r.dailyLength) : null,
-              temperature: r.temperature.trim() !== '' ? parseFloat(r.temperature) : null,
+              daily_weight: parseSafeFloat(r.dailyWeight),
+              daily_length: parseSafeFloat(r.dailyLength),
+              temperature: parseSafeFloat(r.temperature),
               remark: r.remark.trim() || null,
             }))
             .filter(
@@ -1364,26 +1438,37 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             )
         : [];
 
+      if (routineToInsert.length === 0 && growthToInsert.length === 0) {
+        setErrorMessage('No valid selected rows contain saveable data. Check row values and try again.');
+        return;
+      }
+
       let savedRoutineCount = 0;
       let savedGrowthCount = 0;
       const errors: string[] = [];
 
       if (routineToInsert.length > 0) {
         const res = await addRoutineRecordsBulk(routineToInsert);
+        savedRoutineCount = res.records.length;
         if (res.error) {
           errors.push(`Routine: ${res.error}`);
-        } else {
-          savedRoutineCount = res.records.length;
+        } else if (savedRoutineCount === 0) {
+          errors.push('Routine: Supabase returned 0 saved rows. Please verify table permissions.');
+        }
+        if (!res.error && savedRoutineCount > 0) {
           setRoutineDrafts([createEmptyRoutineRow(defaultDate, defaultLogger.trim(), 0)]);
         }
       }
 
       if (growthToInsert.length > 0) {
         const res = await addGrowthRecordsBulk(growthToInsert);
+        savedGrowthCount = res.records.length;
         if (res.error) {
           errors.push(`Growth: ${res.error}`);
-        } else {
-          savedGrowthCount = res.records.length;
+        } else if (savedGrowthCount === 0) {
+          errors.push('Growth: Supabase returned 0 saved rows. Please verify table permissions.');
+        }
+        if (!res.error && savedGrowthCount > 0) {
           setGrowthDrafts([createEmptyGrowthRow(defaultDate, defaultLogger.trim(), 0)]);
         }
       }
@@ -1404,11 +1489,17 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             `${savedGrowthCount} row${savedGrowthCount === 1 ? '' : 's'} into "growth"`
           );
         }
-        setSuccessMessage(`Saved ${parts.join(' and ')}.`);
+        setSuccessMessage(`Saved ${parts.join(' and ')} in Supabase.`);
         if (errors.length === 0) {
           setAiSummary(null);
         }
       }
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? `Failed to save rows to Supabase: ${err.message}`
+          : 'Failed to save rows to Supabase.'
+      );
     } finally {
       setIsImporting(false);
     }
@@ -1428,6 +1519,38 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         className="w-full max-w-6xl bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Persistent off-screen file inputs paired natively with htmlFor labels (never display:none, never nested inside labels) */}
+        <input
+          key={`camera-file-${cameraInputKey}`}
+          id={cameraInputId}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleCameraFallbackChange}
+          tabIndex={-1}
+          className="fixed -top-24 -left-24 w-1 h-1 opacity-0"
+          aria-hidden="true"
+        />
+        <input
+          key={`photo-file-${photoInputKey}`}
+          id={photoInputId}
+          type="file"
+          accept="image/*"
+          onChange={handlePhotoFileChange}
+          tabIndex={-1}
+          className="fixed -top-24 -left-24 w-1 h-1 opacity-0"
+          aria-hidden="true"
+        />
+        <input
+          key={`upload-file-${fileInputKey}`}
+          id={fileInputId}
+          type="file"
+          accept=".csv,.tsv,.txt,.md,.json,.pdf,image/*,text/csv,text/plain,application/json,application/pdf"
+          onChange={handleUploadFileChange}
+          tabIndex={-1}
+          className="fixed -top-24 -left-24 w-1 h-1 opacity-0"
+          aria-hidden="true"
+        />
         {/* Header */}
         <div className="px-5 py-4 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -1637,20 +1760,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                       <span>Start Live Camera</span>
                     </button>
                   )}
-                  <label className="relative overflow-hidden px-3 py-1.5 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl flex items-center gap-1.5 cursor-pointer select-none">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onClick={(e) => {
-                        e.currentTarget.value = '';
-                      }}
-                      onChange={handleCameraFallbackChange}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                      aria-label="Capture photo with device camera"
-                    />
-                    <Camera className="w-3.5 h-3.5 pointer-events-none" />
-                    <span className="pointer-events-none">Capture / Device Camera</span>
+                  <label
+                    htmlFor={cameraInputId}
+                    className="px-3 py-1.5 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl flex items-center gap-1.5 cursor-pointer select-none"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Capture / Device Camera</span>
                   </label>
                 </div>
               </div>
@@ -1750,19 +1865,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                     Choose, drop, or paste a photo or screenshot of feeding logs, baby tracker apps, or growth charts. Gemini will recognize the fields and populate Tabular Entry.
                   </p>
                 </div>
-                <label className="relative overflow-hidden px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl inline-flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onClick={(e) => {
-                      e.currentTarget.value = '';
-                    }}
-                    onChange={handlePhotoFileChange}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    aria-label="Select photo or screenshot"
-                  />
-                  <ImageIcon className="w-3.5 h-3.5 pointer-events-none" />
-                  <span className="pointer-events-none">
+                <label
+                  htmlFor={photoInputId}
+                  className="px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl inline-flex items-center gap-1.5 cursor-pointer select-none"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  <span>
                     {isReadingFile
                       ? 'Loading Photo...'
                       : selectedPhoto
@@ -1817,42 +1925,33 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 </div>
               ) : (
                 <label
+                  htmlFor={photoInputId}
                   onDragOver={(e) => {
                     e.preventDefault();
                     setIsDraggingPhoto(true);
                   }}
                   onDragLeave={() => setIsDraggingPhoto(false)}
                   onDrop={handlePhotoDrop}
-                  className={`relative overflow-hidden w-full py-10 rounded-2xl border-2 border-dashed transition-colors flex flex-col items-center justify-center gap-2 text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none ${
+                  className={`w-full py-10 rounded-2xl border-2 border-dashed transition-colors flex flex-col items-center justify-center gap-2 text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none ${
                     isDraggingPhoto
                       ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30'
                       : 'border-stone-200 dark:border-stone-700 hover:border-emerald-400 dark:hover:border-emerald-600'
                   }`}
                 >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onClick={(e) => {
-                      e.currentTarget.value = '';
-                    }}
-                    onChange={handlePhotoFileChange}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    aria-label="Choose a photo to upload"
-                  />
                   {isReadingFile ? (
                     <>
-                      <Loader2 className="w-7 h-7 text-emerald-500 animate-spin pointer-events-none" />
-                      <span className="font-semibold text-stone-700 dark:text-stone-300 pointer-events-none">
+                      <Loader2 className="w-7 h-7 text-emerald-500 animate-spin" />
+                      <span className="font-semibold text-stone-700 dark:text-stone-300">
                         Preparing photo...
                       </span>
                     </>
                   ) : (
                     <>
-                      <ImageIcon className="w-7 h-7 text-stone-400 pointer-events-none" />
-                      <span className="font-semibold text-stone-700 dark:text-stone-300 pointer-events-none">
+                      <ImageIcon className="w-7 h-7 text-stone-400" />
+                      <span className="font-semibold text-stone-700 dark:text-stone-300">
                         Tap or drop a photo / screenshot (PNG, JPG, HEIC, WEBP)
                       </span>
-                      <span className="text-[11px] pointer-events-none">
+                      <span className="text-[11px]">
                         Processed via Gemini API into Tabular Entry
                       </span>
                     </>
@@ -1874,21 +1973,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                     Upload a CSV, TSV, TXT, JSON, PDF, or photo file (or paste raw notes/sheets below). Gemini will parse and fit the data into Tabular Entry.
                   </p>
                 </div>
-                <label className="relative overflow-hidden px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl inline-flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="file"
-                    accept=".csv,.tsv,.txt,.md,.json,.pdf,image/*,text/csv,text/plain,application/json,application/pdf"
-                    onClick={(e) => {
-                      e.currentTarget.value = '';
-                    }}
-                    onChange={handleUploadFileChange}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    aria-label="Choose a file to upload"
-                  />
-                  <Upload className="w-3.5 h-3.5 pointer-events-none" />
-                  <span className="pointer-events-none">
-                    {isReadingFile ? 'Loading...' : 'Choose File'}
-                  </span>
+                <label
+                  htmlFor={fileInputId}
+                  className="px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl inline-flex items-center gap-1.5 cursor-pointer select-none"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{isReadingFile ? 'Loading...' : 'Choose File'}</span>
                 </label>
               </div>
 
@@ -2631,6 +2721,24 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* Always-visible Save/Error feedback above sticky footer */}
+        {(errorMessage || successMessage) && (
+          <div className="px-5 py-2.5 border-t border-stone-100 dark:border-stone-800 bg-white dark:bg-stone-900">
+            {errorMessage && (
+              <div className="px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+            {successMessage && (
+              <div className="px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900/60 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2 font-semibold">
+                <Check className="w-4 h-4 shrink-0" />
+                <span>{successMessage}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="px-5 py-3.5 border-t border-stone-100 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-900/80 flex flex-wrap items-center justify-between gap-2">
