@@ -100,6 +100,7 @@ interface AppContextType {
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
   systemOrTimeTheme: ThemeMode;
+  isThemeOverridden: boolean;
 
   unitSystem: UnitSystem;
   setUnitSystem: (system: UnitSystem) => void;
@@ -258,8 +259,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeProfileId, setActiveProfileIdState] = useState<string>('');
 
   // Theme detection: daytime (6am-7pm) = light, night (7pm-6am) = dark
-  const systemOrTimeTheme = getSystemOrTimeTheme();
-  const [theme, setThemeState] = useState<ThemeMode>(() => getSystemOrTimeTheme());
+  // Auto-detects based on local system time by default; user can override via toggle.
+  const [systemOrTimeTheme, setSystemOrTimeTheme] = useState<ThemeMode>(() =>
+    getSystemOrTimeTheme()
+  );
+  const [themeOverride, setThemeOverride] = useState<ThemeMode | null>(null);
+  const theme: ThemeMode = themeOverride ?? systemOrTimeTheme;
+  const isThemeOverridden = themeOverride !== null;
 
   const [unitSystem, setUnitSystemState] = useState<UnitSystem>('metric');
   const [formulaSettings, setFormulaSettings] = useState<FormulaSettings>(DEFAULT_FORMULA_SETTINGS);
@@ -273,6 +279,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [noteRecords, setNoteRecords] = useState<NoteRecord[]>([]);
   const [isEntriesLoading, setIsEntriesLoading] = useState<boolean>(true);
   const [isCareTablesLoading, setIsCareTablesLoading] = useState<boolean>(false);
+
+  // Keep system-time theme up to date as local clock crosses 6:00 AM / 7:00 PM
+  useEffect(() => {
+    const syncTimeTheme = () => {
+      setSystemOrTimeTheme((prev) => {
+        const next = getSystemOrTimeTheme();
+        return prev === next ? prev : next;
+      });
+    };
+    const intervalId = window.setInterval(syncTimeTheme, 60_000);
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState !== 'hidden') {
+        syncTimeTheme();
+      }
+    };
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, []);
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -401,7 +430,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const loadedMilestones: CompletedMilestone[] = [];
         const loadedKicks: KickSession[] = [];
         const loadedLoveNotes: LoveNote[] = [];
-        let loadedTheme: ThemeMode | null = null;
         let loadedUnits: UnitSystem | null = null;
         let loadedFormulaSettings: FormulaSettings | null = null;
         let loadedActiveProfileId: string | null = null;
@@ -429,9 +457,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             case 'setting': {
               const setting = row.payload as SettingPayload | undefined;
               if (!setting) break;
-              if (setting.key === 'theme' && (setting.value === 'light' || setting.value === 'dark')) {
-                loadedTheme = setting.value;
-              } else if (setting.key === 'units' && (setting.value === 'metric' || setting.value === 'imperial')) {
+              if (setting.key === 'units' && (setting.value === 'metric' || setting.value === 'imperial')) {
                 loadedUnits = setting.value;
               } else if (setting.key === 'formula_settings' && setting.value && typeof setting.value === 'object') {
                 loadedFormulaSettings = setting.value as FormulaSettings;
@@ -451,8 +477,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCompletedMilestones(loadedMilestones);
         setKickSessions(loadedKicks.reverse());
         setLoveNotes(loadedLoveNotes.reverse());
-
-        if (loadedTheme) setThemeState(loadedTheme);
         if (loadedUnits) setUnitSystemState(loadedUnits);
         if (loadedFormulaSettings) setFormulaSettings(loadedFormulaSettings);
 
@@ -564,8 +588,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const setTheme = (newTheme: ThemeMode) => {
-    setThemeState(newTheme);
-    void upsertEntry(toSettingRow('theme', newTheme));
+    const currentAuto = getSystemOrTimeTheme();
+    setSystemOrTimeTheme(currentAuto);
+    setThemeOverride(newTheme === currentAuto ? null : newTheme);
   };
 
   const toggleTheme = () => {
@@ -1121,7 +1146,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const loadedMilestones: CompletedMilestone[] = [];
         const loadedKicks: KickSession[] = [];
         const loadedLoveNotes: LoveNote[] = [];
-        let loadedTheme: ThemeMode | null = null;
         let loadedUnits: UnitSystem | null = null;
         let loadedFormulaSettings: FormulaSettings | null = null;
         let loadedActiveProfileId: string | null = null;
@@ -1149,9 +1173,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             case 'setting': {
               const setting = row.payload as SettingPayload | undefined;
               if (!setting) break;
-              if (setting.key === 'theme' && (setting.value === 'light' || setting.value === 'dark')) {
-                loadedTheme = setting.value;
-              } else if (setting.key === 'units' && (setting.value === 'metric' || setting.value === 'imperial')) {
+              if (setting.key === 'units' && (setting.value === 'metric' || setting.value === 'imperial')) {
                 loadedUnits = setting.value;
               } else if (setting.key === 'formula_settings' && setting.value && typeof setting.value === 'object') {
                 loadedFormulaSettings = setting.value as FormulaSettings;
@@ -1170,7 +1192,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setKickSessions(loadedKicks.reverse());
         setLoveNotes(loadedLoveNotes.reverse());
 
-        if (loadedTheme) setThemeState(loadedTheme);
         if (loadedUnits) setUnitSystemState(loadedUnits);
         if (loadedFormulaSettings) setFormulaSettings(loadedFormulaSettings);
 
@@ -1511,6 +1532,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setTheme,
         toggleTheme,
         systemOrTimeTheme,
+        isThemeOverridden,
         unitSystem,
         setUnitSystem,
         formulaSettings,

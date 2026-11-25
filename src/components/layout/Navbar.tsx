@@ -56,6 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     theme,
     toggleTheme,
     systemOrTimeTheme,
+    isThemeOverridden,
     isEntriesLoading,
     isCareTablesLoading,
     refreshAllData,
@@ -301,7 +302,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Light / Dark Mode Icon Toggle */}
           <button
             onClick={toggleTheme}
-            title={`Current: ${theme === 'dark' ? 'Dark' : 'Light'} mode (Defaulted to ${systemOrTimeTheme}). Click to toggle.`}
+            title={
+              isThemeOverridden
+                ? `${theme === 'dark' ? 'Dark' : 'Light'} mode (Manual override · Auto by time is ${systemOrTimeTheme}). Click to toggle.`
+                : `${theme === 'dark' ? 'Dark' : 'Light'} mode (Auto by system time). Click to override.`
+            }
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
             className="w-8 h-8 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-700 flex items-center justify-center transition-colors shadow-2xs cursor-pointer"
           >
             {theme === 'dark' ? (

@@ -1029,6 +1029,25 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
   const focusDate = routineInsights.todayBucket.date;
   const wetPlusMixed =
     routineInsights.todayBucket.wetDiapers + routineInsights.todayBucket.mixedDiapers;
+  const totalMl = routineInsights.todayBucket.totalMl;
+  const ebmMl = routineInsights.todayBucket.ebmMl;
+  const formulaMl = routineInsights.todayBucket.formulaMl;
+  const targetMl = routineInsights.estimatedTargetMl;
+  const gapMl = targetMl !== null && targetMl > 0 ? targetMl - totalMl : null;
+  const progressScaleMax =
+    targetMl !== null && targetMl > 0 ? Math.max(targetMl, totalMl) : Math.max(1, totalMl);
+  const ebmBarPct =
+    targetMl !== null && targetMl > 0
+      ? Math.min(100, (ebmMl / progressScaleMax) * 100)
+      : routineInsights.ebmSharePct;
+  const formulaBarPct =
+    targetMl !== null && targetMl > 0
+      ? Math.min(Math.max(0, 100 - ebmBarPct), (formulaMl / progressScaleMax) * 100)
+      : routineInsights.formulaSharePct;
+  const targetMarkerPct =
+    targetMl !== null && targetMl > 0 && totalMl > targetMl
+      ? Math.round((targetMl / progressScaleMax) * 100)
+      : null;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
@@ -1047,20 +1066,28 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
             )}
           </div>
 
-          <div className="text-3xl font-black font-mono tabular-nums text-stone-900 dark:text-white mt-2">
-            {routineInsights.todayBucket.totalMl}{' '}
-            <span className="text-base font-bold font-sans text-stone-400">mL</span>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mt-2">
+            <div className="text-3xl font-black font-mono tabular-nums text-stone-900 dark:text-white">
+              {totalMl}{' '}
+              <span className="text-base font-bold font-sans text-stone-400">mL</span>
+            </div>
+            {targetMl !== null && targetMl > 0 && (
+              <div className="text-xs font-mono tabular-nums text-stone-500 dark:text-stone-400">
+                Rec.{' '}
+                <strong className="text-stone-800 dark:text-stone-200">{targetMl} mL</strong>
+              </div>
+            )}
           </div>
 
           <div className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 tabular-nums">
             EBM:{' '}
             <strong className="font-mono text-emerald-700 dark:text-emerald-400">
-              {routineInsights.todayBucket.ebmMl} mL
+              {ebmMl} mL
             </strong>
             {' · '}
             Formula:{' '}
             <strong className="font-mono text-amber-700 dark:text-amber-400">
-              {routineInsights.todayBucket.formulaMl} mL
+              {formulaMl} mL
             </strong>
           </div>
 
@@ -1079,32 +1106,92 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
             )}
         </div>
 
-        <div className="mt-4 space-y-1.5">
-          <div className="w-full h-2.5 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden flex">
-            {routineInsights.todayBucket.totalMl > 0 && (
-              <>
-                <div
-                  className="h-full bg-emerald-500"
-                  style={{ width: `${routineInsights.ebmSharePct}%` }}
-                  title={`EBM ${routineInsights.ebmSharePct}%`}
-                />
-                <div
-                  className="h-full bg-amber-500"
-                  style={{ width: `${routineInsights.formulaSharePct}%` }}
-                  title={`Formula ${routineInsights.formulaSharePct}%`}
-                />
-              </>
+        {/* Intake vs Recommended Gap Progress Bar */}
+        <div className="mt-4 pt-3 border-t border-stone-100 dark:border-stone-800 space-y-2">
+          <div className="flex items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
+            <span className="font-sans font-semibold text-stone-600 dark:text-stone-300">
+              {targetMl !== null && targetMl > 0 ? 'Intake vs Recommended' : 'Milk Composition'}
+            </span>
+            {gapMl !== null ? (
+              <span
+                className={`font-bold ${
+                  gapMl > 0
+                    ? 'text-amber-700 dark:text-amber-400'
+                    : 'text-emerald-700 dark:text-emerald-400'
+                }`}
+              >
+                {gapMl > 0
+                  ? `${gapMl} mL remaining`
+                  : gapMl === 0
+                    ? 'Target reached'
+                    : `+${Math.abs(gapMl)} mL above target`}
+              </span>
+            ) : (
+              <span className="text-[10px] font-sans text-stone-400 dark:text-stone-500">
+                Log weight for target gap
+              </span>
             )}
           </div>
-          <div className="flex justify-between text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500 font-medium">
-            <span>EBM {routineInsights.ebmSharePct}%</span>
-            <span>
-              {routineInsights.estimatedTargetMl &&
-              routineInsights.targetMinMl &&
-              routineInsights.targetMaxMl
-                ? `Target ${routineInsights.estimatedTargetMl} mL (${routineInsights.targetMinMl}–${routineInsights.targetMaxMl})`
-                : `Formula ${routineInsights.formulaSharePct}%`}
-            </span>
+
+          <div
+            className="relative w-full h-3 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden flex"
+            role="progressbar"
+            aria-label="Current milk intake against recommended daily target"
+            aria-valuenow={totalMl}
+            aria-valuemin={0}
+            aria-valuemax={targetMl ?? Math.max(1, totalMl)}
+          >
+            {totalMl > 0 && (
+              <>
+                {ebmBarPct > 0 && (
+                  <div
+                    className="h-full bg-emerald-500 dark:bg-emerald-400 transition-all"
+                    style={{ width: `${ebmBarPct}%` }}
+                    title={`EBM: ${ebmMl} mL (${routineInsights.ebmSharePct}%)`}
+                  />
+                )}
+                {formulaBarPct > 0 && (
+                  <div
+                    className="h-full bg-amber-400 dark:bg-amber-500 transition-all"
+                    style={{ width: `${formulaBarPct}%` }}
+                    title={`Formula: ${formulaMl} mL (${routineInsights.formulaSharePct}%)`}
+                  />
+                )}
+              </>
+            )}
+
+            {/* Recommended target reference line when current intake exceeds target */}
+            {targetMarkerPct !== null && (
+              <div
+                className="pointer-events-none absolute inset-y-0 w-0.5 bg-stone-900/75 dark:bg-white/85"
+                style={{ left: `${targetMarkerPct}%` }}
+                title={`Recommended target: ${targetMl} mL`}
+              />
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono tabular-nums text-stone-500 dark:text-stone-400">
+            <div className="flex items-center gap-2.5">
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2 h-2 rounded-xs bg-emerald-500 dark:bg-emerald-400" />
+                EBM {routineInsights.ebmSharePct}%
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2 h-2 rounded-xs bg-amber-400 dark:bg-amber-500" />
+                Formula {routineInsights.formulaSharePct}%
+              </span>
+              {gapMl !== null && gapMl > 0 && (
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-xs bg-stone-200 dark:bg-stone-700" />
+                  Gap {gapMl} mL
+                </span>
+              )}
+            </div>
+            {routineInsights.targetMinMl && routineInsights.targetMaxMl && (
+              <span>
+                Range {routineInsights.targetMinMl}–{routineInsights.targetMaxMl} mL
+              </span>
+            )}
           </div>
         </div>
       </div>

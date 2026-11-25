@@ -779,21 +779,19 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* COMBINED CARD 2 (Spans 2 columns on md/lg): Length & Cranial Growth */}
+              {/* COMBINED CARD 2 (Spans 2 columns on md/lg): Concise Side-by-Side Length & Cranial */}
               <div className="md:col-span-2 bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden flex flex-col justify-between transition-all hover:border-stone-300 dark:hover:border-stone-700">
-                <div className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm sm:text-base font-black text-stone-900 dark:text-white">
-                      Length &amp; Cranial Growth
-                    </h3>
-                    <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                      Skeletal stature &amp; head circumference WHO percentiles
-                    </p>
-                  </div>
+                <div className="px-5 pt-4 pb-2.5 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-black text-stone-900 dark:text-white">
+                    Length &amp; Cranial
+                  </h3>
+                  <span className="text-[11px] text-stone-400 dark:text-stone-500">
+                    WHO Percentiles
+                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-stone-100 dark:divide-stone-800 flex-1">
-                  {/* Left Half: Length & Skeletal Stature */}
+                <div className="grid grid-cols-2 divide-x divide-stone-100 dark:divide-stone-800 flex-1">
+                  {/* Left: Length */}
                   <div
                     onClick={() => openPopup('baby-length')}
                     role="button"
@@ -804,53 +802,50 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                         openPopup('baby-length');
                       }
                     }}
-                    className="p-5 sm:px-6 flex flex-col justify-between cursor-pointer hover:bg-teal-50/40 dark:hover:bg-teal-950/20 transition-colors group focus-visible:outline-2 focus-visible:outline-teal-500"
+                    className="p-4 sm:p-5 flex flex-col justify-between gap-3 cursor-pointer hover:bg-teal-50/40 dark:hover:bg-teal-950/20 transition-colors group focus-visible:outline-2 focus-visible:outline-teal-500 min-w-0"
                   >
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span className="flex items-center gap-2 font-bold text-stone-900 dark:text-white text-xs">
-                          <div className="w-8 h-8 rounded-xl bg-teal-100 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 flex items-center justify-center shrink-0">
-                            <Ruler className="w-4 h-4" />
-                          </div>
-                          <span>Length &amp; Stature</span>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="flex items-center gap-1.5 font-bold text-stone-800 dark:text-stone-100 text-xs truncate">
+                          <Ruler className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+                          <span>Length</span>
                         </span>
-                        <span className="text-[11px] font-mono tabular-nums font-bold text-teal-800 dark:text-teal-300">
-                          {lengthPct ? `${lengthPct.percentile}th Pct` : 'WHO'}
+                        <span className="text-[11px] font-mono tabular-nums font-bold text-teal-700 dark:text-teal-300 shrink-0">
+                          {lengthPct ? `${lengthPct.percentile}%` : '—'}
                         </span>
                       </div>
 
-                      <div className="my-3">
-                        <div className="text-2xl sm:text-3xl font-black font-mono tabular-nums text-stone-900 dark:text-white">
+                      <div>
+                        <div className="text-xl sm:text-2xl font-black font-mono tabular-nums text-stone-900 dark:text-white leading-tight">
                           {resolvedLengthCm !== undefined
                             ? UnitConverter.formatLength(resolvedLengthCm, unitSystem)
                             : '—'}
                         </div>
                         {resolvedLengthDate && (
-                          <div className="text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500 mt-0.5">
+                          <div className="text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500 mt-0.5 truncate">
                             {lengthIsFromBirth ? `Birth · ${resolvedLengthDate}` : resolvedLengthDate}
                           </div>
                         )}
-                        <div className="flex items-center gap-1.5 text-[11px] text-teal-800 dark:text-teal-300 font-semibold mt-1.5">
-                          <TrendingUp className="w-3.5 h-3.5 shrink-0" />
-                          <span>{lengthIsFromBirth ? 'From birth length' : '~1.2 cm / mo skeletal velocity'}</span>
-                        </div>
                       </div>
+                    </div>
 
-                      <div className="w-full h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
+                    <div className="space-y-1.5">
+                      <div className="w-full h-1.5 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-linear-to-r from-teal-500 to-sky-400 rounded-full"
                           style={{ width: `${Math.min(100, Math.max(5, lengthPct?.percentile ?? 50))}%` }}
                         />
                       </div>
-                    </div>
-
-                    <div className="mt-4 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[11px] font-bold text-teal-800 dark:text-teal-300 flex items-center justify-between">
-                      <span>View Stature Protocols</span>
-                      <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                      <div className="flex items-center justify-between text-[10px] font-semibold text-teal-700 dark:text-teal-400">
+                        <span className="truncate">
+                          {lengthIsFromBirth ? 'Birth baseline' : '~1.2 cm/mo'}
+                        </span>
+                        <ChevronRight className="w-3 h-3 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                      </div>
                     </div>
                   </div>
 
-                  {/* Right Half: Head Circumference & Neurodevelopment */}
+                  {/* Right: Cranial */}
                   <div
                     onClick={() => openPopup('fontanelle-detail')}
                     role="button"
@@ -861,49 +856,44 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                         openPopup('fontanelle-detail');
                       }
                     }}
-                    className="p-5 sm:px-6 flex flex-col justify-between cursor-pointer hover:bg-amber-50/40 dark:hover:bg-amber-950/20 transition-colors group focus-visible:outline-2 focus-visible:outline-amber-500"
+                    className="p-4 sm:p-5 flex flex-col justify-between gap-3 cursor-pointer hover:bg-amber-50/40 dark:hover:bg-amber-950/20 transition-colors group focus-visible:outline-2 focus-visible:outline-amber-500 min-w-0"
                   >
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span className="flex items-center gap-2 font-bold text-stone-900 dark:text-white text-xs">
-                          <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 flex items-center justify-center shrink-0">
-                            <Brain className="w-4 h-4" />
-                          </div>
-                          <span>Cranial &amp; Brain</span>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="flex items-center gap-1.5 font-bold text-stone-800 dark:text-stone-100 text-xs truncate">
+                          <Brain className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                          <span>Cranial</span>
                         </span>
-                        <span className="text-[11px] font-mono tabular-nums font-bold text-amber-800 dark:text-amber-300">
-                          {hcPct ? `${hcPct.percentile}th Pct` : 'WHO'}
+                        <span className="text-[11px] font-mono tabular-nums font-bold text-amber-700 dark:text-amber-300 shrink-0">
+                          {hcPct ? `${hcPct.percentile}%` : '—'}
                         </span>
                       </div>
 
-                      <div className="my-3">
-                        <div className="text-2xl sm:text-3xl font-black font-mono tabular-nums text-stone-900 dark:text-white">
+                      <div>
+                        <div className="text-xl sm:text-2xl font-black font-mono tabular-nums text-stone-900 dark:text-white leading-tight">
                           {resolvedHcCm !== undefined
                             ? UnitConverter.formatLength(resolvedHcCm, unitSystem)
                             : '—'}
                         </div>
                         {resolvedHcDate && (
-                          <div className="text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500 mt-0.5">
+                          <div className="text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500 mt-0.5 truncate">
                             {hcIsFromBirth ? `Birth · ${resolvedHcDate}` : resolvedHcDate}
                           </div>
                         )}
-                        <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 mt-1.5 flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                          <span>Fontanelle: Soft &amp; Flat</span>
-                        </div>
                       </div>
+                    </div>
 
-                      <div className="w-full h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
+                    <div className="space-y-1.5">
+                      <div className="w-full h-1.5 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-linear-to-r from-amber-500 to-orange-400 rounded-full"
                           style={{ width: `${Math.min(100, Math.max(5, hcPct?.percentile ?? 50))}%` }}
                         />
                       </div>
-                    </div>
-
-                    <div className="mt-4 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[11px] font-bold text-amber-800 dark:text-amber-300 flex items-center justify-between">
-                      <span>View Cranial Guides</span>
-                      <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                      <div className="flex items-center justify-between text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                        <span className="truncate">Fontanelle OK</span>
+                        <ChevronRight className="w-3 h-3 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                      </div>
                     </div>
                   </div>
                 </div>
