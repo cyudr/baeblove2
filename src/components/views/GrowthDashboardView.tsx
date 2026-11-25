@@ -1107,6 +1107,9 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
             <RoutineSummaryAndChartsGrid
               records={profileRoutineRecords}
               routineInsights={routineInsights}
+              profile={activeProfile}
+              growthRecords={growthRecords}
+              babyMeasurements={activeBabyMeasurements}
             />
           </section>
         )}

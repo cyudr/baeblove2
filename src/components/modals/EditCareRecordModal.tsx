@@ -274,11 +274,11 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
                   </label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="0.001"
                     min="0"
                     value={dailyWeight}
                     onChange={(e) => setDailyWeight(e.target.value)}
-                    placeholder="e.g. 6.45"
+                    placeholder="e.g. 6.455"
                     className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
                   />
                 </div>
@@ -359,8 +359,9 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
                   </label>
                   <input
                     type="number"
+                    inputMode="numeric"
                     min="0"
-                    step="5"
+                    step="1"
                     value={ebmMl}
                     onChange={(e) => setEbmMl(e.target.value)}
                     placeholder="e.g. 90"
@@ -373,8 +374,9 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
                   </label>
                   <input
                     type="number"
+                    inputMode="numeric"
                     min="0"
-                    step="5"
+                    step="1"
                     value={formulaMl}
                     onChange={(e) => setFormulaMl(e.target.value)}
                     placeholder="e.g. 60"

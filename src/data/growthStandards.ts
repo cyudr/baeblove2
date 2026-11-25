@@ -247,9 +247,14 @@ export const UnitConverter = {
     const oz = Math.round(totalOz % 16);
     return { lbs, oz };
   },
+  formatKgValue: (kg: number): string => {
+    const rounded = Math.round(kg * 1000) / 1000;
+    const hasThirdDecimal = Math.abs(rounded * 100 - Math.round(rounded * 100)) > 1e-6;
+    return hasThirdDecimal ? rounded.toFixed(3) : rounded.toFixed(2);
+  },
   formatWeight: (kg: number, system: 'metric' | 'imperial'): string => {
     if (system === 'metric') {
-      return `${kg.toFixed(2)} kg`;
+      return `${UnitConverter.formatKgValue(kg)} kg`;
     }
     const totalLbs = kg * 2.20462;
     const lbs = Math.floor(totalLbs);

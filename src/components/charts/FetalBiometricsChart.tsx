@@ -543,11 +543,10 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
 
       {/* Dynamic Scrubber / Latest measurement summary strip */}
       {scrubberState ? (
-        <div className="mt-3 py-2 px-3 bg-amber-50/90 dark:bg-amber-950/40 rounded-xl flex flex-wrap items-center justify-between text-xs text-stone-800 dark:text-stone-200 gap-2 border border-amber-300 dark:border-amber-800 animate-in fade-in duration-150">
+        <div className="mt-3 py-2 px-3 bg-amber-50/90 dark:bg-amber-950/40 rounded-xl flex flex-wrap items-center justify-between text-xs text-stone-800 dark:text-stone-200 gap-2 border border-amber-300 dark:border-amber-800">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              Scrubbing:{' '}
+              Inspecting:{' '}
               <strong>{formatGestationalWeeksLabel(scrubberState.week)}</strong>
             </span>
             <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">|</span>
@@ -852,7 +851,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
 
           {/* Real-time Vertical Guideline and Interactive Tooltip when scrubbing */}
           {scrubberState && !hoveredPoint && (
-            <g className="pointer-events-none transition-all duration-75">
+            <g className="pointer-events-none">
               <line
                 x1={scrubberState.svgX}
                 y1={padding.top}
@@ -862,42 +861,6 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 strokeWidth="1.5"
                 strokeDasharray="4 3"
               />
-              <circle
-                cx={scrubberState.svgX}
-                cy={scaleY(scrubberState.ref50)}
-                r="4.5"
-                fill={isDark ? '#fbbf24' : '#b45309'}
-                stroke={isDark ? '#1c1917' : '#ffffff'}
-                strokeWidth="1.5"
-              />
-              <circle
-                cx={scrubberState.svgX}
-                cy={scaleY(scrubberState.ref95)}
-                r="3"
-                fill="#f59e0b"
-                stroke={isDark ? '#1c1917' : '#ffffff'}
-                strokeWidth="1"
-              />
-              <circle
-                cx={scrubberState.svgX}
-                cy={scaleY(scrubberState.ref5)}
-                r="3"
-                fill="#f59e0b"
-                stroke={isDark ? '#1c1917' : '#ffffff'}
-                strokeWidth="1"
-              />
-
-              {scrubberState.nearestMeasurement && (
-                <circle
-                  cx={scrubberState.nearestMeasurement.x}
-                  cy={scrubberState.nearestMeasurement.y}
-                  r="7.5"
-                  fill="none"
-                  stroke="#d97706"
-                  strokeWidth="2"
-                  className="animate-ping"
-                />
-              )}
 
               {/* Floating Rich Tooltip */}
               <g

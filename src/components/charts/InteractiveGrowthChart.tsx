@@ -659,11 +659,10 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
 
       {/* Dynamic Scrubber / Latest measurement summary strip */}
       {scrubberState ? (
-        <div className="mt-3 py-2 px-3 bg-emerald-50/80 dark:bg-emerald-950/40 rounded-xl flex flex-wrap items-center justify-between text-xs text-stone-800 dark:text-stone-200 gap-2 border border-emerald-300 dark:border-emerald-800 animate-in fade-in duration-150">
+        <div className="mt-3 py-2 px-3 bg-emerald-50/80 dark:bg-emerald-950/40 rounded-xl flex flex-wrap items-center justify-between text-xs text-stone-800 dark:text-stone-200 gap-2 border border-emerald-300 dark:border-emerald-800">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Scrubbing Age: {scrubberAgeLabel}
+            <span className="font-bold text-emerald-950 dark:text-emerald-200">
+              Inspecting Age: {scrubberAgeLabel}
             </span>
             <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">|</span>
             <span>WHO 50th (Median): <strong>{displayValue(scrubberState.p50)}</strong></span>
@@ -975,24 +974,22 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   })
                 }
               >
-                {/* Glow ring */}
+                {/* Subtle halo */}
                 <circle
                   cx={m.x}
                   cy={m.y}
-                  r={isHovered ? 9 : 6}
+                  r={isHovered ? 8 : 6}
                   fill={isDark ? '#2dd4bf' : '#0f766e'}
-                  opacity={isHovered ? 0.28 : 0.18}
-                  className="transition-all"
+                  opacity={isHovered ? 0.25 : 0.16}
                 />
                 {/* Solid core */}
                 <circle
                   cx={m.x}
                   cy={m.y}
-                  r={isHovered ? 5.5 : 4}
+                  r={isHovered ? 5 : 4}
                   fill={isDark ? '#2dd4bf' : '#0f766e'}
                   stroke={isDark ? '#1c1917' : '#ffffff'}
                   strokeWidth="2"
-                  className="transition-all"
                 />
               </g>
             );
@@ -1000,7 +997,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
 
           {/* Real-time Vertical Guideline and Interactive Tooltip when scrubbing */}
           {scrubberState && !hoveredPoint && (
-            <g className="pointer-events-none transition-all duration-75">
+            <g className="pointer-events-none">
               <line
                 x1={scrubberState.svgX}
                 y1={padding.top}
@@ -1010,47 +1007,6 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 strokeWidth="1.5"
                 strokeDasharray="4 3"
               />
-              {showBands && (
-                <>
-                  <circle
-                    cx={scrubberState.svgX}
-                    cy={scaleY(scrubberState.p50)}
-                    r="4.5"
-                    fill={isDark ? '#34d399' : '#15803d'}
-                    stroke={isDark ? '#1c1917' : '#ffffff'}
-                    strokeWidth="1.5"
-                  />
-                  <circle
-                    cx={scrubberState.svgX}
-                    cy={scaleY(scrubberState.p97)}
-                    r="3"
-                    fill={isDark ? '#78716c' : '#a8a29e'}
-                    stroke={isDark ? '#1c1917' : '#ffffff'}
-                    strokeWidth="1"
-                  />
-                  <circle
-                    cx={scrubberState.svgX}
-                    cy={scaleY(scrubberState.p3)}
-                    r="3"
-                    fill={isDark ? '#78716c' : '#a8a29e'}
-                    stroke={isDark ? '#1c1917' : '#ffffff'}
-                    strokeWidth="1"
-                  />
-                </>
-              )}
-
-              {/* If nearest logged measurement exists */}
-              {scrubberState.nearestMeasurement && (
-                <circle
-                  cx={scrubberState.nearestMeasurement.x}
-                  cy={scrubberState.nearestMeasurement.y}
-                  r="7.5"
-                  fill="none"
-                  stroke="#10b981"
-                  strokeWidth="2"
-                  className="animate-ping"
-                />
-              )}
 
               {/* Floating Rich Tooltip */}
               <g

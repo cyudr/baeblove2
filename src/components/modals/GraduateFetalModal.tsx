@@ -205,8 +205,8 @@ export const GraduateFetalModal: React.FC<GraduateFetalModalProps> = ({
                 </label>
                 <input
                   type="number"
-                  step="0.01"
-                  placeholder={unitSystem === 'metric' ? 'e.g. 3.4' : 'e.g. 7.5'}
+                  step="0.001"
+                  placeholder={unitSystem === 'metric' ? 'e.g. 3.425' : 'e.g. 7.5'}
                   value={birthWeight}
                   onChange={(e) => setBirthWeight(e.target.value)}
                   className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl font-mono"

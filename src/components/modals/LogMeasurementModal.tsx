@@ -442,8 +442,8 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     {unitSystem === 'metric' ? (
                       <input
                         type="number"
-                        step="0.01"
-                        placeholder="e.g. 7.25"
+                        step="0.001"
+                        placeholder="e.g. 7.255"
                         value={weightInput}
                         onChange={(e) => setWeightInput(e.target.value)}
                         className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"

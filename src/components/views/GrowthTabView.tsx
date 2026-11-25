@@ -206,7 +206,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
       const sameWeight =
         parsedWeight === null
           ? rec.daily_weight === null
-          : rec.daily_weight !== null && Math.abs(rec.daily_weight - parsedWeight) <= 0.01;
+          : rec.daily_weight !== null && Math.abs(rec.daily_weight - parsedWeight) < 0.0005;
       const sameLength =
         parsedLength === null
           ? rec.daily_length === null
@@ -336,49 +336,67 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Header Card */}
-      <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4 transition-colors">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-2xl bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 flex items-center justify-center shadow-2xs shrink-0">
-            <Scale className="w-4 h-4" />
+      <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs space-y-4 transition-colors">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-2xl bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 flex items-center justify-center shadow-2xs shrink-0">
+              <Scale className="w-4 h-4" />
+            </div>
+            <h2 className="text-xl font-bold text-stone-900 dark:text-white">
+              {activeProfile?.type === 'fetal'
+                ? 'Fetal Growth & Biometric Curves'
+                : 'Growth Tracking'}
+            </h2>
           </div>
-          <h2 className="text-xl font-bold text-stone-900 dark:text-white">
-            {activeProfile?.type === 'fetal'
-              ? 'Fetal Growth & Biometric Curves'
-              : 'Growth Tracking'}
-          </h2>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setIsAskGeminiOpen(true)}
-            className="px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 text-xs font-bold text-emerald-900 dark:text-emerald-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>Ask Gemini</span>
-          </button>
-
-          {activeProfile ? (
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={onOpenLogModal}
-              className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              onClick={() => setIsAskGeminiOpen(true)}
+              className="px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 text-xs font-bold text-emerald-900 dark:text-emerald-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{activeProfile.type === 'baby' ? 'Log Pediatric Checkup' : 'Log Ultrasound'}</span>
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Ask Gemini</span>
             </button>
-          ) : (
-            onOpenProfileModal && (
+
+            {activeProfile ? (
               <button
                 type="button"
-                onClick={onOpenProfileModal}
+                onClick={onOpenLogModal}
                 className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Add Profile</span>
+                <span>{activeProfile.type === 'baby' ? 'Log Pediatric Checkup' : 'Log Ultrasound'}</span>
               </button>
-            )
-          )}
+            ) : (
+              onOpenProfileModal && (
+                <button
+                  type="button"
+                  onClick={onOpenProfileModal}
+                  className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Profile</span>
+                </button>
+              )
+            )}
+          </div>
+        </div>
+
+        {/* Growth & Vitals Interpretation */}
+        <div className="pt-4 border-t border-stone-100 dark:border-stone-800">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 dark:text-amber-300 mb-2">
+            <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>Growth &amp; Vitals Interpretation</span>
+          </div>
+          <ul className="space-y-1.5 text-xs leading-relaxed text-stone-700 dark:text-stone-300">
+            {growthInsights.insights.map((line, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className="text-amber-600 dark:text-amber-400 font-bold mt-0.5 shrink-0">•</span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
 
@@ -502,11 +520,11 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
             </label>
             <input
               type="number"
-              step="0.01"
+              step="0.001"
               min="0"
               value={dailyWeight}
               onChange={(e) => setDailyWeight(e.target.value)}
-              placeholder="e.g. 6.45"
+              placeholder="e.g. 6.455"
               className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
@@ -785,22 +803,6 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Clinical Interpretation Box */}
-      <div className="bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200/80 dark:border-amber-900/50 rounded-3xl p-4 sm:p-5 transition-colors">
-        <div className="flex items-center gap-2 text-xs font-bold text-amber-900 dark:text-amber-300 mb-2">
-          <Sparkles className="w-4 h-4" />
-          <span>Growth &amp; Vitals Interpretation</span>
-        </div>
-        <ul className="space-y-1.5 text-xs text-stone-700 dark:text-stone-300">
-          {growthInsights.insights.map((line, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span className="text-amber-600 dark:text-amber-400 font-bold mt-0.5">•</span>
-              <span>{line}</span>
-            </li>
-          ))}
-        </ul>
       </div>
 
       {/* Clinical Reference Chart */}

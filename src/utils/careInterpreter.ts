@@ -1,4 +1,4 @@
-import { calculatePercentile } from '../data/growthStandards';
+import { calculatePercentile, UnitConverter } from '../data/growthStandards';
 import { getProfileNumericId } from '../lib/entriesStorage';
 import { computeExactAgeFromBirth, DAYS_PER_MONTH, DAYS_PER_WEEK } from './ageCalculator';
 import type { BabyMeasurement, ChildProfile, GrowthRecord, NoteRecord, RoutineRecord } from '../types';
@@ -316,10 +316,10 @@ export function interpretGrowthTable(
           ? ` (${weightVelocityGramsPerDay >= 0 ? '+' : ''}${weightVelocityGramsPerDay} g/day)`
           : '';
       insights.push(
-        `Latest daily weight is ${latestWeightKg.toFixed(2)} kg${pctText}, changing ${sign}${weightDeltaGrams} g since the prior entry${velText}.`
+        `Latest daily weight is ${UnitConverter.formatKgValue(latestWeightKg)} kg${pctText}, changing ${sign}${weightDeltaGrams} g since the prior entry${velText}.`
       );
     } else {
-      insights.push(`Latest daily weight is ${latestWeightKg.toFixed(2)} kg${pctText}.`);
+      insights.push(`Latest daily weight is ${UnitConverter.formatKgValue(latestWeightKg)} kg${pctText}.`);
     }
   }
 
@@ -1038,6 +1038,119 @@ export function buildMonthlyRoutineBoxPlots(
   return periods;
 }
 
+export interface ResolvedDailyWeight {
+  weightKg: number;
+  isExact: boolean;
+}
+
+/**
+ * Builds a date-indexed weight resolver for a profile by combining daily `growth`
+ * logs, pediatric `babyMeasurements`, and birth weight.
+ * - Exact date match -> returns that day's logged weight (`isExact: true`)
+ * - Between two weigh-ins -> linearly interpolates by calendar days
+ * - After latest weigh-in -> carries forward latest weight
+ * - Before earliest weigh-in (on or after birth date) -> uses earliest weight
+ */
+export function buildDailyWeightResolver(
+  growthRecords: GrowthRecord[] = [],
+  babyMeasurements: BabyMeasurement[] = [],
+  profile?: ChildProfile
+): (dateStr: string) => ResolvedDailyWeight | null {
+  const byDate = new Map<string, { weightKg: number; priority: number; createdAt: string }>();
+
+  const birthDate =
+    profile?.type === 'baby' && profile.dateOfEvent
+      ? profile.dateOfEvent.slice(0, 10)
+      : null;
+
+  if (birthDate && profile?.birthWeightKg && profile.birthWeightKg > 0) {
+    byDate.set(birthDate, { weightKg: profile.birthWeightKg, priority: 1, createdAt: '' });
+  }
+
+  for (const m of babyMeasurements) {
+    if (typeof m.weightKg !== 'number' || m.weightKg <= 0) continue;
+    const d = m.date?.slice(0, 10);
+    if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    const existing = byDate.get(d);
+    if (!existing || existing.priority <= 2) {
+      byDate.set(d, { weightKg: m.weightKg, priority: 2, createdAt: '' });
+    }
+  }
+
+  const scopedGrowth = profile
+    ? growthRecords.filter((g) => doesRecordMatchProfile(g, profile))
+    : growthRecords;
+
+  for (const g of scopedGrowth) {
+    if (g.daily_weight === null || g.daily_weight <= 0) continue;
+    const d = getGrowthRecordDate(g);
+    if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    const existing = byDate.get(d);
+    if (
+      !existing ||
+      existing.priority < 3 ||
+      (existing.priority === 3 && (g.created_at ?? '') >= existing.createdAt)
+    ) {
+      byDate.set(d, {
+        weightKg: g.daily_weight,
+        priority: 3,
+        createdAt: g.created_at ?? '',
+      });
+    }
+  }
+
+  const timeline = Array.from(byDate.entries())
+    .map(([date, info]) => ({
+      date,
+      utc: parseLocalDateYMD(date).getTime(),
+      weightKg: info.weightKg,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (timeline.length === 0) {
+    return () => null;
+  }
+
+  const exactMap = new Map(timeline.map((p) => [p.date, p.weightKg]));
+
+  return (dateStr: string): ResolvedDailyWeight | null => {
+    const clean = dateStr.slice(0, 10);
+    const exact = exactMap.get(clean);
+    if (exact !== undefined) {
+      return { weightKg: exact, isExact: true };
+    }
+
+    if (birthDate && clean < birthDate) {
+      return null;
+    }
+
+    const targetUtc = parseLocalDateYMD(clean).getTime();
+
+    if (targetUtc < timeline[0].utc) {
+      return { weightKg: timeline[0].weightKg, isExact: false };
+    }
+
+    const last = timeline[timeline.length - 1];
+    if (targetUtc > last.utc) {
+      return { weightKg: last.weightKg, isExact: false };
+    }
+
+    for (let i = 0; i < timeline.length - 1; i++) {
+      const prev = timeline[i];
+      const next = timeline[i + 1];
+      if (targetUtc >= prev.utc && targetUtc <= next.utc) {
+        const span = next.utc - prev.utc;
+        if (span <= 0) return { weightKg: next.weightKg, isExact: false };
+        const t = (targetUtc - prev.utc) / span;
+        const interp = prev.weightKg + (next.weightKg - prev.weightKg) * t;
+        return { weightKg: Math.round(interp * 1000) / 1000, isExact: false };
+      }
+    }
+
+    return { weightKg: last.weightKg, isExact: false };
+  };
+}
+
 export function interpretRoutineTable(
   records: RoutineRecord[],
   latestWeightKg: number | null,
@@ -1140,7 +1253,7 @@ export function interpretRoutineTable(
     if (estimatedTargetMl && targetMinMl && targetMaxMl && recommendedFeedMl && perFeedMinMl && perFeedMaxMl) {
       if (todayBucket.totalMl >= targetMinMl && todayBucket.totalMl <= targetMaxMl) {
         insights.push(
-          `Intake is within your ${lowRate}–${highRate} mL/kg daily range (${targetMinMl}–${targetMaxMl} mL/day; ${clampedZ}% target is ${estimatedTargetMl} mL/day or ~${recommendedFeedMl} mL/feed across ${feedsPerDay} feeds for ${latestWeightKg?.toFixed(2)} kg).`
+          `Intake is within your ${lowRate}–${highRate} mL/kg daily range (${targetMinMl}–${targetMaxMl} mL/day; ${clampedZ}% target is ${estimatedTargetMl} mL/day or ~${recommendedFeedMl} mL/feed across ${feedsPerDay} feeds for ${latestWeightKg !== null ? UnitConverter.formatKgValue(latestWeightKg) : '—'} kg).`
         );
       } else if (todayBucket.totalMl < targetMinMl) {
         insights.push(
@@ -1154,7 +1267,7 @@ export function interpretRoutineTable(
     }
   } else if (estimatedTargetMl && targetMinMl && targetMaxMl && recommendedFeedMl && perFeedMinMl && perFeedMaxMl) {
     insights.push(
-      `Based on ${latestWeightKg?.toFixed(2)} kg at ${lowRate}–${highRate} mL/kg/day (${clampedZ}% target = ${effectiveTargetMlPerKg} mL/kg), daily target is ${estimatedTargetMl} mL (${targetMinMl}–${targetMaxMl} mL) and recommended feed target is ${recommendedFeedMl} mL/feed (${perFeedMinMl}–${perFeedMaxMl} mL across ${feedsPerDay} feeds/day).`
+      `Based on ${latestWeightKg !== null ? UnitConverter.formatKgValue(latestWeightKg) : '—'} kg at ${lowRate}–${highRate} mL/kg/day (${clampedZ}% target = ${effectiveTargetMlPerKg} mL/kg), daily target is ${estimatedTargetMl} mL (${targetMinMl}–${targetMaxMl} mL) and recommended feed target is ${recommendedFeedMl} mL/feed (${perFeedMinMl}–${perFeedMaxMl} mL across ${feedsPerDay} feeds/day).`
     );
   }
 

@@ -1,14 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Baby, Clock, Droplets } from 'lucide-react';
-import type { RoutineRecord } from '../../types';
+import type { BabyMeasurement, ChildProfile, GrowthRecord, RoutineRecord } from '../../types';
+import { UnitConverter } from '../../data/growthStandards';
+import { parseCalendarDateUTC } from '../../utils/ageCalculator';
 import {
   buildDailyRoutineSeries,
+  buildDailyWeightResolver,
   buildMonthlyRoutineBoxPlots,
   buildWeeklyRoutineBoxPlots,
   type BoxPlotStats,
   type DailyRoutineBucket,
   type DailySpanOption,
   type MonthlySpanOption,
+  type ResolvedDailyWeight,
   type RoutineChartGranularity,
   type RoutineInterpretation,
   type RoutinePeriodBoxPlotBucket,
@@ -54,6 +58,132 @@ function computeNiceAxisMax(rawMax: number, minFloor: number): number {
 
 function formatNum(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+interface PeriodIndexBadge {
+  short: string;
+  full: string;
+}
+
+function getIsoWeekNumber(dateStr: string): number {
+  const utc = parseCalendarDateUTC(dateStr);
+  if (utc === null) return 1;
+  const d = new Date(utc);
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = Date.UTC(d.getUTCFullYear(), 0, 1);
+  return Math.ceil(((d.getTime() - yearStart) / 86_400_000 + 1) / 7);
+}
+
+function getDayIndexLabel(dateStr: string, birthDate?: string | null): PeriodIndexBadge | null {
+  const dateUtc = parseCalendarDateUTC(dateStr);
+  if (dateUtc === null) return null;
+
+  const birthUtc = birthDate ? parseCalendarDateUTC(birthDate) : null;
+  if (birthUtc !== null) {
+    const rawDays = Math.round((dateUtc - birthUtc) / 86_400_000);
+    if (rawDays < 0) return null;
+    return { short: `D${rawDays}`, full: `Day ${rawDays}` };
+  }
+
+  const d = new Date(dateUtc);
+  const yearStart = Date.UTC(d.getUTCFullYear(), 0, 1);
+  const dayOfYear = Math.floor((dateUtc - yearStart) / 86_400_000) + 1;
+  return { short: `D${dayOfYear}`, full: `Day ${dayOfYear}` };
+}
+
+function getWeekIndexLabel(mondayStr: string, birthDate?: string | null): PeriodIndexBadge | null {
+  const startUtc = parseCalendarDateUTC(mondayStr);
+  if (startUtc === null) return null;
+
+  const birthUtc = birthDate ? parseCalendarDateUTC(birthDate) : null;
+  if (birthUtc !== null) {
+    const endUtc = startUtc + 6 * 86_400_000;
+    if (endUtc < birthUtc) return null;
+    const midUtc = startUtc + 3 * 86_400_000;
+    const midDays = Math.round((midUtc - birthUtc) / 86_400_000);
+    const weekNum = Math.floor(Math.max(0, midDays) / 7) + 1;
+    return { short: `W${weekNum}`, full: `Week ${weekNum}` };
+  }
+
+  const isoWeek = getIsoWeekNumber(mondayStr);
+  return { short: `W${isoWeek}`, full: `Week ${isoWeek}` };
+}
+
+function getMonthIndexLabel(ymKey: string, birthDate?: string | null): PeriodIndexBadge | null {
+  const match = /^(\d{4})-(\d{2})/.exec(ymKey);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+
+  if (birthDate) {
+    const birthMatch = /^(\d{4})-(\d{2})/.exec(birthDate.trim());
+    if (birthMatch) {
+      const by = Number(birthMatch[1]);
+      const bm = Number(birthMatch[2]);
+      const diff = (y - by) * 12 + (m - bm);
+      if (diff < 0) return null;
+      const monthNum = diff + 1;
+      return { short: `M${monthNum}`, full: `Month ${monthNum}` };
+    }
+  }
+
+  return { short: `M${m}`, full: `Month ${m}` };
+}
+
+function formatUtcDateYMD(utcMs: number): string {
+  const d = new Date(utcMs);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function computePeriodRecommendedMl(
+  granularity: 'weekly' | 'monthly',
+  periodKey: string,
+  effectiveRateMlPerKg: number | null,
+  resolveWeight: (dateStr: string) => ResolvedDailyWeight | null,
+  focusDate?: string
+): { targetMl: number; avgWeightKg: number } | null {
+  if (!effectiveRateMlPerKg || effectiveRateMlPerKg <= 0) return null;
+
+  const allDates: string[] = [];
+  if (granularity === 'weekly') {
+    const startUtc = parseCalendarDateUTC(periodKey);
+    if (startUtc === null) return null;
+    for (let i = 0; i < 7; i++) {
+      allDates.push(formatUtcDateYMD(startUtc + i * 86_400_000));
+    }
+  } else {
+    const match = /^(\d{4})-(\d{2})/.exec(periodKey);
+    if (!match) return null;
+    const y = Number(match[1]);
+    const m = Number(match[2]);
+    const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    for (let day = 1; day <= daysInMonth; day++) {
+      allDates.push(`${match[1]}-${match[2]}-${String(day).padStart(2, '0')}`);
+    }
+  }
+
+  const cappedDates = focusDate ? allDates.filter((d) => d <= focusDate) : allDates;
+  const candidateDates = cappedDates.length > 0 ? cappedDates : allDates;
+
+  const weights: number[] = [];
+  for (const dateStr of candidateDates) {
+    const resolved = resolveWeight(dateStr);
+    if (resolved && resolved.weightKg > 0) {
+      weights.push(resolved.weightKg);
+    }
+  }
+
+  if (weights.length === 0) return null;
+  const avgWeightKg =
+    Math.round((weights.reduce((sum, w) => sum + w, 0) / weights.length) * 1000) / 1000;
+  return {
+    targetMl: Math.round(avgWeightKg * effectiveRateMlPerKg),
+    avgWeightKg,
+  };
 }
 
 interface GranularityControlsProps {
@@ -174,10 +304,12 @@ const ChartControls: React.FC<GranularityControlsProps> = ({
 interface SvgBoxPlotProps {
   periods: RoutinePeriodBoxPlotBucket[];
   getStats: (period: RoutinePeriodBoxPlotBucket) => BoxPlotStats | null;
+  getSubLabel?: (period: RoutinePeriodBoxPlotBucket) => string | null;
   axisMax: number;
   unitLabel: string;
   accent: 'emerald' | 'sky';
   referenceLine?: { value: number; label: string } | null;
+  referencePoints?: (number | null)[];
   activeKey: string | null;
   onHoverKey: (key: string | null) => void;
 }
@@ -185,10 +317,12 @@ interface SvgBoxPlotProps {
 const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
   periods,
   getStats,
+  getSubLabel,
   axisMax,
   unitLabel,
   accent,
   referenceLine,
+  referencePoints,
   activeKey,
   onHoverKey,
 }) => {
@@ -201,9 +335,9 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
     }
   }, [periods.length]);
 
-  const svgHeight = 152;
+  const svgHeight = 166;
   const padTop = 14;
-  const padBottom = 26;
+  const padBottom = 36;
   const padLeft = 36;
   const padRight = 10;
   const plotHeight = svgHeight - padTop - padBottom;
@@ -237,12 +371,45 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
     accent === 'emerald'
       ? 'fill-emerald-500/8 dark:fill-emerald-400/10'
       : 'fill-sky-500/8 dark:fill-sky-400/10';
+  const subLabelFillClass =
+    accent === 'emerald'
+      ? 'fill-emerald-700/80 dark:fill-emerald-400/80'
+      : 'fill-sky-700/80 dark:fill-sky-400/80';
+
+  const referenceCoords = useMemo(() => {
+    if (!referencePoints || referencePoints.length === 0) return [];
+    const pts: { idx: number; cx: number; y: number; value: number }[] = [];
+    for (let i = 0; i < periods.length; i++) {
+      const val = referencePoints[i];
+      if (val !== null && val !== undefined && val > 0) {
+        pts.push({
+          idx: i,
+          cx: padLeft + i * colStep + colStep / 2,
+          y: yOf(val),
+          value: val,
+        });
+      }
+    }
+    return pts;
+  }, [referencePoints, periods.length, colStep, axisMax]);
+
+  const referencePathD = useMemo(() => {
+    if (referenceCoords.length === 0) return '';
+    if (referenceCoords.length === 1) {
+      const p = referenceCoords[0];
+      const half = Math.max(12, colStep * 0.36);
+      return `M ${(p.cx - half).toFixed(1)} ${p.y.toFixed(1)} L ${(p.cx + half).toFixed(1)} ${p.y.toFixed(1)}`;
+    }
+    return referenceCoords
+      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.cx.toFixed(1)} ${p.y.toFixed(1)}`)
+      .join(' ');
+  }, [referenceCoords, colStep]);
 
   return (
     <div ref={scrollRef} className="w-full overflow-x-auto pb-1">
       <svg
         viewBox={`0 0 ${minSvgWidth} ${svgHeight}`}
-        className="w-full h-[152px] select-none"
+        className="w-full h-[166px] select-none"
         style={{ minWidth: periods.length > 6 ? `${minSvgWidth}px` : undefined }}
         role="img"
         aria-label={`Box plot chart in ${unitLabel}`}
@@ -272,20 +439,23 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
           );
         })}
 
-        {/* Optional benchmark/target dashed line */}
-        {referenceLine && referenceLine.value > 0 && referenceLine.value <= axisMax && (
-          <g>
-            <line
-              x1={padLeft}
-              x2={minSvgWidth - padRight}
-              y1={yOf(referenceLine.value)}
-              y2={yOf(referenceLine.value)}
-              className="stroke-emerald-500/70 dark:stroke-emerald-400/60"
-              strokeWidth={1.25}
-              strokeDasharray="4 3"
-            />
-          </g>
-        )}
+        {/* Optional constant benchmark/target dashed line */}
+        {!referencePathD &&
+          referenceLine &&
+          referenceLine.value > 0 &&
+          referenceLine.value <= axisMax && (
+            <g>
+              <line
+                x1={padLeft}
+                x2={minSvgWidth - padRight}
+                y1={yOf(referenceLine.value)}
+                y2={yOf(referenceLine.value)}
+                className="stroke-emerald-500/70 dark:stroke-emerald-400/60"
+                strokeWidth={1.25}
+                strokeDasharray="4 3"
+              />
+            </g>
+          )}
 
         {/* Box plots per period */}
         {periods.map((period, idx) => {
@@ -395,10 +565,10 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
                 />
               )}
 
-              {/* X-axis period label */}
+              {/* X-axis period date label + week/month number below */}
               <text
                 x={cx}
-                y={svgHeight - 7}
+                y={svgHeight - 19}
                 textAnchor="middle"
                 className={`text-[9px] font-mono ${
                   isHovered
@@ -408,9 +578,48 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
               >
                 {period.label}
               </text>
+              {getSubLabel?.(period) && (
+                <text
+                  x={cx}
+                  y={svgHeight - 7}
+                  textAnchor="middle"
+                  className={`text-[8.5px] font-mono font-semibold ${
+                    isHovered ? 'fill-stone-800 dark:fill-stone-100' : subLabelFillClass
+                  }`}
+                >
+                  {getSubLabel(period)}
+                </text>
+              )}
             </g>
           );
         })}
+
+        {/* Dynamic green dotted recommended line across periods (based on daily weights) */}
+        {referencePathD && (
+          <g className="pointer-events-none">
+            <path
+              d={referencePathD}
+              fill="none"
+              className="stroke-emerald-600 dark:stroke-emerald-400"
+              strokeWidth={1.65}
+              strokeDasharray="4 3"
+            />
+            {referenceCoords.map((pt) => {
+              const period = periods[pt.idx];
+              const isHovered = period && activeKey === period.key;
+              return (
+                <circle
+                  key={`ref-${pt.idx}`}
+                  cx={pt.cx}
+                  cy={pt.y}
+                  r={isHovered ? 3.2 : 2.2}
+                  className="fill-emerald-600 dark:fill-emerald-400 stroke-white dark:stroke-stone-900"
+                  strokeWidth={1}
+                />
+              );
+            })}
+          </g>
+        )}
       </svg>
     </div>
   );
@@ -419,13 +628,19 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
 interface FeedingVolumeTrendChartProps {
   records: RoutineRecord[];
   estimatedTargetMl?: number | null;
+  effectiveTargetMlPerKg?: number | null;
   focusDate?: string;
+  birthDate?: string | null;
+  resolveWeightForDate?: (dateStr: string) => ResolvedDailyWeight | null;
 }
 
 export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = ({
   records,
   estimatedTargetMl = null,
+  effectiveTargetMlPerKg = null,
   focusDate,
+  birthDate = null,
+  resolveWeightForDate,
 }) => {
   const [granularity, setGranularity] = useState<RoutineChartGranularity>('daily');
   const [dailySpan, setDailySpan] = useState<DailySpanOption>(7);
@@ -465,30 +680,123 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
     return Math.round(active.reduce((s, d) => s + d.totalMl, 0) / active.length);
   }, [dailySeries]);
 
+  const dailyTargets = useMemo(() => {
+    return dailySeries.map((bucket) => {
+      if (resolveWeightForDate && effectiveTargetMlPerKg && effectiveTargetMlPerKg > 0) {
+        const resolved = resolveWeightForDate(bucket.date);
+        if (resolved && resolved.weightKg > 0) {
+          return {
+            targetMl: Math.round(resolved.weightKg * effectiveTargetMlPerKg),
+            weightKg: resolved.weightKg,
+            isExactWeight: resolved.isExact,
+          };
+        }
+      }
+      if (estimatedTargetMl && estimatedTargetMl > 0) {
+        return { targetMl: estimatedTargetMl, weightKg: null, isExactWeight: false };
+      }
+      return null;
+    });
+  }, [dailySeries, resolveWeightForDate, effectiveTargetMlPerKg, estimatedTargetMl]);
+
+  const periodTargets = useMemo(() => {
+    if (granularity === 'daily') return [];
+    return periodBuckets.map((period) => {
+      if (resolveWeightForDate && effectiveTargetMlPerKg && effectiveTargetMlPerKg > 0) {
+        const computed = computePeriodRecommendedMl(
+          granularity,
+          period.key,
+          effectiveTargetMlPerKg,
+          resolveWeightForDate,
+          focusDate
+        );
+        if (computed) return computed;
+      }
+      if (estimatedTargetMl && estimatedTargetMl > 0) {
+        return { targetMl: estimatedTargetMl, avgWeightKg: null as number | null };
+      }
+      return null;
+    });
+  }, [
+    granularity,
+    periodBuckets,
+    resolveWeightForDate,
+    effectiveTargetMlPerKg,
+    focusDate,
+    estimatedTargetMl,
+  ]);
+
   const dailyAxisMax = useMemo(() => {
     const maxData = Math.max(0, ...dailySeries.map((d) => d.totalMl));
-    const maxWithTarget = Math.max(maxData, estimatedTargetMl ?? 0);
-    return computeNiceAxisMax(maxWithTarget, 200);
-  }, [dailySeries, estimatedTargetMl]);
+    const maxTarget = Math.max(0, ...dailyTargets.map((t) => t?.targetMl ?? 0));
+    return computeNiceAxisMax(Math.max(maxData, maxTarget), 200);
+  }, [dailySeries, dailyTargets]);
 
   const boxAxisMax = useMemo(() => {
     const maxVal = Math.max(
       0,
       ...periodBuckets.map((p) => p.milkStats?.max ?? 0),
+      ...periodTargets.map((t) => t?.targetMl ?? 0),
       estimatedTargetMl ?? 0
     );
     return computeNiceAxisMax(maxVal, 200);
-  }, [periodBuckets, estimatedTargetMl]);
+  }, [periodBuckets, periodTargets, estimatedTargetMl]);
 
-  const hoveredDaily: DailyRoutineBucket | null = useMemo(() => {
-    if (granularity !== 'daily' || !hoveredKey) return null;
-    return dailySeries.find((d) => d.date === hoveredKey) ?? null;
+  const dailyRecommendedPath = useMemo(() => {
+    const pts: { x: number; y: number; idx: number }[] = [];
+    for (let i = 0; i < dailyTargets.length; i++) {
+      const t = dailyTargets[i];
+      if (!t || t.targetMl <= 0) continue;
+      const x = (i + 0.5) * 100;
+      const clamped = Math.max(0, Math.min(dailyAxisMax, t.targetMl));
+      const y = 100 - (clamped / dailyAxisMax) * 100;
+      pts.push({ x, y, idx: i });
+    }
+    if (pts.length === 0) return '';
+    if (pts.length === 1) {
+      const p = pts[0];
+      return `M ${(p.idx * 100 + 8).toFixed(1)} ${p.y.toFixed(2)} L ${((p.idx + 1) * 100 - 8).toFixed(1)} ${p.y.toFixed(2)}`;
+    }
+    return pts
+      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(2)}`)
+      .join(' ');
+  }, [dailyTargets, dailyAxisMax]);
+
+  const legendTargetSummary = useMemo(() => {
+    const vals =
+      granularity === 'daily'
+        ? dailyTargets.map((t) => t?.targetMl).filter((v): v is number => typeof v === 'number' && v > 0)
+        : periodTargets.map((t) => t?.targetMl).filter((v): v is number => typeof v === 'number' && v > 0);
+    if (vals.length === 0) return null;
+    const minVal = Math.min(...vals);
+    const maxVal = Math.max(...vals);
+    if (minVal === maxVal) return `Rec: ${maxVal} mL/d`;
+    return `Rec: ${minVal}–${maxVal} mL/d`;
+  }, [granularity, dailyTargets, periodTargets]);
+
+  const hoveredDailyIndex = useMemo(() => {
+    if (granularity !== 'daily' || !hoveredKey) return -1;
+    return dailySeries.findIndex((d) => d.date === hoveredKey);
   }, [granularity, hoveredKey, dailySeries]);
 
-  const hoveredPeriod: RoutinePeriodBoxPlotBucket | null = useMemo(() => {
-    if (granularity === 'daily' || !hoveredKey) return null;
-    return periodBuckets.find((p) => p.key === hoveredKey) ?? null;
+  const hoveredDaily: DailyRoutineBucket | null =
+    hoveredDailyIndex >= 0 ? dailySeries[hoveredDailyIndex] : null;
+  const hoveredDailyTarget = hoveredDailyIndex >= 0 ? dailyTargets[hoveredDailyIndex] : null;
+  const hoveredDailyBadge = hoveredDaily ? getDayIndexLabel(hoveredDaily.date, birthDate) : null;
+
+  const hoveredPeriodIndex = useMemo(() => {
+    if (granularity === 'daily' || !hoveredKey) return -1;
+    return periodBuckets.findIndex((p) => p.key === hoveredKey);
   }, [granularity, hoveredKey, periodBuckets]);
+
+  const hoveredPeriod: RoutinePeriodBoxPlotBucket | null =
+    hoveredPeriodIndex >= 0 ? periodBuckets[hoveredPeriodIndex] : null;
+  const hoveredPeriodTarget = hoveredPeriodIndex >= 0 ? periodTargets[hoveredPeriodIndex] : null;
+  const hoveredPeriodBadge = hoveredPeriod
+    ? granularity === 'weekly'
+      ? getWeekIndexLabel(hoveredPeriod.key, birthDate)
+      : getMonthIndexLabel(hoveredPeriod.key, birthDate)
+    : null;
 
   const titleLabel =
     granularity === 'daily'
@@ -542,6 +850,7 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
             <>
               <span className="font-bold text-stone-800 dark:text-stone-100">
                 {hoveredDaily.date}
+                {hoveredDailyBadge ? ` (${hoveredDailyBadge.full})` : ''}
               </span>
               <span>·</span>
               <span className="font-semibold text-emerald-700 dark:text-emerald-400">
@@ -554,15 +863,27 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
               <span>
                 {hoveredDaily.feedCount} feed{hoveredDaily.feedCount === 1 ? '' : 's'}
               </span>
+              {hoveredDailyTarget && (
+                <>
+                  <span>·</span>
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    Rec. {hoveredDailyTarget.targetMl} mL
+                    {hoveredDailyTarget.weightKg !== null
+                      ? ` (${UnitConverter.formatKgValue(hoveredDailyTarget.weightKg)} kg)`
+                      : ''}
+                  </span>
+                </>
+              )}
             </>
           ) : (
-            <span>Hover or tap a day for exact EBM/Formula breakdown</span>
+            <span>Hover or tap a day for exact EBM/Formula &amp; daily weight target</span>
           )
         ) : hoveredPeriod ? (
           hoveredPeriod.milkStats ? (
             <>
               <span className="font-bold text-stone-800 dark:text-stone-100">
                 {hoveredPeriod.rangeLabel}
+                {hoveredPeriodBadge ? ` (${hoveredPeriodBadge.full})` : ''}
               </span>
               <span>·</span>
               <span className="font-semibold text-emerald-700 dark:text-emerald-400">
@@ -576,13 +897,33 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                 {formatNum(hoveredPeriod.milkStats.max)}
               </span>
               <span>(n={hoveredPeriod.milkStats.count}d)</span>
+              {hoveredPeriodTarget && (
+                <>
+                  <span>·</span>
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    Rec. {hoveredPeriodTarget.targetMl} mL/d
+                    {hoveredPeriodTarget.avgWeightKg !== null
+                      ? ` (${UnitConverter.formatKgValue(hoveredPeriodTarget.avgWeightKg)} kg)`
+                      : ''}
+                  </span>
+                </>
+              )}
             </>
           ) : (
             <>
               <span className="font-bold text-stone-800 dark:text-stone-100">
                 {hoveredPeriod.rangeLabel}
+                {hoveredPeriodBadge ? ` (${hoveredPeriodBadge.full})` : ''}
               </span>
               <span>· No feeding volume logged</span>
+              {hoveredPeriodTarget && (
+                <>
+                  <span>·</span>
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    Rec. {hoveredPeriodTarget.targetMl} mL/d
+                  </span>
+                </>
+              )}
             </>
           )
         ) : (
@@ -594,28 +935,49 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
       {granularity === 'daily' ? (
         <div ref={dailyScrollRef} className="w-full overflow-x-auto pb-1">
           <div
-            className="relative flex items-end justify-between gap-1.5 h-32 pt-4"
+            className="relative flex items-end justify-between"
             style={{
-              minWidth: dailySeries.length > 9 ? `${dailySeries.length * 36}px` : undefined,
+              minWidth: dailySeries.length > 9 ? `${dailySeries.length * 38}px` : undefined,
             }}
           >
-            {/* Target reference line */}
-            {estimatedTargetMl && estimatedTargetMl > 0 && estimatedTargetMl <= dailyAxisMax && (
-              <div
-                className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-emerald-500/60 dark:border-emerald-400/50"
-                style={{
-                  bottom: `calc(${Math.round((estimatedTargetMl / dailyAxisMax) * 100)}% * 0.72 + 16px)`,
-                }}
-                title={`Daily milk target: ${estimatedTargetMl} mL`}
-              />
+            {/* Dynamic green dotted line for daily recommended feed amount based on daily weight */}
+            {dailyRecommendedPath && (
+              <svg
+                viewBox={`0 0 ${Math.max(1, dailySeries.length) * 100} 100`}
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute left-0 right-0 top-4 h-24 w-full z-20 overflow-visible"
+                aria-hidden="true"
+              >
+                <path
+                  d={dailyRecommendedPath}
+                  fill="none"
+                  className="stroke-emerald-600 dark:stroke-emerald-400"
+                  strokeWidth={1.75}
+                  strokeDasharray="4 3"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
             )}
 
-            {dailySeries.map((bucket) => {
+            {dailySeries.map((bucket, idx) => {
               const ebmHeight = Math.round((bucket.ebmMl / dailyAxisMax) * 100);
               const formulaHeight = Math.round((bucket.formulaMl / dailyAxisMax) * 100);
               const dayLabel = bucket.date.slice(5);
+              const dayBadge = getDayIndexLabel(bucket.date, birthDate);
+              const dayTarget = dailyTargets[idx];
+              const targetBottomPct =
+                dayTarget && dayTarget.targetMl > 0
+                  ? Math.min(100, Math.max(0, (dayTarget.targetMl / dailyAxisMax) * 100))
+                  : null;
               const isSelected = hoveredKey === bucket.date;
               const showTopValue = dailySeries.length <= 14 || isSelected;
+              const tooltipRec = dayTarget
+                ? ` · Rec. ${dayTarget.targetMl} mL${
+                    dayTarget.weightKg !== null
+                      ? ` (${UnitConverter.formatKgValue(dayTarget.weightKg)} kg)`
+                      : ''
+                  }`
+                : '';
               return (
                 <div
                   key={bucket.date}
@@ -624,37 +986,58 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                   onClick={() =>
                     setHoveredKey(hoveredKey === bucket.date ? null : bucket.date)
                   }
-                  className={`relative z-10 flex-1 min-w-[28px] flex flex-col items-center gap-1 h-full justify-end rounded-lg px-0.5 transition-colors cursor-pointer ${
+                  className={`relative z-10 flex-1 min-w-[30px] flex flex-col items-center rounded-lg px-0.5 transition-colors cursor-pointer ${
                     isSelected ? 'bg-emerald-50/70 dark:bg-emerald-950/30' : ''
                   }`}
-                  title={`${bucket.date}: ${bucket.totalMl} mL (EBM ${bucket.ebmMl} / Formula ${bucket.formulaMl})`}
+                  title={`${bucket.date}${dayBadge ? ` (${dayBadge.full})` : ''}: ${bucket.totalMl} mL (EBM ${bucket.ebmMl} / Formula ${bucket.formulaMl})${tooltipRec}`}
                 >
-                  <span className="text-[8.5px] font-mono tabular-nums font-semibold text-stone-500 dark:text-stone-400 leading-none h-2.5">
+                  <span className="text-[8.5px] font-mono tabular-nums font-semibold text-stone-500 dark:text-stone-400 leading-none h-3 mb-1 flex items-end">
                     {showTopValue && bucket.totalMl > 0 ? bucket.totalMl : ''}
                   </span>
-                  <div className="w-full max-w-[22px] flex-1 flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
-                    {formulaHeight > 0 && (
-                      <div
-                        className="w-full bg-amber-400 dark:bg-amber-500 transition-all"
-                        style={{ height: `${formulaHeight}%` }}
-                      />
-                    )}
-                    {ebmHeight > 0 && (
-                      <div
-                        className="w-full bg-emerald-500 dark:bg-emerald-400 transition-all"
-                        style={{ height: `${ebmHeight}%` }}
+                  <div className="relative w-full max-w-[22px] h-24">
+                    <div className="w-full h-full flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
+                      {formulaHeight > 0 && (
+                        <div
+                          className="w-full bg-amber-400 dark:bg-amber-500 transition-all"
+                          style={{ height: `${formulaHeight}%` }}
+                        />
+                      )}
+                      {ebmHeight > 0 && (
+                        <div
+                          className="w-full bg-emerald-500 dark:bg-emerald-400 transition-all"
+                          style={{ height: `${ebmHeight}%` }}
+                        />
+                      )}
+                    </div>
+                    {targetBottomPct !== null && (
+                      <span
+                        className={`pointer-events-none absolute left-1/2 -translate-x-1/2 translate-y-1/2 rounded-full bg-emerald-600 dark:bg-emerald-400 ring-1 ring-white dark:ring-stone-900 z-30 ${
+                          isSelected ? 'w-2 h-2' : 'w-1.5 h-1.5'
+                        }`}
+                        style={{ bottom: `${targetBottomPct}%` }}
                       />
                     )}
                   </div>
-                  <span
-                    className={`text-[9px] font-mono tabular-nums ${
-                      isSelected
-                        ? 'text-stone-900 dark:text-white font-bold'
-                        : 'text-stone-400 dark:text-stone-500'
-                    }`}
-                  >
-                    {dayLabel}
-                  </span>
+                  <div className="mt-1 flex flex-col items-center leading-tight">
+                    <span
+                      className={`text-[9px] font-mono tabular-nums ${
+                        isSelected
+                          ? 'text-stone-900 dark:text-white font-bold'
+                          : 'text-stone-400 dark:text-stone-500'
+                      }`}
+                    >
+                      {dayLabel}
+                    </span>
+                    <span
+                      className={`text-[8.5px] font-mono tabular-nums font-semibold ${
+                        isSelected
+                          ? 'text-emerald-700 dark:text-emerald-300'
+                          : 'text-emerald-700/75 dark:text-emerald-400/75'
+                      }`}
+                    >
+                      {dayBadge ? dayBadge.short : '—'}
+                    </span>
+                  </div>
                 </div>
               );
             })}
@@ -664,9 +1047,16 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
         <SvgBoxPlot
           periods={periodBuckets}
           getStats={(p) => p.milkStats}
+          getSubLabel={(p) =>
+            (granularity === 'weekly'
+              ? getWeekIndexLabel(p.key, birthDate)
+              : getMonthIndexLabel(p.key, birthDate)
+            )?.short ?? null
+          }
           axisMax={boxAxisMax}
           unitLabel="mL per day"
           accent="emerald"
+          referencePoints={periodTargets.map((t) => t?.targetMl ?? null)}
           referenceLine={
             estimatedTargetMl ? { value: estimatedTargetMl, label: `${estimatedTargetMl} mL` } : null
           }
@@ -687,6 +1077,12 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
               <span className="w-2 h-2 rounded-xs bg-amber-400 dark:bg-amber-500" />
               Formula
             </span>
+            {legendTargetSummary && (
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3.5 border-t-[1.5px] border-dashed border-emerald-600 dark:border-emerald-400" />
+                Daily rec. (by wt)
+              </span>
+            )}
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
@@ -702,10 +1098,16 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
               <span className="w-2 h-2 rounded-full border border-emerald-800 dark:border-emerald-200 bg-white dark:bg-stone-900" />
               Mean
             </span>
+            {legendTargetSummary && (
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3.5 border-t-[1.5px] border-dashed border-emerald-600 dark:border-emerald-400" />
+                Rec. (by wt)
+              </span>
+            )}
           </div>
         )}
-        {estimatedTargetMl && estimatedTargetMl > 0 && (
-          <span className="font-mono tabular-nums">Target: {estimatedTargetMl} mL/d</span>
+        {legendTargetSummary && (
+          <span className="font-mono tabular-nums">{legendTargetSummary}</span>
         )}
       </div>
     </div>
@@ -715,11 +1117,13 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
 interface DiaperOutputTrendChartProps {
   records: RoutineRecord[];
   focusDate?: string;
+  birthDate?: string | null;
 }
 
 export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
   records,
   focusDate,
+  birthDate = null,
 }) => {
   const [granularity, setGranularity] = useState<RoutineChartGranularity>('daily');
   const [dailySpan, setDailySpan] = useState<DailySpanOption>(7);
@@ -779,6 +1183,13 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
     return periodBuckets.find((p) => p.key === hoveredKey) ?? null;
   }, [granularity, hoveredKey, periodBuckets]);
 
+  const hoveredDailyBadge = hoveredDaily ? getDayIndexLabel(hoveredDaily.date, birthDate) : null;
+  const hoveredPeriodBadge = hoveredPeriod
+    ? granularity === 'weekly'
+      ? getWeekIndexLabel(hoveredPeriod.key, birthDate)
+      : getMonthIndexLabel(hoveredPeriod.key, birthDate)
+    : null;
+
   const titleLabel =
     granularity === 'daily'
       ? dailySpan === 'all'
@@ -832,6 +1243,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
             <>
               <span className="font-bold text-stone-800 dark:text-stone-100">
                 {hoveredDaily.date}
+                {hoveredDailyBadge ? ` (${hoveredDailyBadge.full})` : ''}
               </span>
               <span>·</span>
               <span className="font-semibold text-sky-700 dark:text-sky-400">
@@ -850,6 +1262,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
             <>
               <span className="font-bold text-stone-800 dark:text-stone-100">
                 {hoveredPeriod.rangeLabel}
+                {hoveredPeriodBadge ? ` (${hoveredPeriodBadge.full})` : ''}
               </span>
               <span>·</span>
               <span className="font-semibold text-sky-700 dark:text-sky-400">
@@ -869,6 +1282,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
             <>
               <span className="font-bold text-stone-800 dark:text-stone-100">
                 {hoveredPeriod.rangeLabel}
+                {hoveredPeriodBadge ? ` (${hoveredPeriodBadge.full})` : ''}
               </span>
               <span>· No diaper changes logged</span>
             </>
@@ -882,16 +1296,16 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
       {granularity === 'daily' ? (
         <div ref={dailyScrollRef} className="w-full overflow-x-auto pb-1">
           <div
-            className="relative flex items-end justify-between gap-1.5 h-32 pt-4"
+            className="relative flex items-end justify-between"
             style={{
-              minWidth: dailySeries.length > 9 ? `${dailySeries.length * 36}px` : undefined,
+              minWidth: dailySeries.length > 9 ? `${dailySeries.length * 38}px` : undefined,
             }}
           >
-            {/* 6-diaper pediatric hydration reference line */}
+            {/* 6-diaper pediatric hydration reference line (pixel-aligned to h-24 plot zone) */}
             <div
-              className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-emerald-500/70 dark:border-emerald-500/60"
+              className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-emerald-500/70 dark:border-emerald-500/60 z-20"
               style={{
-                bottom: `calc(${Math.round((6 / dailyAxisMax) * 100)}% * 0.72 + 16px)`,
+                top: `${16 + (1 - Math.min(1, 6 / dailyAxisMax)) * 96}px`,
               }}
               title="Pediatric hydration benchmark: 6 wet diapers/day"
             />
@@ -907,6 +1321,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
               );
               const otherHeight = Math.round((otherDiapers / dailyAxisMax) * 100);
               const dayLabel = bucket.date.slice(5);
+              const dayBadge = getDayIndexLabel(bucket.date, birthDate);
               const isSelected = hoveredKey === bucket.date;
               const showTopValue = dailySeries.length <= 14 || isSelected;
               return (
@@ -917,15 +1332,15 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
                   onClick={() =>
                     setHoveredKey(hoveredKey === bucket.date ? null : bucket.date)
                   }
-                  className={`relative z-10 flex-1 min-w-[28px] flex flex-col items-center gap-1 h-full justify-end rounded-lg px-0.5 transition-colors cursor-pointer ${
+                  className={`relative z-10 flex-1 min-w-[30px] flex flex-col items-center rounded-lg px-0.5 transition-colors cursor-pointer ${
                     isSelected ? 'bg-sky-50/70 dark:bg-sky-950/30' : ''
                   }`}
-                  title={`${bucket.date}: ${bucket.totalDiapers} changes (Wet ${bucket.wetDiapers}, Mixed ${bucket.mixedDiapers}, Dirty ${bucket.dirtyDiapers})`}
+                  title={`${bucket.date}${dayBadge ? ` (${dayBadge.full})` : ''}: ${bucket.totalDiapers} changes (Wet ${bucket.wetDiapers}, Mixed ${bucket.mixedDiapers}, Dirty ${bucket.dirtyDiapers})`}
                 >
-                  <span className="text-[9px] font-mono tabular-nums font-semibold text-stone-500 dark:text-stone-400 leading-none h-2.5">
+                  <span className="text-[9px] font-mono tabular-nums font-semibold text-stone-500 dark:text-stone-400 leading-none h-3 mb-1 flex items-end">
                     {showTopValue && bucket.totalDiapers > 0 ? bucket.totalDiapers : ''}
                   </span>
-                  <div className="w-full max-w-[22px] flex-1 flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
+                  <div className="w-full max-w-[22px] h-24 flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
                     {otherHeight > 0 && (
                       <div
                         className="w-full bg-stone-400 dark:bg-stone-500 transition-all"
@@ -951,15 +1366,26 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
                       />
                     )}
                   </div>
-                  <span
-                    className={`text-[9px] font-mono tabular-nums ${
-                      isSelected
-                        ? 'text-stone-900 dark:text-white font-bold'
-                        : 'text-stone-400 dark:text-stone-500'
-                    }`}
-                  >
-                    {dayLabel}
-                  </span>
+                  <div className="mt-1 flex flex-col items-center leading-tight">
+                    <span
+                      className={`text-[9px] font-mono tabular-nums ${
+                        isSelected
+                          ? 'text-stone-900 dark:text-white font-bold'
+                          : 'text-stone-400 dark:text-stone-500'
+                      }`}
+                    >
+                      {dayLabel}
+                    </span>
+                    <span
+                      className={`text-[8.5px] font-mono tabular-nums font-semibold ${
+                        isSelected
+                          ? 'text-sky-700 dark:text-sky-300'
+                          : 'text-sky-700/75 dark:text-sky-400/75'
+                      }`}
+                    >
+                      {dayBadge ? dayBadge.short : '—'}
+                    </span>
+                  </div>
                 </div>
               );
             })}
@@ -969,6 +1395,12 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
         <SvgBoxPlot
           periods={periodBuckets}
           getStats={(p) => p.diaperStats}
+          getSubLabel={(p) =>
+            (granularity === 'weekly'
+              ? getWeekIndexLabel(p.key, birthDate)
+              : getMonthIndexLabel(p.key, birthDate)
+            )?.short ?? null
+          }
           axisMax={boxAxisMax}
           unitLabel="diapers per day"
           accent="sky"
@@ -1020,13 +1452,26 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
 interface RoutineSummaryAndChartsGridProps {
   records: RoutineRecord[];
   routineInsights: RoutineInterpretation;
+  profile?: ChildProfile;
+  growthRecords?: GrowthRecord[];
+  babyMeasurements?: BabyMeasurement[];
 }
 
 export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridProps> = ({
   records,
   routineInsights,
+  profile,
+  growthRecords = [],
+  babyMeasurements = [],
 }) => {
   const focusDate = routineInsights.todayBucket.date;
+  const birthDate =
+    profile?.type === 'baby' && profile.dateOfEvent ? profile.dateOfEvent.slice(0, 10) : null;
+
+  const resolveWeightForDate = useMemo(
+    () => buildDailyWeightResolver(growthRecords, babyMeasurements, profile),
+    [growthRecords, babyMeasurements, profile]
+  );
   const wetPlusMixed =
     routineInsights.todayBucket.wetDiapers + routineInsights.todayBucket.mixedDiapers;
   const totalMl = routineInsights.todayBucket.totalMl;
@@ -1253,7 +1698,10 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
         <FeedingVolumeTrendChart
           records={records}
           estimatedTargetMl={routineInsights.estimatedTargetMl}
+          effectiveTargetMlPerKg={routineInsights.effectiveTargetMlPerKg}
           focusDate={focusDate}
+          birthDate={birthDate}
+          resolveWeightForDate={resolveWeightForDate}
         />
       </div>
 
@@ -1317,7 +1765,11 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
 
           {/* Diaper Output Interactive Chart */}
           <div className="lg:col-span-8 p-5">
-            <DiaperOutputTrendChart records={records} focusDate={focusDate} />
+            <DiaperOutputTrendChart
+              records={records}
+              focusDate={focusDate}
+              birthDate={birthDate}
+            />
           </div>
         </div>
       </div>

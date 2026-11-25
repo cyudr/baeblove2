@@ -8,6 +8,7 @@ import {
   formatFeedingMethodLabel,
   getGrowthRecordDate,
   getRoutineRecordDate,
+  normalizeRoutineTimeHHMM,
 } from '../../utils/careInterpreter';
 import {
   DAYS_PER_MONTH,
@@ -29,6 +30,10 @@ import {
   Scale,
   Filter,
   Sparkles,
+  Copy,
+  AlertTriangle,
+  CheckCircle2,
+  X,
 } from 'lucide-react';
 import { AttachedPrenatalHistoryModal } from '../modals/AttachedPrenatalHistoryModal';
 import { EditAuthModal } from '../modals/EditAuthModal';
@@ -48,6 +53,30 @@ type PendingEditAction =
   | { kind: 'growth'; record: GrowthRecord }
   | { kind: 'baby'; record: BabyMeasurement }
   | { kind: 'fetal'; record: FetalMeasurement };
+
+type DuplicateEntryType = 'routine' | 'growth' | 'baby' | 'fetal';
+
+interface DuplicateItem {
+  rowKey: string;
+  entryType: DuplicateEntryType;
+  date: string;
+  time: string;
+  fingerprint: string;
+  summary: string;
+  meta: string;
+  editAction: PendingEditAction;
+  onDelete: () => void;
+}
+
+interface DuplicateGroup {
+  groupKey: string;
+  entryType: DuplicateEntryType;
+  entryTypeLabel: string;
+  date: string;
+  time: string;
+  isExactMatch: boolean;
+  items: DuplicateItem[];
+}
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -117,6 +146,8 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
   const [editingRoutineInHistory, setEditingRoutineInHistory] = useState<RoutineRecord | null>(null);
   const [editingGrowthInHistory, setEditingGrowthInHistory] = useState<GrowthRecord | null>(null);
   const [massImportTable, setMassImportTable] = useState<MassImportTable | null>(null);
+  const [isDuplicateScanOpen, setIsDuplicateScanOpen] = useState(false);
+  const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
 
   const isBaby = activeProfile?.type === 'baby';
   const hasAttachedFetal = Boolean(isBaby && activeProfile?.attachedFetalProfileId);
@@ -185,13 +216,269 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
       : activeFetalMeasurements.length
     : 0;
 
+  // Detect duplicate entries grouped strictly by (entryType, date, time)
+  const { duplicateGroups, duplicateRowKeys, totalDuplicateEntries } = useMemo(() => {
+    const groupsMap = new Map<string, { entryType: DuplicateEntryType; entryTypeLabel: string; date: string; time: string; items: DuplicateItem[] }>();
+
+    const pushItem = (
+      entryType: DuplicateEntryType,
+      entryTypeLabel: string,
+      date: string,
+      time: string,
+      item: DuplicateItem
+    ) => {
+      if (!date) return;
+      const key = `${entryType}|${date}|${time}`;
+      const existing = groupsMap.get(key);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        groupsMap.set(key, {
+          entryType,
+          entryTypeLabel,
+          date,
+          time,
+          items: [item],
+        });
+      }
+    };
+
+    for (const row of filteredRoutine) {
+      const date = getRoutineRecordDate(row);
+      const time = normalizeRoutineTimeHHMM(row.time);
+      const parts: string[] = [];
+      if (row.emb_mL !== null) parts.push(`EBM ${row.emb_mL} mL`);
+      if (row.formula_mL !== null) parts.push(`Formula ${row.formula_mL} mL`);
+      if (row.feed_duration_min !== null) parts.push(`${row.feed_duration_min} min`);
+      const methodLabel = formatFeedingMethodLabel(row.feeding_method);
+      if (methodLabel) parts.push(methodLabel);
+      if (row.diaper) {
+        const loadStr = row['diaper load'] !== null ? ` (${formatDiaperLoad(row['diaper load'])})` : '';
+        parts.push(`Diaper: ${row.diaper}${loadStr}`);
+      }
+      if (row.stool) parts.push(`Stool: ${row.stool}`);
+      if (row.remark?.trim()) parts.push(`"${row.remark.trim()}"`);
+
+      const fingerprint = JSON.stringify([
+        row.emb_mL ?? null,
+        row.formula_mL ?? null,
+        row.feed_duration_min ?? null,
+        (row.feeding_method ?? '').trim().toLowerCase(),
+        (row.diaper ?? '').trim().toLowerCase(),
+        row['diaper load'] ?? null,
+        (row.stool ?? '').trim().toLowerCase(),
+        (row.remark ?? '').trim().toLowerCase(),
+      ]);
+
+      pushItem('routine', 'Routine', date, time, {
+        rowKey: `routine-${row.id}`,
+        entryType: 'routine',
+        date,
+        time,
+        fingerprint,
+        summary: parts.length > 0 ? parts.join(' · ') : 'Empty routine entry',
+        meta: `#${row.id}${row.name ? ` · ${row.name}` : ''} · Logged ${formatDateTime(row.created_at)}`,
+        editAction: { kind: 'routine', record: row },
+        onDelete: () => {
+          void removeRoutineRecord(row.id);
+        },
+      });
+    }
+
+    for (const row of filteredGrowth) {
+      const date = getGrowthRecordDate(row);
+      const time = '';
+      const parts: string[] = [];
+      if (row.daily_weight !== null) {
+        parts.push(`Weight ${UnitConverter.formatWeight(row.daily_weight, unitSystem)}`);
+      }
+      if (row.daily_length !== null) {
+        parts.push(`Length ${UnitConverter.formatLength(row.daily_length, unitSystem)}`);
+      }
+      if (row.temperature !== null) parts.push(`Temp ${row.temperature.toFixed(1)}°C`);
+      if (row.remark?.trim()) parts.push(`"${row.remark.trim()}"`);
+
+      const fingerprint = JSON.stringify([
+        row.daily_weight ?? null,
+        row.daily_length ?? null,
+        row.temperature ?? null,
+        (row.remark ?? '').trim().toLowerCase(),
+      ]);
+
+      pushItem('growth', 'Daily Growth', date, time, {
+        rowKey: `growth-${row.id}`,
+        entryType: 'growth',
+        date,
+        time,
+        fingerprint,
+        summary: parts.length > 0 ? parts.join(' · ') : 'Empty growth entry',
+        meta: `#${row.id}${row.name ? ` · ${row.name}` : ''} · Logged ${formatDateTime(row.created_at)}`,
+        editAction: { kind: 'growth', record: row },
+        onDelete: () => {
+          void removeGrowthRecord(row.id);
+        },
+      });
+    }
+
+    if (activeProfile && isBaby) {
+      for (const m of filteredBabyMeasurements) {
+        const date = (m.date || '').slice(0, 10);
+        const time = '';
+        const parts: string[] = [];
+        if (m.weightKg) parts.push(`Weight ${UnitConverter.formatWeight(m.weightKg, unitSystem)}`);
+        if (m.lengthCm) parts.push(`Length ${UnitConverter.formatLength(m.lengthCm, unitSystem)}`);
+        if (m.headCircumferenceCm) {
+          parts.push(`HC ${UnitConverter.formatLength(m.headCircumferenceCm, unitSystem)}`);
+        }
+        if (m.notes?.trim()) parts.push(`"${m.notes.trim()}"`);
+
+        const fingerprint = JSON.stringify([
+          m.weightKg ?? null,
+          m.lengthCm ?? null,
+          m.headCircumferenceCm ?? null,
+          Boolean(m.pediatricianVisit),
+          (m.notes ?? '').trim().toLowerCase(),
+        ]);
+
+        pushItem('baby', 'Pediatric Checkup', date, time, {
+          rowKey: `baby-m-${m.id}`,
+          entryType: 'baby',
+          date,
+          time,
+          fingerprint,
+          summary: parts.length > 0 ? parts.join(' · ') : 'Pediatric checkup',
+          meta: `${m.loggedBy ? `${m.loggedBy} · ` : ''}${m.pediatricianVisit ? 'Well-child check' : 'Measurement'}`,
+          editAction: { kind: 'baby', record: m },
+          onDelete: () => {
+            deleteBabyMeasurement(m.id);
+          },
+        });
+      }
+    } else if (activeProfile && !isBaby) {
+      for (const m of filteredFetalMeasurements) {
+        const date = (m.date || '').slice(0, 10);
+        const time = '';
+        const parts: string[] = [`${m.gestationalWeeks}w ${m.gestationalDays}d`];
+        if (m.efwGrams) parts.push(`EFW ${UnitConverter.formatFetalWeight(m.efwGrams, unitSystem)}`);
+        if (m.bpdMm) parts.push(`BPD ${m.bpdMm}mm`);
+        if (m.hcMm) parts.push(`HC ${m.hcMm}mm`);
+        if (m.acMm) parts.push(`AC ${m.acMm}mm`);
+        if (m.flMm) parts.push(`FL ${m.flMm}mm`);
+        if (m.notes?.trim()) parts.push(`"${m.notes.trim()}"`);
+
+        const fingerprint = JSON.stringify([
+          m.gestationalWeeks,
+          m.gestationalDays,
+          m.efwGrams ?? null,
+          m.bpdMm ?? null,
+          m.hcMm ?? null,
+          m.acMm ?? null,
+          m.flMm ?? null,
+          (m.notes ?? '').trim().toLowerCase(),
+        ]);
+
+        pushItem('fetal', 'Ultrasound Scan', date, time, {
+          rowKey: `fetal-m-${m.id}`,
+          entryType: 'fetal',
+          date,
+          time,
+          fingerprint,
+          summary: parts.join(' · '),
+          meta: m.loggedBy || m.scanLocation || 'Ultrasound scan',
+          editAction: { kind: 'fetal', record: m },
+          onDelete: () => {
+            deleteFetalMeasurement(m.id);
+          },
+        });
+      }
+    }
+
+    const groups: DuplicateGroup[] = [];
+    const keys = new Set<string>();
+    let totalEntries = 0;
+
+    for (const [groupKey, group] of groupsMap.entries()) {
+      if (group.items.length < 2) continue;
+      const uniqueFingerprints = new Set(group.items.map((item) => item.fingerprint));
+      groups.push({
+        groupKey,
+        entryType: group.entryType,
+        entryTypeLabel: group.entryTypeLabel,
+        date: group.date,
+        time: group.time,
+        isExactMatch: uniqueFingerprints.size === 1,
+        items: group.items,
+      });
+      for (const item of group.items) {
+        keys.add(item.rowKey);
+      }
+      totalEntries += group.items.length;
+    }
+
+    groups.sort((a, b) => {
+      const aSort = `${a.date}T${a.time || '00:00'}`;
+      const bSort = `${b.date}T${b.time || '00:00'}`;
+      return bSort.localeCompare(aSort);
+    });
+
+    return {
+      duplicateGroups: groups,
+      duplicateRowKeys: keys,
+      totalDuplicateEntries: totalEntries,
+    };
+  }, [
+    filteredRoutine,
+    filteredGrowth,
+    filteredBabyMeasurements,
+    filteredFetalMeasurements,
+    activeProfile,
+    isBaby,
+    unitSystem,
+    removeRoutineRecord,
+    removeGrowthRecord,
+    deleteBabyMeasurement,
+    deleteFetalMeasurement,
+  ]);
+
+  const displayedRoutine = useMemo(
+    () =>
+      isDuplicateScanOpen && showDuplicatesOnly
+        ? filteredRoutine.filter((r) => duplicateRowKeys.has(`routine-${r.id}`))
+        : filteredRoutine,
+    [filteredRoutine, isDuplicateScanOpen, showDuplicatesOnly, duplicateRowKeys]
+  );
+
+  const displayedGrowth = useMemo(
+    () =>
+      isDuplicateScanOpen && showDuplicatesOnly
+        ? filteredGrowth.filter((g) => duplicateRowKeys.has(`growth-${g.id}`))
+        : filteredGrowth,
+    [filteredGrowth, isDuplicateScanOpen, showDuplicatesOnly, duplicateRowKeys]
+  );
+
+  const displayedBabyMeasurements = useMemo(
+    () =>
+      isDuplicateScanOpen && showDuplicatesOnly
+        ? filteredBabyMeasurements.filter((m) => duplicateRowKeys.has(`baby-m-${m.id}`))
+        : filteredBabyMeasurements,
+    [filteredBabyMeasurements, isDuplicateScanOpen, showDuplicatesOnly, duplicateRowKeys]
+  );
+
+  const displayedFetalMeasurements = useMemo(
+    () =>
+      isDuplicateScanOpen && showDuplicatesOnly
+        ? filteredFetalMeasurements.filter((m) => duplicateRowKeys.has(`fetal-m-${m.id}`))
+        : filteredFetalMeasurements,
+    [filteredFetalMeasurements, isDuplicateScanOpen, showDuplicatesOnly, duplicateRowKeys]
+  );
+
   const renderRoutineTable = () => (
     <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-colors">
       <div className="px-5 py-3.5 border-b border-stone-100 dark:border-stone-800 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Droplets className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
           <h3 className="text-xs font-bold text-stone-800 dark:text-stone-200 uppercase tracking-wider">
-            Routine Data History ({filteredRoutine.length})
+            Routine Data History ({displayedRoutine.length})
           </h3>
         </div>
         <div className="flex items-center gap-3">
@@ -216,9 +503,11 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
         </div>
       </div>
 
-      {filteredRoutine.length === 0 ? (
+      {displayedRoutine.length === 0 ? (
         <div className="p-10 text-center text-xs text-stone-500 dark:text-stone-400">
-          No routine entries found in Supabase yet. Log feeds or diapers in the Routine tab.
+          {isDuplicateScanOpen && showDuplicatesOnly
+            ? 'No duplicate routine entries found.'
+            : 'No routine entries found in Supabase yet. Log feeds or diapers in the Routine tab.'}
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -240,20 +529,30 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
-              {filteredRoutine.map((row) => {
+              {displayedRoutine.map((row) => {
                 const totalVol = (row.emb_mL ?? 0) + (row.formula_mL ?? 0);
                 const methodLabel = formatFeedingMethodLabel(row.feeding_method);
                 const deleteKey = `routine-${row.id}`;
+                const isDup = isDuplicateScanOpen && duplicateRowKeys.has(deleteKey);
                 return (
                   <tr
                     key={row.id}
-                    className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors"
+                    className={`transition-colors ${
+                      isDup
+                        ? 'bg-amber-50/70 dark:bg-amber-950/30 hover:bg-amber-100/60 dark:hover:bg-amber-950/45'
+                        : 'hover:bg-stone-50/70 dark:hover:bg-stone-800/40'
+                    }`}
                   >
                     <td className="py-3 px-4 whitespace-nowrap font-bold text-stone-900 dark:text-white">
                       <span>{getRoutineRecordDate(row)}</span>
                       {row.time && (
                         <span className="ml-1.5 font-mono text-[11px] text-stone-500 dark:text-stone-400 font-normal">
                           {row.time.slice(0, 5)}
+                        </span>
+                      )}
+                      {isDup && (
+                        <span className="ml-2 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                          · Duplicate
                         </span>
                       )}
                     </td>
@@ -360,7 +659,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
         <div className="flex items-center gap-2">
           <Scale className="w-4 h-4 text-amber-600 dark:text-amber-400" />
           <h3 className="text-xs font-bold text-stone-800 dark:text-stone-200 uppercase tracking-wider">
-            Growth Data History ({filteredGrowth.length})
+            Growth Data History ({displayedGrowth.length})
           </h3>
         </div>
         <div className="flex items-center gap-3">
@@ -385,9 +684,11 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
         </div>
       </div>
 
-      {filteredGrowth.length === 0 ? (
+      {displayedGrowth.length === 0 ? (
         <div className="p-10 text-center text-xs text-stone-500 dark:text-stone-400">
-          No daily growth entries found in Supabase yet. Log weight, length, or temperature in the Growth tab.
+          {isDuplicateScanOpen && showDuplicatesOnly
+            ? 'No duplicate daily growth entries found.'
+            : 'No daily growth entries found in Supabase yet. Log weight, length, or temperature in the Growth tab.'}
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -405,10 +706,11 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
-              {filteredGrowth.map((row) => {
+              {displayedGrowth.map((row) => {
                 const tempInfo =
                   row.temperature !== null ? classifyTemperature(row.temperature) : null;
                 const deleteKey = `growth-${row.id}`;
+                const isDup = isDuplicateScanOpen && duplicateRowKeys.has(deleteKey);
                 const recordDateStr = getGrowthRecordDate(row);
                 const autoAgeLabel =
                   isBaby && activeProfile
@@ -417,10 +719,21 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                 return (
                   <tr
                     key={row.id}
-                    className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors"
+                    className={`transition-colors ${
+                      isDup
+                        ? 'bg-amber-50/70 dark:bg-amber-950/30 hover:bg-amber-100/60 dark:hover:bg-amber-950/45'
+                        : 'hover:bg-stone-50/70 dark:hover:bg-stone-800/40'
+                    }`}
                   >
                     <td className="py-3 px-4 whitespace-nowrap font-bold text-stone-900 dark:text-white">
-                      <div>{recordDateStr}</div>
+                      <div>
+                        {recordDateStr}
+                        {isDup && (
+                          <span className="ml-2 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                            · Duplicate
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[10px] font-normal text-stone-400 dark:text-stone-500">
                         {formatDateTime(row.created_at)}
                       </div>
@@ -538,9 +851,11 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
         </div>
 
         {isBaby ? (
-          filteredBabyMeasurements.length === 0 ? (
+          displayedBabyMeasurements.length === 0 ? (
             <div className="p-10 text-center text-xs text-stone-500 dark:text-stone-400">
-              No pediatric checkups recorded yet for {activeProfile.name}.
+              {isDuplicateScanOpen && showDuplicatesOnly
+                ? 'No duplicate pediatric checkups found.'
+                : `No pediatric checkups recorded yet for ${activeProfile.name}.`}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -559,7 +874,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
-                  {filteredBabyMeasurements.map((m) => {
+                  {displayedBabyMeasurements.map((m) => {
                     const exactAge = computeExactAgeFromBirth(activeProfile.dateOfEvent, m.date);
                     const exactMonths = exactAge ? exactAge.exactMonths : m.ageInMonths;
                     const exactDays = exactAge
@@ -573,14 +888,24 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                       ? calculatePercentile(m.weightKg, exactMonths, 'weight', activeProfile.gender)
                       : null;
                     const deleteKey = `baby-m-${m.id}`;
+                    const isDup = isDuplicateScanOpen && duplicateRowKeys.has(deleteKey);
 
                     return (
                       <tr
                         key={m.id}
-                        className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors"
+                        className={`transition-colors ${
+                          isDup
+                            ? 'bg-amber-50/70 dark:bg-amber-950/30 hover:bg-amber-100/60 dark:hover:bg-amber-950/45'
+                            : 'hover:bg-stone-50/70 dark:hover:bg-stone-800/40'
+                        }`}
                       >
                         <td className="py-3.5 px-4 font-bold text-stone-900 dark:text-white whitespace-nowrap">
                           {m.date}
+                          {isDup && (
+                            <span className="ml-2 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                              · Duplicate
+                            </span>
+                          )}
                           {m.pediatricianVisit && (
                             <span className="block text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">
                               Well-child check
@@ -654,9 +979,11 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
               </table>
             </div>
           )
-        ) : filteredFetalMeasurements.length === 0 ? (
+        ) : displayedFetalMeasurements.length === 0 ? (
           <div className="p-10 text-center text-xs text-stone-500 dark:text-stone-400">
-            No ultrasound scans logged yet for {activeProfile.name}.
+            {isDuplicateScanOpen && showDuplicatesOnly
+              ? 'No duplicate ultrasound scans found.'
+              : `No ultrasound scans logged yet for ${activeProfile.name}.`}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -678,15 +1005,25 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
-                {filteredFetalMeasurements.map((m) => {
+                {displayedFetalMeasurements.map((m) => {
                   const deleteKey = `fetal-m-${m.id}`;
+                  const isDup = isDuplicateScanOpen && duplicateRowKeys.has(deleteKey);
                   return (
                     <tr
                       key={m.id}
-                      className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors"
+                      className={`transition-colors ${
+                        isDup
+                          ? 'bg-amber-50/70 dark:bg-amber-950/30 hover:bg-amber-100/60 dark:hover:bg-amber-950/45'
+                          : 'hover:bg-stone-50/70 dark:hover:bg-stone-800/40'
+                      }`}
                     >
                       <td className="py-3.5 px-4 font-bold text-stone-900 dark:text-white whitespace-nowrap">
                         {m.date}
+                        {isDup && (
+                          <span className="ml-2 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                            · Duplicate
+                          </span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">{m.loggedBy || '—'}</td>
                       <td className="py-3.5 px-4 whitespace-nowrap font-mono font-bold text-amber-900 dark:text-amber-400">
@@ -888,6 +1225,30 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
             <span>Mass Import</span>
           </button>
 
+          <button
+            type="button"
+            onClick={() => {
+              setIsDuplicateScanOpen((prev) => {
+                if (prev) setShowDuplicatesOnly(false);
+                return !prev;
+              });
+            }}
+            className={`px-3 py-2 text-xs font-semibold rounded-xl border transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
+              isDuplicateScanOpen
+                ? 'text-amber-950 dark:text-amber-100 bg-amber-100 dark:bg-amber-950/70 border-amber-300 dark:border-amber-700 shadow-2xs'
+                : 'text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border-stone-200/60 dark:border-stone-700/60'
+            }`}
+            title="Check history entries for duplicates by date, time, and entry type"
+          >
+            <Copy className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>Detect Duplicates</span>
+            {duplicateGroups.length > 0 && (
+              <span className="font-mono tabular-nums text-[11px] font-bold text-amber-700 dark:text-amber-300">
+                ({duplicateGroups.length})
+              </span>
+            )}
+          </button>
+
           {activeProfile && onOpenEditProfileModal && (
             <button
               type="button"
@@ -920,6 +1281,159 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Duplicate Detection Results Panel */}
+      {isDuplicateScanOpen && (
+        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-amber-200 dark:border-amber-800/70 shadow-xs overflow-hidden transition-colors">
+          <div className="px-5 py-3.5 border-b border-stone-100 dark:border-stone-800 flex flex-wrap items-center justify-between gap-3 bg-amber-50/50 dark:bg-amber-950/20">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {duplicateGroups.length > 0 ? (
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              )}
+              <div className="min-w-0">
+                <h3 className="text-xs font-bold text-stone-900 dark:text-white">
+                  {duplicateGroups.length > 0
+                    ? `${duplicateGroups.length} duplicate group${duplicateGroups.length === 1 ? '' : 's'} detected (${totalDuplicateEntries} entries)`
+                    : 'No duplicates detected'}
+                </h3>
+                <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                  Checked by matching date, time, and entry type across visible history records.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {duplicateGroups.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowDuplicatesOnly((prev) => !prev)}
+                  className={`px-2.5 py-1.5 text-[11px] font-semibold rounded-xl border transition-colors cursor-pointer whitespace-nowrap ${
+                    showDuplicatesOnly
+                      ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 border-stone-900 dark:border-stone-100'
+                      : 'bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-200 border-stone-200 dark:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-700'
+                  }`}
+                >
+                  {showDuplicatesOnly ? 'Showing Duplicates Only' : 'Filter Tables to Duplicates'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDuplicateScanOpen(false);
+                  setShowDuplicatesOnly(false);
+                }}
+                aria-label="Close duplicate detector"
+                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {duplicateGroups.length > 0 && (
+            <div className="divide-y divide-stone-100 dark:divide-stone-800 max-h-[380px] overflow-y-auto">
+              {duplicateGroups.map((group) => (
+                <div key={group.groupKey} className="px-5 py-3.5 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono tabular-nums">
+                      <span className="font-sans font-bold text-stone-900 dark:text-white">
+                        {group.entryTypeLabel}
+                      </span>
+                      <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">
+                        ·
+                      </span>
+                      <span className="font-semibold text-stone-800 dark:text-stone-200">
+                        {group.date}
+                      </span>
+                      {group.time && (
+                        <>
+                          <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">
+                            ·
+                          </span>
+                          <span className="font-semibold text-stone-800 dark:text-stone-200">
+                            {group.time}
+                          </span>
+                        </>
+                      )}
+                      <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">
+                        ·
+                      </span>
+                      <span className="font-sans text-[11px] text-stone-500 dark:text-stone-400">
+                        {group.items.length} entries
+                      </span>
+                    </div>
+
+                    <span
+                      className={`text-[11px] font-semibold ${
+                        group.isExactMatch
+                          ? 'text-rose-700 dark:text-rose-400'
+                          : 'text-amber-700 dark:text-amber-400'
+                      }`}
+                    >
+                      {group.isExactMatch ? 'Exact duplicate' : 'Same date & time (values differ)'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {group.items.map((item) => {
+                      const confirmKey = `dup-${item.rowKey}`;
+                      return (
+                        <div
+                          key={item.rowKey}
+                          className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-stone-50/90 dark:bg-stone-800/60 border border-stone-200/70 dark:border-stone-700/60 text-xs"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-stone-800 dark:text-stone-100 truncate">
+                              {item.summary}
+                            </div>
+                            <div className="text-[10px] font-mono tabular-nums text-stone-500 dark:text-stone-400 mt-0.5">
+                              {item.meta}
+                            </div>
+                          </div>
+
+                          <div className="inline-flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setPendingEditAction(item.editAction)}
+                              className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-white rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-700 transition-colors cursor-pointer"
+                              title="Authenticate with bae_Key to edit entry"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            {pendingDeleteKey === confirmKey ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPendingDeleteKey(null);
+                                  item.onDelete();
+                                }}
+                                className="px-2 py-1 text-[10px] font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg cursor-pointer"
+                              >
+                                Confirm
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setPendingDeleteKey(confirmKey)}
+                                className="p-1.5 text-stone-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                                title="Delete duplicate entry"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Sub-Tab Bar */}
       <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-stone-100 dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700/80 transition-colors">

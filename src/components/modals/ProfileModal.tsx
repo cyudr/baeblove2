@@ -339,9 +339,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   </label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="0.001"
                     min="0"
-                    placeholder="e.g. 3.42"
+                    placeholder="e.g. 3.425"
                     value={birthWeightKg}
                     onChange={(e) => setBirthWeightKg(e.target.value)}
                     className="w-full px-2.5 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"

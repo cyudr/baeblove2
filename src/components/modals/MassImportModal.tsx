@@ -635,7 +635,7 @@ function findGrowthDuplicateMatch(
     const sameWeight =
       rowWeight === null
         ? rec.daily_weight === null
-        : rec.daily_weight !== null && Math.abs(rec.daily_weight - rowWeight) <= 0.01;
+        : rec.daily_weight !== null && Math.abs(rec.daily_weight - rowWeight) < 0.0005;
     const sameLength =
       rowLength === null
         ? rec.daily_length === null
@@ -2913,8 +2913,9 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                             </label>
                             <input
                               type="number"
+                              inputMode="numeric"
                               min="0"
-                              step="5"
+                              step="1"
                               value={row.ebmMl}
                               onChange={(e) => {
                                 const nextEbm = e.target.value;
@@ -2946,8 +2947,9 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                             </label>
                             <input
                               type="number"
+                              inputMode="numeric"
                               min="0"
-                              step="5"
+                              step="1"
                               value={row.formulaMl}
                               onChange={(e) => {
                                 const nextFormula = e.target.value;
@@ -3246,7 +3248,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                             </label>
                             <input
                               type="number"
-                              step="0.01"
+                              step="0.001"
                               min="0"
                               value={row.dailyWeight}
                               onChange={(e) =>
@@ -3258,7 +3260,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder="e.g. 6.45"
+                              placeholder="e.g. 6.455"
                               className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
                             />
                           </div>

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
+import { UnitConverter } from '../../data/growthStandards';
 import {
   DEFAULT_DIAPER_LOAD,
   DEFAULT_MILK_FORMULA,
@@ -563,25 +564,43 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Header Card */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs transition-colors">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shadow-2xs">
-            <Droplets className="w-4 h-4" />
+      <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs space-y-4 transition-colors">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shadow-2xs shrink-0">
+              <Droplets className="w-4 h-4" />
+            </div>
+            <h2 className="text-xl font-bold text-stone-900 dark:text-white">
+              Routine Data Logging
+            </h2>
           </div>
-          <h2 className="text-xl font-bold text-stone-900 dark:text-white">
-            Routine Data Logging
-          </h2>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsAskGeminiOpen(true)}
+              className="px-3.5 py-2 text-xs font-bold text-emerald-900 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Ask Gemini</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setIsAskGeminiOpen(true)}
-            className="px-3.5 py-2 text-xs font-bold text-emerald-900 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>Ask Gemini</span>
-          </button>
+        {/* Routine Interpretation */}
+        <div className="pt-4 border-t border-stone-100 dark:border-stone-800">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-900 dark:text-emerald-300 mb-2">
+            <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>Routine Interpretation</span>
+          </div>
+          <ul className="space-y-1.5 text-xs leading-relaxed text-stone-700 dark:text-stone-300">
+            {routineInsights.insights.map((line, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold mt-0.5 shrink-0">•</span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
 
@@ -735,8 +754,9 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               </label>
               <input
                 type="number"
+                inputMode="numeric"
                 min="0"
-                step="5"
+                step="1"
                 value={ebmMl}
                 onChange={(e) => setEbmMl(e.target.value)}
                 placeholder="e.g. 90"
@@ -750,8 +770,9 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               </label>
               <input
                 type="number"
+                inputMode="numeric"
                 min="0"
-                step="5"
+                step="1"
                 value={formulaMl}
                 onChange={(e) => setFormulaMl(e.target.value)}
                 placeholder="e.g. 60"
@@ -905,7 +926,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                 {currentWeightKg !== null ? (
                   <>
                     <strong className="font-mono text-stone-800 dark:text-stone-200">
-                      {currentWeightKg.toFixed(2)} kg
+                      {UnitConverter.formatKgValue(currentWeightKg)} kg
                     </strong>
                     {currentWeightInfo.sourceLabel && (
                       <span className="text-stone-400 dark:text-stone-500">
@@ -1004,23 +1025,10 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
       <RoutineSummaryAndChartsGrid
         records={filteredRoutine}
         routineInsights={routineInsights}
+        profile={activeProfile}
+        growthRecords={profileGrowthRecords}
+        babyMeasurements={activeBabyMeasurements}
       />
-
-      {/* Clinical Interpretation Box */}
-      <div className="bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-200/80 dark:border-emerald-900/50 rounded-3xl p-4 sm:p-5 transition-colors">
-        <div className="flex items-center gap-2 text-xs font-bold text-emerald-900 dark:text-emerald-300 mb-2">
-          <Sparkles className="w-4 h-4" />
-          <span>Routine Interpretation</span>
-        </div>
-        <ul className="space-y-1.5 text-xs text-stone-700 dark:text-stone-300">
-          {routineInsights.insights.map((line, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span className="text-emerald-600 dark:text-emerald-400 font-bold mt-0.5">•</span>
-              <span>{line}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
 
       {/* Recent Routine Entries Table */}
       <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-colors">
@@ -1232,7 +1240,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                   </div>
                   <div className="text-sm font-bold text-stone-900 dark:text-white mt-0.5">
                     {currentWeightKg !== null ? (
-                      <span className="font-mono">{currentWeightKg.toFixed(2)} kg</span>
+                      <span className="font-mono">{UnitConverter.formatKgValue(currentWeightKg)} kg</span>
                     ) : (
                       <span className="text-stone-500 font-normal">
                         No weight logged yet — log a weight in the Growth tab
@@ -1351,7 +1359,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                     <span>Daily Min = Weight × x</span>
                     <span className="font-bold text-stone-900 dark:text-white">
                       {currentWeightKg !== null && routineInsights.targetMinMl !== null
-                        ? `${currentWeightKg.toFixed(2)} × ${lowFormulaRate} = ${routineInsights.targetMinMl} mL`
+                        ? `${UnitConverter.formatKgValue(currentWeightKg)} × ${lowFormulaRate} = ${routineInsights.targetMinMl} mL`
                         : `${lowFormulaRate} mL/kg`}
                     </span>
                   </div>
@@ -1359,7 +1367,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                     <span>Daily Max = Weight × y</span>
                     <span className="font-bold text-stone-900 dark:text-white">
                       {currentWeightKg !== null && routineInsights.targetMaxMl !== null
-                        ? `${currentWeightKg.toFixed(2)} × ${highFormulaRate} = ${routineInsights.targetMaxMl} mL`
+                        ? `${UnitConverter.formatKgValue(currentWeightKg)} × ${highFormulaRate} = ${routineInsights.targetMaxMl} mL`
                         : `${highFormulaRate} mL/kg`}
                     </span>
                   </div>
@@ -1367,7 +1375,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                     <span>Daily Target = Weight × [x + z% × (y − x)]</span>
                     <span className="font-bold text-emerald-800 dark:text-emerald-300">
                       {currentWeightKg !== null && routineInsights.estimatedTargetMl !== null
-                        ? `${currentWeightKg.toFixed(2)} × ${routineInsights.effectiveTargetMlPerKg} = ${routineInsights.estimatedTargetMl} mL`
+                        ? `${UnitConverter.formatKgValue(currentWeightKg)} × ${routineInsights.effectiveTargetMlPerKg} = ${routineInsights.estimatedTargetMl} mL`
                         : `${routineInsights.effectiveTargetMlPerKg} mL/kg`}
                     </span>
                   </div>
