@@ -544,19 +544,18 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
   const [cameraPhoto, setCameraPhoto] = useState<BinaryAttachment | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const cameraFallbackInputRef = useRef<HTMLInputElement | null>(null);
 
   // Photo entry state
   const [selectedPhoto, setSelectedPhoto] = useState<BinaryAttachment | null>(null);
-  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
 
   // File upload entry state
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [uploadedTextContent, setUploadedTextContent] = useState<string>('');
   const [uploadedBinaryFile, setUploadedBinaryFile] = useState<BinaryAttachment | null>(null);
-  const fileUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   // Gemini & Database status
+  const [isReadingFile, setIsReadingFile] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -713,37 +712,64 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     stopCameraStream();
   };
 
+  const detectImageMime = (file: File): string => {
+    const rawType = (file.type || '').toLowerCase().trim();
+    if (rawType === 'image/jpg') return 'image/jpeg';
+    if (
+      IMAGE_MIMES.has(rawType) ||
+      rawType === 'image/heic' ||
+      rawType === 'image/heif'
+    ) {
+      return rawType;
+    }
+    const lower = (file.name || '').toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.heic')) return 'image/heic';
+    if (lower.endsWith('.heif')) return 'image/heif';
+    return 'image/jpeg';
+  };
+
   const readImageFileAsAttachment = (
     file: File,
     onLoaded: (att: BinaryAttachment) => void
   ) => {
-    if (file.size > 15 * 1024 * 1024) {
-      setErrorMessage('Image is too large. Please choose an image smaller than 15 MB.');
+    if (file.size > 20 * 1024 * 1024) {
+      setErrorMessage('Image is too large. Please choose an image smaller than 20 MB.');
       return;
     }
+    setIsReadingFile(true);
+    setErrorMessage(null);
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : '';
       const commaIdx = dataUrl.indexOf(',');
       const rawBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
       if (!rawBase64) {
+        setIsReadingFile(false);
         setErrorMessage('Failed to read the selected image.');
         return;
       }
-      const mimeType = IMAGE_MIMES.has(file.type) ? file.type : 'image/jpeg';
+      const detectedMime = detectImageMime(file);
+      const isStandardWebImage = IMAGE_MIMES.has(detectedMime);
 
-      // Resize/compress large photos client-side so serverless /api/gemini payloads stay fast & reliable
-      if (mimeType !== 'image/gif') {
+      // Resize/compress large photos (or convert non-standard formats) client-side so /api/gemini stays fast & reliable
+      if (detectedMime !== 'image/gif') {
         const img = new Image();
         img.onload = () => {
           const maxDim = 1600;
           const needsResize =
-            img.width > maxDim || img.height > maxDim || file.size > 1.5 * 1024 * 1024;
+            img.width > maxDim ||
+            img.height > maxDim ||
+            file.size > 1.5 * 1024 * 1024 ||
+            !isStandardWebImage;
           if (!needsResize) {
+            setIsReadingFile(false);
             onLoaded({
-              mimeType,
+              mimeType: detectedMime,
               data: rawBase64,
-              fileName: file.name,
+              fileName: file.name || 'photo.jpg',
               previewUrl: dataUrl,
             });
             return;
@@ -756,50 +782,56 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           if (!ctx) {
+            setIsReadingFile(false);
             onLoaded({
-              mimeType,
+              mimeType: isStandardWebImage ? detectedMime : 'image/jpeg',
               data: rawBase64,
-              fileName: file.name,
-              previewUrl: dataUrl,
+              fileName: file.name || 'photo.jpg',
+              previewUrl: isStandardWebImage ? dataUrl : undefined,
             });
             return;
           }
           ctx.drawImage(img, 0, 0, width, height);
           const compressedUrl = canvas.toDataURL('image/jpeg', 0.85);
           const compressedBase64 = compressedUrl.slice(compressedUrl.indexOf(',') + 1);
+          setIsReadingFile(false);
           onLoaded({
             mimeType: 'image/jpeg',
             data: compressedBase64,
-            fileName: file.name,
+            fileName: file.name || 'photo.jpg',
             previewUrl: compressedUrl,
           });
         };
         img.onerror = () => {
+          setIsReadingFile(false);
           onLoaded({
-            mimeType,
+            mimeType: detectedMime,
             data: rawBase64,
-            fileName: file.name,
-            previewUrl: dataUrl,
+            fileName: file.name || 'photo.jpg',
+            previewUrl: isStandardWebImage ? dataUrl : undefined,
           });
         };
         img.src = dataUrl;
         return;
       }
 
+      setIsReadingFile(false);
       onLoaded({
-        mimeType,
+        mimeType: detectedMime,
         data: rawBase64,
-        fileName: file.name,
+        fileName: file.name || 'photo.gif',
         previewUrl: dataUrl,
       });
     };
-    reader.onerror = () => setErrorMessage('Unable to read the selected image file.');
+    reader.onerror = () => {
+      setIsReadingFile(false);
+      setErrorMessage('Unable to read the selected image file.');
+    };
     reader.readAsDataURL(file);
   };
 
   const handleCameraFallbackChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = '';
     if (!file) return;
     setErrorMessage(null);
     setCameraError(null);
@@ -808,26 +840,63 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
 
   const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = '';
     if (!file) return;
     setErrorMessage(null);
     readImageFileAsAttachment(file, (att) => setSelectedPhoto(att));
   };
 
+  const handlePhotoDrop = (e: React.DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingPhoto(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    setErrorMessage(null);
+    readImageFileAsAttachment(file, (att) => setSelectedPhoto(att));
+  };
+
+  const handlePhotoPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          setErrorMessage(null);
+          readImageFileAsAttachment(file, (att) => setSelectedPhoto(att));
+          return;
+        }
+      }
+    }
+  };
+
   const handleUploadFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = '';
     if (!file) return;
 
     setErrorMessage(null);
     setSuccessMessage(null);
+
+    const lowerName = (file.name || '').toLowerCase();
+    const isImageFile =
+      file.type.startsWith('image/') ||
+      /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(lowerName);
+
+    if (isImageFile) {
+      readImageFileAsAttachment(file, (att) => {
+        setUploadedFileName(att.fileName);
+        setUploadedBinaryFile(att);
+        setUploadedTextContent('');
+      });
+      return;
+    }
 
     if (file.size > 10 * 1024 * 1024) {
       setErrorMessage('File is too large. Please upload a file smaller than 10 MB.');
       return;
     }
 
-    const lowerName = file.name.toLowerCase();
     const isTextLike =
       file.type.startsWith('text/') ||
       file.type === 'application/csv' ||
@@ -839,21 +908,29 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       lowerName.endsWith('.json');
 
     if (isTextLike) {
+      setIsReadingFile(true);
       const reader = new FileReader();
       reader.onload = () => {
+        setIsReadingFile(false);
         const content = typeof reader.result === 'string' ? reader.result : '';
         setUploadedFileName(file.name);
         setUploadedTextContent(content);
         setUploadedBinaryFile(null);
       };
-      reader.onerror = () => setErrorMessage('Unable to read the selected file.');
+      reader.onerror = () => {
+        setIsReadingFile(false);
+        setErrorMessage('Unable to read the selected file.');
+      };
       reader.readAsText(file);
       return;
     }
 
-    if (BINARY_FILE_MIMES.has(file.type)) {
+    const isPdf = file.type === 'application/pdf' || lowerName.endsWith('.pdf');
+    if (isPdf || BINARY_FILE_MIMES.has(file.type)) {
+      setIsReadingFile(true);
       const reader = new FileReader();
       reader.onload = () => {
+        setIsReadingFile(false);
         const dataUrl = typeof reader.result === 'string' ? reader.result : '';
         const commaIdx = dataUrl.indexOf(',');
         const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
@@ -863,13 +940,16 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         }
         setUploadedFileName(file.name);
         setUploadedBinaryFile({
-          mimeType: file.type,
+          mimeType: isPdf ? 'application/pdf' : file.type,
           data: base64,
           fileName: file.name,
           previewUrl: file.type.startsWith('image/') ? dataUrl : undefined,
         });
       };
-      reader.onerror = () => setErrorMessage('Unable to read the selected file.');
+      reader.onerror = () => {
+        setIsReadingFile(false);
+        setErrorMessage('Unable to read the selected file.');
+      };
       reader.readAsDataURL(file);
       return;
     }
@@ -1547,14 +1627,6 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    ref={cameraFallbackInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleCameraFallbackChange}
-                    className="hidden"
-                  />
                   {!cameraActive && (
                     <button
                       type="button"
@@ -1565,14 +1637,21 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                       <span>Start Live Camera</span>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => cameraFallbackInputRef.current?.click()}
-                    className="px-3 py-1.5 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Capture / Device Camera</span>
-                  </button>
+                  <label className="relative overflow-hidden px-3 py-1.5 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onClick={(e) => {
+                        e.currentTarget.value = '';
+                      }}
+                      onChange={handleCameraFallbackChange}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      aria-label="Capture photo with device camera"
+                    />
+                    <Camera className="w-3.5 h-3.5 pointer-events-none" />
+                    <span className="pointer-events-none">Capture / Device Camera</span>
+                  </label>
                 </div>
               </div>
 
@@ -1658,44 +1737,58 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
 
           {/* MODE 2: PHOTO ENTRY (processed via Gemini -> fills Tabular Entry) */}
           {entryMode === 'photo' && (
-            <div className="rounded-2xl border border-stone-200 dark:border-stone-800 p-4 sm:p-5 space-y-4 bg-stone-50/50 dark:bg-stone-800/30">
+            <div
+              onPaste={handlePhotoPaste}
+              className="rounded-2xl border border-stone-200 dark:border-stone-800 p-4 sm:p-5 space-y-4 bg-stone-50/50 dark:bg-stone-800/30"
+            >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="text-xs font-bold text-stone-900 dark:text-white">
                     Photo Entry (Gemini Recognition)
                   </h4>
                   <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                    Choose a photo or screenshot of feeding logs, baby tracker apps, or growth charts. Gemini will recognize the fields and populate Tabular Entry.
+                    Choose, drop, or paste a photo or screenshot of feeding logs, baby tracker apps, or growth charts. Gemini will recognize the fields and populate Tabular Entry.
                   </p>
                 </div>
-                <div>
+                <label className="relative overflow-hidden px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl inline-flex items-center gap-1.5 cursor-pointer select-none">
                   <input
-                    ref={photoInputRef}
                     type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    accept="image/*"
+                    onClick={(e) => {
+                      e.currentTarget.value = '';
+                    }}
                     onChange={handlePhotoFileChange}
-                    className="hidden"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    aria-label="Select photo or screenshot"
                   />
-                  <button
-                    type="button"
-                    onClick={() => photoInputRef.current?.click()}
-                    className="px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5" />
-                    <span>{selectedPhoto ? 'Choose Another Photo' : 'Select Photo / Screenshot'}</span>
-                  </button>
-                </div>
+                  <ImageIcon className="w-3.5 h-3.5 pointer-events-none" />
+                  <span className="pointer-events-none">
+                    {isReadingFile
+                      ? 'Loading Photo...'
+                      : selectedPhoto
+                        ? 'Choose Another Photo'
+                        : 'Select Photo / Screenshot'}
+                  </span>
+                </label>
               </div>
 
               {selectedPhoto ? (
                 <div className="space-y-3">
-                  {selectedPhoto.previewUrl && (
+                  {selectedPhoto.previewUrl ? (
                     <div className="rounded-2xl overflow-hidden border border-stone-200 dark:border-stone-700 bg-stone-950/5 max-h-72 flex items-center justify-center">
                       <img
                         src={selectedPhoto.previewUrl}
                         alt={selectedPhoto.fileName}
                         className="max-h-72 object-contain"
                       />
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-4 py-6 flex flex-col items-center justify-center gap-1.5 text-xs text-stone-600 dark:text-stone-300">
+                      <ImageIcon className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                      <span className="font-semibold">{selectedPhoto.fileName}</span>
+                      <span className="text-[11px] text-stone-500 dark:text-stone-400">
+                        Photo ready ({selectedPhoto.mimeType}) — tap Recognize below to extract entries.
+                      </span>
                     </div>
                   )}
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1705,7 +1798,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                     <button
                       type="button"
                       onClick={() => void handleRecognizeWithGemini('photo')}
-                      disabled={isAnalyzing}
+                      disabled={isAnalyzing || isReadingFile}
                       className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400 dark:text-stone-950 rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                     >
                       {isAnalyzing ? (
@@ -1723,17 +1816,48 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                   </div>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => photoInputRef.current?.click()}
-                  className="w-full py-10 rounded-2xl border-2 border-dashed border-stone-200 dark:border-stone-700 hover:border-emerald-400 dark:hover:border-emerald-600 transition-colors flex flex-col items-center justify-center gap-2 text-xs text-stone-500 dark:text-stone-400 cursor-pointer"
+                <label
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDraggingPhoto(true);
+                  }}
+                  onDragLeave={() => setIsDraggingPhoto(false)}
+                  onDrop={handlePhotoDrop}
+                  className={`relative overflow-hidden w-full py-10 rounded-2xl border-2 border-dashed transition-colors flex flex-col items-center justify-center gap-2 text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none ${
+                    isDraggingPhoto
+                      ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30'
+                      : 'border-stone-200 dark:border-stone-700 hover:border-emerald-400 dark:hover:border-emerald-600'
+                  }`}
                 >
-                  <ImageIcon className="w-7 h-7 text-stone-400" />
-                  <span className="font-semibold text-stone-700 dark:text-stone-300">
-                    Click to choose a PNG, JPG, or WEBP photo
-                  </span>
-                  <span className="text-[11px]">Processed via Gemini API into Tabular Entry</span>
-                </button>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onClick={(e) => {
+                      e.currentTarget.value = '';
+                    }}
+                    onChange={handlePhotoFileChange}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    aria-label="Choose a photo to upload"
+                  />
+                  {isReadingFile ? (
+                    <>
+                      <Loader2 className="w-7 h-7 text-emerald-500 animate-spin pointer-events-none" />
+                      <span className="font-semibold text-stone-700 dark:text-stone-300 pointer-events-none">
+                        Preparing photo...
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <ImageIcon className="w-7 h-7 text-stone-400 pointer-events-none" />
+                      <span className="font-semibold text-stone-700 dark:text-stone-300 pointer-events-none">
+                        Tap or drop a photo / screenshot (PNG, JPG, HEIC, WEBP)
+                      </span>
+                      <span className="text-[11px] pointer-events-none">
+                        Processed via Gemini API into Tabular Entry
+                      </span>
+                    </>
+                  )}
+                </label>
               )}
             </div>
           )}
@@ -1747,26 +1871,25 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                     File Upload Entry (Gemini Recognition)
                   </h4>
                   <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                    Upload a CSV, TSV, TXT, JSON, or PDF file (or paste raw notes/sheets below). Gemini will parse and fit the data into Tabular Entry.
+                    Upload a CSV, TSV, TXT, JSON, PDF, or photo file (or paste raw notes/sheets below). Gemini will parse and fit the data into Tabular Entry.
                   </p>
                 </div>
-                <div>
+                <label className="relative overflow-hidden px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl inline-flex items-center gap-1.5 cursor-pointer select-none">
                   <input
-                    ref={fileUploadInputRef}
                     type="file"
-                    accept=".csv,.tsv,.txt,.md,.json,.pdf,text/csv,text/plain,application/json,application/pdf,image/png,image/jpeg,image/webp"
+                    accept=".csv,.tsv,.txt,.md,.json,.pdf,image/*,text/csv,text/plain,application/json,application/pdf"
+                    onClick={(e) => {
+                      e.currentTarget.value = '';
+                    }}
                     onChange={handleUploadFileChange}
-                    className="hidden"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    aria-label="Choose a file to upload"
                   />
-                  <button
-                    type="button"
-                    onClick={() => fileUploadInputRef.current?.click()}
-                    className="px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Choose File</span>
-                  </button>
-                </div>
+                  <Upload className="w-3.5 h-3.5 pointer-events-none" />
+                  <span className="pointer-events-none">
+                    {isReadingFile ? 'Loading...' : 'Choose File'}
+                  </span>
+                </label>
               </div>
 
               {uploadedFileName && (

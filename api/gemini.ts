@@ -60,6 +60,8 @@ const ALLOWED_ATTACHMENT_MIMES = new Set([
   'image/jpeg',
   'image/webp',
   'image/gif',
+  'image/heic',
+  'image/heif',
   'application/pdf',
   'text/plain',
   'text/csv',
