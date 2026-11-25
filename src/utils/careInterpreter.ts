@@ -3,15 +3,26 @@ import { getProfileNumericId } from '../lib/entriesStorage';
 import type { BabyMeasurement, ChildProfile, GrowthRecord, NoteRecord, RoutineRecord } from '../types';
 
 export function doesRecordMatchProfile(
-  record: { profile_id?: string | null; name?: string | null } | null | undefined,
+  record: { profile_id?: string | number | null; name?: string | null } | null | undefined,
   profile: ChildProfile | undefined
 ): boolean {
   if (!profile) return true;
   if (!record) return false;
 
-  const recordProfileId = (record.profile_id ?? '').trim();
+  const recordProfileId =
+    record.profile_id !== null && record.profile_id !== undefined
+      ? String(record.profile_id).trim()
+      : '';
   if (recordProfileId) {
-    return recordProfileId === profile.id.trim();
+    const profileIdTrimmed = profile.id.trim();
+    if (recordProfileId === profileIdTrimmed) return true;
+    const numericProfileId = String(getProfileNumericId(profileIdTrimmed));
+    if (recordProfileId === numericProfileId) return true;
+    if (profileIdTrimmed === `profile-${recordProfileId}`) return true;
+    const strippedRecord = recordProfileId.replace(/^profile-/i, '');
+    const strippedProfile = profileIdTrimmed.replace(/^profile-/i, '');
+    if (strippedRecord && strippedRecord === strippedProfile) return true;
+    return false;
   }
 
   // Fallback for legacy rows created before profile_id was added

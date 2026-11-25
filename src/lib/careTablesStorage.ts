@@ -1,5 +1,6 @@
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { supabase, GROWTH_TABLE, ROUTINE_TABLE, NOTES_TABLE } from './supabase';
+import { getProfileNumericId } from './entriesStorage';
 import type {
   GrowthRecord,
   NewGrowthRecordInput,
@@ -27,6 +28,30 @@ function toNullableText(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Converts a profile identifier (e.g. "profile-1795580368030", "1795580368030", or custom id)
+ * into a Postgres bigint (`int8`) value so tables with `profile_id bigint` (growth, routine, notes)
+ * never throw 22P02 invalid input syntax for type bigint.
+ */
+function resolveNumericProfileId(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.round(value) : null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^\d+$/.test(trimmed)) {
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  const prefixed = trimmed.match(/^profile-(\d+)$/i);
+  if (prefixed) {
+    const parsed = Number(prefixed[1]);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return getProfileNumericId(trimmed);
 }
 
 function toNullableDate(value: string | null | undefined): string | null {
@@ -128,6 +153,7 @@ function normalizeNoteRow(raw: Record<string, unknown>): NoteRecord {
     created_at: String(raw.created_at ?? new Date().toISOString()),
     name: raw.name !== null && raw.name !== undefined ? String(raw.name) : null,
     notes: raw.notes !== null && raw.notes !== undefined ? String(raw.notes) : null,
+    remark: raw.remark !== null && raw.remark !== undefined ? String(raw.remark) : null,
     profile_id:
       parsedProfileId !== null && !Number.isNaN(parsedProfileId) ? parsedProfileId : null,
   };
@@ -181,9 +207,9 @@ export async function fetchGrowthRecords(): Promise<GrowthRecord[] | null> {
 }
 
 function buildGrowthPayload(input: NewGrowthRecordInput, nonNullProfileId = false) {
-  const cleanedProfileId = toNullableText(input.profile_id);
+  const numericProfileId = resolveNumericProfileId(input.profile_id);
   return {
-    profile_id: nonNullProfileId ? (cleanedProfileId ?? '') : cleanedProfileId,
+    profile_id: nonNullProfileId ? (numericProfileId ?? 0) : numericProfileId,
     date: toNullableDate(input.date),
     daily_weight: toNullableFloat(input.daily_weight),
     daily_length: toNullableFloat(input.daily_length),
@@ -340,8 +366,8 @@ export async function updateGrowthRecord(
   updates: NewGrowthRecordInput
 ): Promise<{ record: GrowthRecord | null; error?: string }> {
   const payload: Record<string, unknown> = {};
-  if ('profile_id' in updates) payload.profile_id = toNullableText(updates.profile_id);
-  if ('date' in updates) payload.date = toNullableText(updates.date);
+  if ('profile_id' in updates) payload.profile_id = resolveNumericProfileId(updates.profile_id);
+  if ('date' in updates) payload.date = toNullableDate(updates.date);
   if ('daily_weight' in updates) payload.daily_weight = toNullableFloat(updates.daily_weight);
   if ('daily_length' in updates) payload.daily_length = toNullableFloat(updates.daily_length);
   if ('temperature' in updates) payload.temperature = toNullableFloat(updates.temperature);
@@ -440,9 +466,9 @@ export async function fetchRoutineRecords(): Promise<RoutineRecord[] | null> {
 }
 
 function buildRoutinePayload(input: NewRoutineRecordInput, nonNullProfileId = false) {
-  const cleanedProfileId = toNullableText(input.profile_id);
+  const numericProfileId = resolveNumericProfileId(input.profile_id);
   return {
-    profile_id: nonNullProfileId ? (cleanedProfileId ?? '') : cleanedProfileId,
+    profile_id: nonNullProfileId ? (numericProfileId ?? 0) : numericProfileId,
     date: toNullableDate(input.date),
     time: toNullableTime(input.time),
     'EBM (mL)': toNullableInt(input['EBM (mL)']),
@@ -600,9 +626,9 @@ export async function updateRoutineRecord(
   updates: NewRoutineRecordInput
 ): Promise<{ record: RoutineRecord | null; error?: string }> {
   const payload: Record<string, unknown> = {};
-  if ('profile_id' in updates) payload.profile_id = toNullableText(updates.profile_id);
-  if ('date' in updates) payload.date = toNullableText(updates.date);
-  if ('time' in updates) payload.time = toNullableText(updates.time);
+  if ('profile_id' in updates) payload.profile_id = resolveNumericProfileId(updates.profile_id);
+  if ('date' in updates) payload.date = toNullableDate(updates.date);
+  if ('time' in updates) payload.time = toNullableTime(updates.time);
   if ('EBM (mL)' in updates) payload['EBM (mL)'] = toNullableInt(updates['EBM (mL)']);
   if ('Formula (mL)' in updates) payload['Formula (mL)'] = toNullableInt(updates['Formula (mL)']);
   if ('Diaper' in updates) payload.Diaper = toNullableText(updates.Diaper);
@@ -707,6 +733,7 @@ export async function insertNoteRecord(
   const payload = {
     name: toNullableText(input.name),
     notes: toNullableText(input.notes),
+    remark: toNullableText(input.remark),
     profile_id: toNullableInt(input.profile_id),
   };
 
@@ -731,7 +758,7 @@ export async function insertNoteRecord(
   if (firstAttempt.error?.code === '23502') {
     const retryAttempt = await supabase
       .from(NOTES_TABLE)
-      .insert([{ id: Date.now(), ...payload }])
+      .insert([{ id: nextFallbackId(), ...payload }])
       .select('*');
 
     const retryRow = Array.isArray(retryAttempt.data)
@@ -766,6 +793,7 @@ export async function updateNoteRecord(
   const payload: Record<string, unknown> = {};
   if ('name' in updates) payload.name = toNullableText(updates.name);
   if ('notes' in updates) payload.notes = toNullableText(updates.notes);
+  if ('remark' in updates) payload.remark = toNullableText(updates.remark);
   if ('profile_id' in updates) payload.profile_id = toNullableInt(updates.profile_id);
 
   if (!supabase) {

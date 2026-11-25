@@ -29,6 +29,7 @@ export interface EntryRow {
   profile_id: string | null;
   profile_name?: string | null;
   logged_by?: string | null;
+  remark?: string | null;
   payload: unknown;
   created_at?: string;
   updated_at?: string;
@@ -46,6 +47,7 @@ export interface SettingPayload {
  *   profile_id     text default ''::text
  *   "profile name" text (baby / profile name)
  *   name           text (person logging the entry)
+ *   remark         text (optional notes / remark)
  *   payload        json
  *   updated_at     timestamptz default now()
  */
@@ -55,6 +57,7 @@ interface RawDbEntryRow {
   profile_id?: string | null;
   'profile name'?: string | null;
   name?: string | null;
+  remark?: string | null;
   payload: unknown;
   updated_at?: string;
 }
@@ -154,6 +157,7 @@ function toDbEntryRow(row: EntryRow, updatedAt: string): RawDbEntryRow {
     profile_id: row.profile_id ?? '',
     'profile name': normalizeOptionalText(row.profile_name),
     name: normalizeOptionalText(row.logged_by),
+    remark: normalizeOptionalText(row.remark),
     payload: buildEnvelope(row),
     updated_at: updatedAt,
   };
@@ -204,6 +208,7 @@ function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
   const numericId = Number(raw.id);
   const dbProfileName = normalizeOptionalText(raw['profile name']);
   const dbLoggedBy = normalizeOptionalText(raw.name);
+  const dbRemark = normalizeOptionalText(raw.remark);
   let parsedPayload = raw.payload;
 
   if (typeof parsedPayload === 'string') {
@@ -228,6 +233,7 @@ function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
       profile_id: raw.profile_id || null,
       profile_name: dbProfileName,
       logged_by: dbLoggedBy,
+      remark: dbRemark,
       payload: hydrated,
       created_at: raw.created_at,
       updated_at: raw.updated_at,
@@ -335,6 +341,7 @@ export function toProfileRow(profile: ChildProfile): EntryRow {
     profile_id: profile.id,
     profile_name: normalizeOptionalText(profile.name),
     logged_by: normalizeOptionalText(profile.loggedBy),
+    remark: null,
     payload: profile,
   };
 }
@@ -349,6 +356,7 @@ export function toBabyMeasurementRow(
     profile_id: measurement.profileId,
     profile_name: normalizeOptionalText(profileName),
     logged_by: normalizeOptionalText(measurement.loggedBy),
+    remark: normalizeOptionalText(measurement.notes),
     payload: measurement,
   };
 }
@@ -363,6 +371,7 @@ export function toFetalMeasurementRow(
     profile_id: measurement.profileId,
     profile_name: normalizeOptionalText(profileName),
     logged_by: normalizeOptionalText(measurement.loggedBy),
+    remark: normalizeOptionalText(measurement.notes),
     payload: measurement,
   };
 }
@@ -377,6 +386,7 @@ export function toMilestoneRow(
     profile_id: milestone.profileId,
     profile_name: normalizeOptionalText(profileName),
     logged_by: normalizeOptionalText(milestone.loggedBy),
+    remark: normalizeOptionalText(milestone.notes),
     payload: milestone,
   };
 }
@@ -391,6 +401,7 @@ export function toKickSessionRow(
     profile_id: session.profileId,
     profile_name: normalizeOptionalText(profileName),
     logged_by: normalizeOptionalText(session.loggedBy),
+    remark: normalizeOptionalText(session.notes),
     payload: session,
   };
 }
@@ -405,6 +416,7 @@ export function toLoveNoteRow(
     profile_id: note.profileId,
     profile_name: normalizeOptionalText(profileName),
     logged_by: normalizeOptionalText(note.author),
+    remark: normalizeOptionalText(note.content),
     payload: note,
   };
 }
@@ -517,6 +529,7 @@ async function upsertEntriesWithGeneratedIdentity(
     profile_id: string;
     'profile name': string | null;
     name: string | null;
+    remark: string | null;
     payload: PayloadEnvelope;
     updated_at: string;
   }> = [];
@@ -527,6 +540,7 @@ async function upsertEntriesWithGeneratedIdentity(
       profile_id: row.profile_id ?? '',
       'profile name': normalizeOptionalText(row.profile_name),
       name: normalizeOptionalText(row.logged_by),
+      remark: normalizeOptionalText(row.remark),
       payload: buildEnvelope(row),
       updated_at: updatedAt,
     };

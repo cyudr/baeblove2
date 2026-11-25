@@ -218,12 +218,14 @@ export interface NoteRecord {
   created_at: string;
   name: string | null;
   notes: string | null;
+  remark: string | null;
   profile_id: number | null;
 }
 
 export interface NewNoteRecordInput {
   name?: string | null;
   notes?: string | null;
+  remark?: string | null;
   profile_id?: number | null;
 }
 

@@ -1322,12 +1322,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setNoteRecords((prev) =>
         prev.map((n) =>
           n.id === id
-            ? {
-                ...n,
-                name: 'name' in updates ? (updates.name ?? null) : n.name,
-                notes: 'notes' in updates ? (updates.notes ?? null) : n.notes,
-                profile_id: 'profile_id' in updates ? (updates.profile_id ?? null) : n.profile_id,
-              }
+              ? {
+                  ...n,
+                  name: 'name' in updates ? (updates.name ?? null) : n.name,
+                  notes: 'notes' in updates ? (updates.notes ?? null) : n.notes,
+                  remark: 'remark' in updates ? (updates.remark ?? null) : n.remark,
+                  profile_id: 'profile_id' in updates ? (updates.profile_id ?? null) : n.profile_id,
+                }
             : n
         )
       );

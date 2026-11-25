@@ -37,12 +37,15 @@ interface GeminiRequestBody {
   prompt?: string;
   parts?: GeminiInputPart[];
   attachment?: GeminiAttachment | null;
+  attachments?: GeminiAttachment[] | null;
   systemInstruction?: string;
   responseMimeType?: string;
   responseSchema?: Schema;
   model?: string;
   thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
 }
+
+const MAX_ATTACHMENTS = 12;
 
 const DEFAULT_GEMINI_MODEL = (process.env.GEMINI_MODEL || 'gemini-4-hydrogen').trim();
 const FALLBACK_GEMINI_MODEL = 'gemini-3.1-flash-lite';
@@ -279,23 +282,47 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
 
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
 
-    if (body.attachment) {
+    const incomingAttachments: GeminiAttachment[] = [];
+    if (Array.isArray(body.attachments)) {
+      for (const att of body.attachments) {
+        if (att && typeof att === 'object') {
+          incomingAttachments.push(att);
+        }
+      }
+    }
+    if (body.attachment && typeof body.attachment === 'object') {
+      incomingAttachments.push(body.attachment);
+    }
+
+    if (incomingAttachments.length > MAX_ATTACHMENTS) {
+      sendJson(res, 400, {
+        error: `Too many attachments. Please upload at most ${MAX_ATTACHMENTS} files at once.`,
+      });
+      return;
+    }
+
+    for (let i = 0; i < incomingAttachments.length; i++) {
+      const att = incomingAttachments[i];
       if (
-        !body.attachment.mimeType ||
-        !ALLOWED_ATTACHMENT_MIMES.has(body.attachment.mimeType) ||
-        typeof body.attachment.data !== 'string' ||
-        body.attachment.data.length === 0
+        !att.mimeType ||
+        !ALLOWED_ATTACHMENT_MIMES.has(att.mimeType) ||
+        typeof att.data !== 'string' ||
+        att.data.length === 0
       ) {
         sendJson(res, 400, {
-          error:
-            'Unsupported attachment format. Upload a PNG, JPEG, WEBP, GIF, PDF, or plain text/CSV file.',
+          error: `Unsupported attachment format${att.fileName ? ` ("${att.fileName}")` : ''}. Upload PNG, JPEG, WEBP, GIF, HEIC, PDF, or plain text/CSV files.`,
         });
         return;
       }
+      if (incomingAttachments.length > 1 || att.fileName) {
+        parts.push({
+          text: `Attachment ${i + 1}${att.fileName ? ` (${att.fileName})` : ''}:`,
+        });
+      }
       parts.push({
         inlineData: {
-          mimeType: body.attachment.mimeType,
-          data: body.attachment.data,
+          mimeType: att.mimeType,
+          data: att.data,
         },
       });
     }

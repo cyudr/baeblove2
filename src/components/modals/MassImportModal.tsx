@@ -73,11 +73,22 @@ interface GrowthDraftRow {
 }
 
 interface BinaryAttachment {
+  id: string;
   mimeType: string;
   data: string;
   fileName: string;
   previewUrl?: string;
 }
+
+interface UploadedFileItem {
+  id: string;
+  fileName: string;
+  kind: 'text' | 'binary';
+  textContent?: string;
+  binary?: BinaryAttachment;
+}
+
+const MAX_MULTI_FILES = 12;
 
 interface MassImportModalProps {
   isOpen: boolean;
@@ -182,10 +193,11 @@ function buildMassImportGeminiPayload(params: {
   rawText: string;
   defaultDate: string;
   defaultLogger: string;
-  attachment: { mimeType: string; data: string; fileName?: string } | null;
+  attachments: Array<{ mimeType: string; data: string; fileName?: string }>;
 }) {
-  const { targetTable, rawText, defaultDate, defaultLogger, attachment } = params;
+  const { targetTable, rawText, defaultDate, defaultLogger, attachments } = params;
   const currentYear = defaultDate.slice(0, 4);
+  const fileCount = attachments.length;
 
   const routineFieldRules = [
     'ROUTINE rows (feeding & diaper events):',
@@ -209,11 +221,17 @@ function buildMassImportGeminiPayload(params: {
     '- remark: concise growth/vitals notes (e.g. "before feed", "post-vaccine check"). Null if none.',
   ].join('\n');
 
+  const multiFileNote =
+    fileCount > 1
+      ? `Multiple files/images (${fileCount}) are attached. Read EVERY attachment thoroughly, combine all distinct entries in chronological order, and deduplicate exact duplicates that overlap between consecutive screenshots or pages.`
+      : 'Read the provided input thoroughly and extract every distinct record.';
+
   const systemInstruction =
     targetTable === 'auto'
       ? [
           'You are a precise baby-care data classification and extraction engine.',
-          'A single photo, handwritten sheet, screenshot, PDF, or text file may contain BOTH Routine records (feeds, milk volumes, durations, diapers) AND Growth records (weight, length/height, temperature), or only one of the two.',
+          'The provided photo(s), handwritten sheet(s), screenshot(s), PDF(s), or text file(s) may contain BOTH Routine records (feeds, milk volumes, durations, diapers) AND Growth records (weight, length/height, temperature), or only one of the two.',
+          multiFileNote,
           'Carefully classify and extract EVERY Routine event into `routineRows` AND EVERY Growth/Vitals measurement into `growthRows`.',
           'If a single line/card contains both a feed/diaper AND a weight/length/temperature, place the feed/diaper fields into `routineRows` and the weight/length/temperature fields into `growthRows` using the same date/logger.',
           `Context: defaultDate="${defaultDate}", currentYear="${currentYear}", defaultLogger="${defaultLogger}".`,
@@ -224,14 +242,16 @@ function buildMassImportGeminiPayload(params: {
       : targetTable === 'routine'
         ? [
             'You are a precise data extraction engine for a baby care Routine table.',
-            'Extract EVERY distinct feeding or diaper log entry from the provided text, CSV, table, chat log, screenshot, photo, or PDF into the rows array.',
+            'Extract EVERY distinct feeding or diaper log entry from all provided text, CSV, tables, chat logs, screenshots, photos, or PDFs into the rows array.',
+            multiFileNote,
             `Context: defaultDate="${defaultDate}", currentYear="${currentYear}", defaultLogger="${defaultLogger}".`,
             routineFieldRules,
             'Populate every recognized row object with all fields (using null for absent fields). Do not fabricate rows. Skip header rows and empty lines.',
           ].join('\n\n')
         : [
             'You are a precise data extraction engine for a baby daily Growth & Vitals table.',
-            'Extract EVERY distinct daily weight, length, or temperature measurement from the provided text, CSV, table, chat log, screenshot, photo, or PDF into the rows array.',
+            'Extract EVERY distinct daily weight, length, or temperature measurement from all provided text, CSV, tables, chat logs, screenshots, photos, or PDFs into the rows array.',
+            multiFileNote,
             `Context: defaultDate="${defaultDate}", currentYear="${currentYear}", defaultLogger="${defaultLogger}".`,
             growthFieldRules,
             'Populate every recognized row object with all fields (using null for absent fields). Do not fabricate rows. Skip header rows and empty lines.',
@@ -282,13 +302,15 @@ function buildMassImportGeminiPayload(params: {
 
   const prompt = [
     targetTable === 'auto'
-      ? 'Mode: AUTO-RECOGNIZE both "routine" (feeds/diapers) and "growth" (weight/length/temperature) records from this single input.'
+      ? `Mode: AUTO-RECOGNIZE both "routine" (feeds/diapers) and "growth" (weight/length/temperature) records across ${fileCount > 1 ? `all ${fileCount} attached files` : 'this input'}.`
       : `Target table: "${targetTable}"`,
     `Default date if missing: ${defaultDate}`,
     defaultLogger ? `Default logger name if missing: ${defaultLogger}` : '',
     rawText
-      ? `\nSource data to parse:\n${rawText}`
-      : '\nExtract all tabular or written records from the attached document/image.',
+      ? `\nSource text data to parse:\n${rawText}`
+      : fileCount > 1
+        ? `\nExtract and combine all tabular or written records from all ${fileCount} attached documents/images.`
+        : '\nExtract all tabular or written records from the attached document/image.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -298,7 +320,7 @@ function buildMassImportGeminiPayload(params: {
     systemInstruction,
     responseMimeType: 'application/json',
     responseSchema,
-    attachment,
+    attachments: attachments.length > 0 ? attachments : null,
     thinkingLevel: 'LOW' as const,
   };
 }
@@ -543,23 +565,23 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
   const photoInputId = `${modalUid}-photo`;
   const fileInputId = `${modalUid}-file`;
 
-  // Camera entry state
+  // Camera entry state (supports snapping multiple photos/pages)
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [cameraPhoto, setCameraPhoto] = useState<BinaryAttachment | null>(null);
+  const [cameraPhotos, setCameraPhotos] = useState<BinaryAttachment[]>([]);
   const [cameraInputKey, setCameraInputKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Photo entry state
-  const [selectedPhoto, setSelectedPhoto] = useState<BinaryAttachment | null>(null);
+  // Photo entry state (supports multiple photos/screenshots in one go)
+  const [selectedPhotos, setSelectedPhotos] = useState<BinaryAttachment[]>([]);
   const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
   const [photoInputKey, setPhotoInputKey] = useState(0);
 
-  // File upload entry state
-  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  // File upload entry state (supports multiple mixed text/PDF/image files + pasted notes)
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFileItem[]>([]);
   const [uploadedTextContent, setUploadedTextContent] = useState<string>('');
-  const [uploadedBinaryFile, setUploadedBinaryFile] = useState<BinaryAttachment | null>(null);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
 
   // Gemini & Database status
@@ -660,11 +682,10 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
   const startCamera = async () => {
     setCameraError(null);
     setErrorMessage(null);
-    setCameraPhoto(null);
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setCameraError(
-        'Live camera preview is not supported in this browser. Use the "Capture / Take Photo" button below instead.'
+        'Live camera preview is not supported in this browser. Use the "Capture / Device Camera" button below instead.'
       );
       return;
     }
@@ -684,7 +705,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       });
     } catch {
       setCameraError(
-        'Camera access was blocked or unavailable. Allow camera permissions or use "Capture / Take Photo" below.'
+        'Camera access was blocked or unavailable. Allow camera permissions or use "Capture / Device Camera" below.'
       );
     }
   };
@@ -696,7 +717,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       return;
     }
 
-    const maxDim = 1600;
+    if (cameraPhotos.length >= MAX_MULTI_FILES) {
+      setCameraError(`Maximum of ${MAX_MULTI_FILES} photos can be queued at once.`);
+      return;
+    }
+
+    const maxDim = cameraPhotos.length >= 2 ? 1280 : 1500;
     const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
     const width = Math.round(video.videoWidth * scale);
     const height = Math.round(video.videoHeight * scale);
@@ -710,16 +736,19 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       return;
     }
     ctx.drawImage(video, 0, 0, width, height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+    const dataUrl = canvas.toDataURL('image/jpeg', cameraPhotos.length >= 2 ? 0.78 : 0.85);
     const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
 
-    setCameraPhoto({
-      mimeType: 'image/jpeg',
-      data: base64,
-      fileName: `camera-capture-${Date.now()}.jpg`,
-      previewUrl: dataUrl,
-    });
-    stopCameraStream();
+    setCameraPhotos((prev) => [
+      ...prev,
+      {
+        id: makeRowKey('cam', prev.length),
+        mimeType: 'image/jpeg',
+        data: base64,
+        fileName: `camera-capture-${prev.length + 1}.jpg`,
+        previewUrl: dataUrl,
+      },
+    ]);
   };
 
   const detectImageMime = (file: File): string => {
@@ -741,156 +770,202 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     return 'image/jpeg';
   };
 
-  const readImageFileAsAttachment = (
+  const readSingleImageAsAttachment = (
     file: File,
-    onLoaded: (att: BinaryAttachment) => void,
+    compact = false
+  ): Promise<{ attachment?: BinaryAttachment; error?: string }> =>
+    new Promise((resolve) => {
+      if (file.size > 20 * 1024 * 1024) {
+        resolve({ error: `"${file.name}" is larger than 20 MB.` });
+        return;
+      }
+
+      let settled = false;
+      const done = (result: { attachment?: BinaryAttachment; error?: string }) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(watchdog);
+        resolve(result);
+      };
+      const watchdog = window.setTimeout(() => {
+        done({ error: `Timed out reading "${file.name}".` });
+      }, 15000);
+
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+          const commaIdx = dataUrl.indexOf(',');
+          const rawBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
+          if (!rawBase64) {
+            done({ error: `Failed to read "${file.name}".` });
+            return;
+          }
+          const detectedMime = detectImageMime(file);
+          const isStandardWebImage = IMAGE_MIMES.has(detectedMime);
+
+          if (detectedMime !== 'image/gif') {
+            const img = new Image();
+            img.onload = () => {
+              try {
+                const maxDim = compact ? 1280 : 1550;
+                const sizeThreshold = compact ? 450 * 1024 : 1.2 * 1024 * 1024;
+                const needsResize =
+                  img.width > maxDim ||
+                  img.height > maxDim ||
+                  file.size > sizeThreshold ||
+                  !isStandardWebImage;
+                if (!needsResize) {
+                  done({
+                    attachment: {
+                      id: makeRowKey('img', 0),
+                      mimeType: detectedMime,
+                      data: rawBase64,
+                      fileName: file.name || 'photo.jpg',
+                      previewUrl: dataUrl,
+                    },
+                  });
+                  return;
+                }
+                const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+                const width = Math.max(1, Math.round(img.width * scale));
+                const height = Math.max(1, Math.round(img.height * scale));
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                  done({
+                    attachment: {
+                      id: makeRowKey('img', 0),
+                      mimeType: isStandardWebImage ? detectedMime : 'image/jpeg',
+                      data: rawBase64,
+                      fileName: file.name || 'photo.jpg',
+                      previewUrl: isStandardWebImage ? dataUrl : undefined,
+                    },
+                  });
+                  return;
+                }
+                ctx.drawImage(img, 0, 0, width, height);
+                const compressedUrl = canvas.toDataURL('image/jpeg', compact ? 0.76 : 0.84);
+                const compressedBase64 = compressedUrl.slice(compressedUrl.indexOf(',') + 1);
+                done({
+                  attachment: {
+                    id: makeRowKey('img', 0),
+                    mimeType: 'image/jpeg',
+                    data: compressedBase64,
+                    fileName: file.name || 'photo.jpg',
+                    previewUrl: compressedUrl,
+                  },
+                });
+              } catch {
+                done({
+                  attachment: {
+                    id: makeRowKey('img', 0),
+                    mimeType: detectedMime,
+                    data: rawBase64,
+                    fileName: file.name || 'photo.jpg',
+                    previewUrl: isStandardWebImage ? dataUrl : undefined,
+                  },
+                });
+              }
+            };
+            img.onerror = () => {
+              done({
+                attachment: {
+                  id: makeRowKey('img', 0),
+                  mimeType: detectedMime,
+                  data: rawBase64,
+                  fileName: file.name || 'photo.jpg',
+                  previewUrl: isStandardWebImage ? dataUrl : undefined,
+                },
+              });
+            };
+            img.src = dataUrl;
+            return;
+          }
+
+          done({
+            attachment: {
+              id: makeRowKey('img', 0),
+              mimeType: detectedMime,
+              data: rawBase64,
+              fileName: file.name || 'photo.gif',
+              previewUrl: dataUrl,
+            },
+          });
+        };
+        reader.onerror = () => {
+          done({ error: `Unable to read "${file.name}".` });
+        };
+        reader.readAsDataURL(file);
+      } catch {
+        done({ error: `Unable to read "${file.name}".` });
+      }
+    });
+
+  const appendImageFiles = async (
+    files: File[],
+    setter: React.Dispatch<React.SetStateAction<BinaryAttachment[]>>,
+    existingCount: number,
     onDone?: () => void
   ) => {
-    if (file.size > 20 * 1024 * 1024) {
-      setErrorMessage('Image is too large. Please choose an image smaller than 20 MB.');
+    if (files.length === 0) {
       onDone?.();
       return;
     }
 
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(watchdog);
-      setIsReadingFile(false);
+    const remainingSlots = MAX_MULTI_FILES - existingCount;
+    if (remainingSlots <= 0) {
+      setErrorMessage(`You can recognize up to ${MAX_MULTI_FILES} files in one go.`);
       onDone?.();
-    };
-    const watchdog = window.setTimeout(() => {
-      finish();
-    }, 12000);
+      return;
+    }
+
+    const filesToProcess = files.slice(0, remainingSlots);
+    const skippedCount = files.length - filesToProcess.length;
+    const compact = existingCount + filesToProcess.length > 2;
 
     setIsReadingFile(true);
     setErrorMessage(null);
-
     try {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
-        const commaIdx = dataUrl.indexOf(',');
-        const rawBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
-        if (!rawBase64) {
-          setErrorMessage('Failed to read the selected image.');
-          finish();
-          return;
-        }
-        const detectedMime = detectImageMime(file);
-        const isStandardWebImage = IMAGE_MIMES.has(detectedMime);
+      const results = await Promise.all(
+        filesToProcess.map((f) => readSingleImageAsAttachment(f, compact))
+      );
+      const loaded = results
+        .map((r) => r.attachment)
+        .filter((a): a is BinaryAttachment => Boolean(a));
+      const errors = results.map((r) => r.error).filter((e): e is string => Boolean(e));
 
-        // Resize/compress large photos (or convert non-standard formats) client-side so /api/gemini stays fast & reliable
-        if (detectedMime !== 'image/gif') {
-          const img = new Image();
-          img.onload = () => {
-            try {
-              const maxDim = 1600;
-              const needsResize =
-                img.width > maxDim ||
-                img.height > maxDim ||
-                file.size > 1.5 * 1024 * 1024 ||
-                !isStandardWebImage;
-              if (!needsResize) {
-                onLoaded({
-                  mimeType: detectedMime,
-                  data: rawBase64,
-                  fileName: file.name || 'photo.jpg',
-                  previewUrl: dataUrl,
-                });
-                finish();
-                return;
-              }
-              const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-              const width = Math.max(1, Math.round(img.width * scale));
-              const height = Math.max(1, Math.round(img.height * scale));
-              const canvas = document.createElement('canvas');
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext('2d');
-              if (!ctx) {
-                onLoaded({
-                  mimeType: isStandardWebImage ? detectedMime : 'image/jpeg',
-                  data: rawBase64,
-                  fileName: file.name || 'photo.jpg',
-                  previewUrl: isStandardWebImage ? dataUrl : undefined,
-                });
-                finish();
-                return;
-              }
-              ctx.drawImage(img, 0, 0, width, height);
-              const compressedUrl = canvas.toDataURL('image/jpeg', 0.85);
-              const compressedBase64 = compressedUrl.slice(compressedUrl.indexOf(',') + 1);
-              onLoaded({
-                mimeType: 'image/jpeg',
-                data: compressedBase64,
-                fileName: file.name || 'photo.jpg',
-                previewUrl: compressedUrl,
-              });
-              finish();
-            } catch {
-              onLoaded({
-                mimeType: detectedMime,
-                data: rawBase64,
-                fileName: file.name || 'photo.jpg',
-                previewUrl: isStandardWebImage ? dataUrl : undefined,
-              });
-              finish();
-            }
-          };
-          img.onerror = () => {
-            onLoaded({
-              mimeType: detectedMime,
-              data: rawBase64,
-              fileName: file.name || 'photo.jpg',
-              previewUrl: isStandardWebImage ? dataUrl : undefined,
-            });
-            finish();
-          };
-          img.src = dataUrl;
-          return;
-        }
-
-        onLoaded({
-          mimeType: detectedMime,
-          data: rawBase64,
-          fileName: file.name || 'photo.gif',
-          previewUrl: dataUrl,
-        });
-        finish();
-      };
-      reader.onerror = () => {
-        setErrorMessage('Unable to read the selected image file.');
-        finish();
-      };
-      reader.readAsDataURL(file);
-    } catch {
-      setErrorMessage('Unable to read the selected image file.');
-      finish();
+      if (loaded.length > 0) {
+        setter((prev) => [...prev, ...loaded].slice(0, MAX_MULTI_FILES));
+      }
+      if (skippedCount > 0) {
+        errors.push(`Only the first ${MAX_MULTI_FILES} files were added.`);
+      }
+      if (errors.length > 0) {
+        setErrorMessage(errors.join(' '));
+      }
+    } finally {
+      setIsReadingFile(false);
+      onDone?.();
     }
   };
 
   const handleCameraFallbackChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setErrorMessage(null);
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
     setCameraError(null);
-    readImageFileAsAttachment(
-      file,
-      (att) => setCameraPhoto(att),
-      () => setCameraInputKey((k) => k + 1)
+    void appendImageFiles(files, setCameraPhotos, cameraPhotos.length, () =>
+      setCameraInputKey((k) => k + 1)
     );
   };
 
   const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setErrorMessage(null);
-    readImageFileAsAttachment(
-      file,
-      (att) => setSelectedPhoto(att),
-      () => setPhotoInputKey((k) => k + 1)
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
+    void appendImageFiles(files, setSelectedPhotos, selectedPhotos.length, () =>
+      setPhotoInputKey((k) => k + 1)
     );
   };
 
@@ -898,167 +973,236 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     e.preventDefault();
     e.stopPropagation();
     setIsDraggingPhoto(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    setErrorMessage(null);
-    readImageFileAsAttachment(file, (att) => setSelectedPhoto(att));
+    const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+    if (files.length === 0) return;
+    void appendImageFiles(files, setSelectedPhotos, selectedPhotos.length);
   };
 
   const handlePhotoPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+    const imageFiles: File[] = [];
     for (const item of Array.from(items)) {
       if (item.type.startsWith('image/')) {
         const file = item.getAsFile();
-        if (file) {
-          e.preventDefault();
-          setErrorMessage(null);
-          readImageFileAsAttachment(file, (att) => setSelectedPhoto(att));
-          return;
-        }
+        if (file) imageFiles.push(file);
       }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      void appendImageFiles(imageFiles, setSelectedPhotos, selectedPhotos.length);
+    }
+  };
+
+  const readSingleUploadedFile = (
+    file: File,
+    compactImages: boolean
+  ): Promise<{ item?: UploadedFileItem; error?: string }> =>
+    new Promise((resolve) => {
+      const lowerName = (file.name || '').toLowerCase();
+      const isImageFile =
+        file.type.startsWith('image/') ||
+        /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(lowerName);
+
+      if (isImageFile) {
+        void readSingleImageAsAttachment(file, compactImages).then((res) => {
+          if (res.attachment) {
+            resolve({
+              item: {
+                id: res.attachment.id,
+                fileName: res.attachment.fileName,
+                kind: 'binary',
+                binary: res.attachment,
+              },
+            });
+          } else {
+            resolve({ error: res.error || `Failed to read "${file.name}".` });
+          }
+        });
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        resolve({ error: `"${file.name}" is larger than 10 MB.` });
+        return;
+      }
+
+      const isTextLike =
+        file.type.startsWith('text/') ||
+        file.type === 'application/csv' ||
+        file.type === 'application/json' ||
+        lowerName.endsWith('.csv') ||
+        lowerName.endsWith('.tsv') ||
+        lowerName.endsWith('.txt') ||
+        lowerName.endsWith('.md') ||
+        lowerName.endsWith('.json');
+
+      if (isTextLike) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const content = typeof reader.result === 'string' ? reader.result : '';
+          resolve({
+            item: {
+              id: makeRowKey('txt', 0),
+              fileName: file.name,
+              kind: 'text',
+              textContent: content,
+            },
+          });
+        };
+        reader.onerror = () => resolve({ error: `Unable to read "${file.name}".` });
+        reader.readAsText(file);
+        return;
+      }
+
+      const isPdf = file.type === 'application/pdf' || lowerName.endsWith('.pdf');
+      if (isPdf || BINARY_FILE_MIMES.has(file.type)) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+          const commaIdx = dataUrl.indexOf(',');
+          const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
+          if (!base64) {
+            resolve({ error: `Failed to encode "${file.name}".` });
+            return;
+          }
+          const att: BinaryAttachment = {
+            id: makeRowKey('bin', 0),
+            mimeType: isPdf ? 'application/pdf' : file.type,
+            data: base64,
+            fileName: file.name,
+            previewUrl: file.type.startsWith('image/') ? dataUrl : undefined,
+          };
+          resolve({
+            item: {
+              id: att.id,
+              fileName: file.name,
+              kind: 'binary',
+              binary: att,
+            },
+          });
+        };
+        reader.onerror = () => resolve({ error: `Unable to read "${file.name}".` });
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      resolve({
+        error: `Unsupported file "${file.name}". Upload CSV, TSV, TXT, JSON, PDF, or image files.`,
+      });
+    });
+
+  const appendUploadedFiles = async (files: File[], onDone?: () => void) => {
+    if (files.length === 0) {
+      onDone?.();
+      return;
+    }
+
+    const remainingSlots = MAX_MULTI_FILES - uploadedFiles.length;
+    if (remainingSlots <= 0) {
+      setErrorMessage(`You can upload up to ${MAX_MULTI_FILES} files in one go.`);
+      onDone?.();
+      return;
+    }
+
+    const filesToProcess = files.slice(0, remainingSlots);
+    const skippedCount = files.length - filesToProcess.length;
+    const compactImages = uploadedFiles.length + filesToProcess.length > 2;
+
+    setIsReadingFile(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const results = await Promise.all(
+        filesToProcess.map((f) => readSingleUploadedFile(f, compactImages))
+      );
+      const loaded = results
+        .map((r) => r.item)
+        .filter((it): it is UploadedFileItem => Boolean(it));
+      const errors = results.map((r) => r.error).filter((e): e is string => Boolean(e));
+
+      if (loaded.length > 0) {
+        setUploadedFiles((prev) => [...prev, ...loaded].slice(0, MAX_MULTI_FILES));
+      }
+      if (skippedCount > 0) {
+        errors.push(`Only the first ${MAX_MULTI_FILES} files were added.`);
+      }
+      if (errors.length > 0) {
+        setErrorMessage(errors.join(' '));
+      }
+    } finally {
+      setIsReadingFile(false);
+      onDone?.();
     }
   };
 
   const handleUploadFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const resetFileInput = () => setFileInputKey((k) => k + 1);
-
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    const lowerName = (file.name || '').toLowerCase();
-    const isImageFile =
-      file.type.startsWith('image/') ||
-      /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(lowerName);
-
-    if (isImageFile) {
-      readImageFileAsAttachment(
-        file,
-        (att) => {
-          setUploadedFileName(att.fileName);
-          setUploadedBinaryFile(att);
-          setUploadedTextContent('');
-        },
-        resetFileInput
-      );
-      return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMessage('File is too large. Please upload a file smaller than 10 MB.');
-      resetFileInput();
-      return;
-    }
-
-    const isTextLike =
-      file.type.startsWith('text/') ||
-      file.type === 'application/csv' ||
-      file.type === 'application/json' ||
-      lowerName.endsWith('.csv') ||
-      lowerName.endsWith('.tsv') ||
-      lowerName.endsWith('.txt') ||
-      lowerName.endsWith('.md') ||
-      lowerName.endsWith('.json');
-
-    if (isTextLike) {
-      setIsReadingFile(true);
-      const reader = new FileReader();
-      reader.onload = () => {
-        setIsReadingFile(false);
-        const content = typeof reader.result === 'string' ? reader.result : '';
-        setUploadedFileName(file.name);
-        setUploadedTextContent(content);
-        setUploadedBinaryFile(null);
-        resetFileInput();
-      };
-      reader.onerror = () => {
-        setIsReadingFile(false);
-        setErrorMessage('Unable to read the selected file.');
-        resetFileInput();
-      };
-      reader.readAsText(file);
-      return;
-    }
-
-    const isPdf = file.type === 'application/pdf' || lowerName.endsWith('.pdf');
-    if (isPdf || BINARY_FILE_MIMES.has(file.type)) {
-      setIsReadingFile(true);
-      const reader = new FileReader();
-      reader.onload = () => {
-        setIsReadingFile(false);
-        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
-        const commaIdx = dataUrl.indexOf(',');
-        const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
-        if (!base64) {
-          setErrorMessage('Failed to encode the uploaded file.');
-          resetFileInput();
-          return;
-        }
-        setUploadedFileName(file.name);
-        setUploadedBinaryFile({
-          mimeType: isPdf ? 'application/pdf' : file.type,
-          data: base64,
-          fileName: file.name,
-          previewUrl: file.type.startsWith('image/') ? dataUrl : undefined,
-        });
-        resetFileInput();
-      };
-      reader.onerror = () => {
-        setIsReadingFile(false);
-        setErrorMessage('Unable to read the selected file.');
-        resetFileInput();
-      };
-      reader.readAsDataURL(file);
-      return;
-    }
-
-    setErrorMessage(
-      'Unsupported file type. Upload a CSV, TSV, TXT, JSON, PDF, or image file.'
-    );
-    resetFileInput();
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
+    void appendUploadedFiles(files, () => setFileInputKey((k) => k + 1));
   };
 
-  // Process Camera / Photo / File Upload through Gemini API and fit recognized data into Tabular Data Entry
+  const handleUploadFileDrop = (e: React.DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFiles(false);
+    const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+    if (files.length === 0) return;
+    void appendUploadedFiles(files);
+  };
+
+  // Process Camera / Photo / File Upload through Gemini API (supports multiple files at once) and fit recognized data into Tabular Data Entry
   const handleRecognizeWithGemini = async (source: 'camera' | 'photo' | 'file') => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
     let rawTextToSend = '';
-    let attachmentToSend: { mimeType: string; data: string; fileName?: string } | null = null;
+    let attachmentsToSend: Array<{ mimeType: string; data: string; fileName?: string }> = [];
 
     if (source === 'camera') {
-      if (!cameraPhoto) {
-        setErrorMessage('Capture a photo from your camera first.');
+      if (cameraPhotos.length === 0) {
+        setErrorMessage('Capture at least one photo from your camera first.');
         return;
       }
-      attachmentToSend = {
-        mimeType: cameraPhoto.mimeType,
-        data: cameraPhoto.data,
-        fileName: cameraPhoto.fileName,
-      };
+      attachmentsToSend = cameraPhotos.map((p) => ({
+        mimeType: p.mimeType,
+        data: p.data,
+        fileName: p.fileName,
+      }));
     } else if (source === 'photo') {
-      if (!selectedPhoto) {
-        setErrorMessage('Select a photo or screenshot first.');
+      if (selectedPhotos.length === 0) {
+        setErrorMessage('Select at least one photo or screenshot first.');
         return;
       }
-      attachmentToSend = {
-        mimeType: selectedPhoto.mimeType,
-        data: selectedPhoto.data,
-        fileName: selectedPhoto.fileName,
-      };
+      attachmentsToSend = selectedPhotos.map((p) => ({
+        mimeType: p.mimeType,
+        data: p.data,
+        fileName: p.fileName,
+      }));
     } else {
-      rawTextToSend = uploadedTextContent.trim();
-      if (uploadedBinaryFile) {
-        attachmentToSend = {
-          mimeType: uploadedBinaryFile.mimeType,
-          data: uploadedBinaryFile.data,
-          fileName: uploadedBinaryFile.fileName,
-        };
+      const textChunks: string[] = [];
+      for (const item of uploadedFiles) {
+        if (item.kind === 'text' && item.textContent && item.textContent.trim()) {
+          textChunks.push(`--- File: ${item.fileName} ---\n${item.textContent.trim()}`);
+        } else if (item.kind === 'binary' && item.binary) {
+          attachmentsToSend.push({
+            mimeType: item.binary.mimeType,
+            data: item.binary.data,
+            fileName: item.binary.fileName,
+          });
+        }
       }
-      if (!rawTextToSend && !attachmentToSend) {
-        setErrorMessage('Upload a file or paste file contents before recognizing with Gemini.');
+      if (uploadedTextContent.trim()) {
+        textChunks.push(
+          textChunks.length > 0
+            ? `--- Pasted Notes ---\n${uploadedTextContent.trim()}`
+            : uploadedTextContent.trim()
+        );
+      }
+      rawTextToSend = textChunks.join('\n\n');
+
+      if (!rawTextToSend && attachmentsToSend.length === 0) {
+        setErrorMessage('Upload one or more files, or paste text before recognizing with Gemini.');
         return;
       }
     }
@@ -1070,7 +1214,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         rawText: rawTextToSend,
         defaultDate,
         defaultLogger: defaultLogger.trim(),
-        attachment: attachmentToSend,
+        attachments: attachmentsToSend,
       });
 
       const response = await fetch('/api/gemini', {
@@ -1536,6 +1680,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
           id={photoInputId}
           type="file"
           accept="image/*"
+          multiple
           onChange={handlePhotoFileChange}
           tabIndex={-1}
           className="fixed -top-24 -left-24 w-1 h-1 opacity-0"
@@ -1546,6 +1691,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
           id={fileInputId}
           type="file"
           accept=".csv,.tsv,.txt,.md,.json,.pdf,image/*,text/csv,text/plain,application/json,application/pdf"
+          multiple
           onChange={handleUploadFileChange}
           tabIndex={-1}
           className="fixed -top-24 -left-24 w-1 h-1 opacity-0"
@@ -1693,6 +1839,11 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             >
               <Camera className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
               <span>Camera Entry</span>
+              {cameraPhotos.length > 0 && (
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-sky-100 dark:bg-sky-950/70 text-sky-800 dark:text-sky-300">
+                  {cameraPhotos.length}
+                </span>
+              )}
             </button>
 
             <button
@@ -1706,6 +1857,11 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             >
               <ImageIcon className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
               <span>Photo Entry</span>
+              {selectedPhotos.length > 0 && (
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300">
+                  {selectedPhotos.length}
+                </span>
+              )}
             </button>
 
             <button
@@ -1719,6 +1875,11 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             >
               <Upload className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
               <span>File Upload</span>
+              {uploadedFiles.length > 0 && (
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-teal-100 dark:bg-teal-950/70 text-teal-800 dark:text-teal-300">
+                  {uploadedFiles.length}
+                </span>
+              )}
             </button>
           </div>
 
@@ -1737,16 +1898,16 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             </div>
           )}
 
-          {/* MODE 1: CAMERA ENTRY (processed via Gemini -> fills Tabular Entry) */}
+          {/* MODE 1: CAMERA ENTRY (supports snapping multiple photos -> Gemini -> fills Tabular Entry) */}
           {entryMode === 'camera' && (
             <div className="rounded-2xl border border-stone-200 dark:border-stone-800 p-4 sm:p-5 space-y-4 bg-stone-50/50 dark:bg-stone-800/30">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="text-xs font-bold text-stone-900 dark:text-white">
-                    Camera Entry (Gemini Recognition)
+                    Camera Entry (Gemini Recognition — Multiple Pages Supported)
                   </h4>
                   <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                    Snap a photo of handwritten logs, clinic charts, or feeding sheets. Gemini will extract rows into Tabular Entry for your review.
+                    Snap one or more photos (up to {MAX_MULTI_FILES}) of handwritten logs, clinic charts, or feeding sheets. Gemini recognizes all photos together into Tabular Entry.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1765,7 +1926,9 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                     className="px-3 py-1.5 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl flex items-center gap-1.5 cursor-pointer select-none"
                   >
                     <Camera className="w-3.5 h-3.5" />
-                    <span>Capture / Device Camera</span>
+                    <span>
+                      {cameraPhotos.length > 0 ? 'Add Device Capture' : 'Capture / Device Camera'}
+                    </span>
                   </label>
                 </div>
               </div>
@@ -1790,57 +1953,90 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                     <button
                       type="button"
                       onClick={captureFromCamera}
-                      className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                      disabled={cameraPhotos.length >= MAX_MULTI_FILES}
+                      className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                     >
                       <Camera className="w-3.5 h-3.5" />
-                      <span>Take Snapshot</span>
+                      <span>
+                        {cameraPhotos.length > 0
+                          ? `Take Snapshot #${cameraPhotos.length + 1}`
+                          : 'Take Snapshot'}
+                      </span>
                     </button>
                     <button
                       type="button"
                       onClick={stopCameraStream}
                       className="px-3.5 py-2 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl cursor-pointer"
                     >
-                      Stop Camera
+                      Done Capturing
                     </button>
                   </div>
                 </div>
               )}
 
-              {cameraPhoto && (
+              {cameraPhotos.length > 0 && (
                 <div className="space-y-3">
-                  {cameraPhoto.previewUrl && (
-                    <div className="rounded-2xl overflow-hidden border border-stone-200 dark:border-stone-700 bg-stone-950/5 max-h-72 flex items-center justify-center">
-                      <img
-                        src={cameraPhoto.previewUrl}
-                        alt="Captured camera preview"
-                        className="max-h-72 object-contain"
-                      />
-                    </div>
-                  )}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                    {cameraPhotos.map((photo, idx) => (
+                      <div
+                        key={photo.id}
+                        className="relative group rounded-xl overflow-hidden border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900"
+                      >
+                        {photo.previewUrl ? (
+                          <img
+                            src={photo.previewUrl}
+                            alt={`Camera capture ${idx + 1}`}
+                            className="w-full h-28 object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-28 flex flex-col items-center justify-center gap-1 p-2 text-[11px] text-stone-500">
+                            <ImageIcon className="w-5 h-5 text-emerald-600" />
+                            <span className="truncate max-w-full">{photo.fileName}</span>
+                          </div>
+                        )}
+                        <div className="px-2 py-1 text-[10px] font-medium text-stone-600 dark:text-stone-300 truncate bg-stone-50 dark:bg-stone-800/80 border-t border-stone-200 dark:border-stone-700">
+                          #{idx + 1} · {photo.fileName}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCameraPhotos((prev) => prev.filter((item) => item.id !== photo.id))
+                          }
+                          className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-stone-900/75 text-white hover:bg-rose-600 transition-colors cursor-pointer"
+                          title="Remove photo"
+                          aria-label={`Remove camera photo ${idx + 1}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <button
                       type="button"
-                      onClick={() => setCameraPhoto(null)}
+                      onClick={() => setCameraPhotos([])}
                       className="px-3 py-1.5 text-xs font-semibold text-stone-600 dark:text-stone-300 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl flex items-center gap-1.5 cursor-pointer"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Retake</span>
+                      <span>Clear All ({cameraPhotos.length})</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => void handleRecognizeWithGemini('camera')}
-                      disabled={isAnalyzing}
+                      disabled={isAnalyzing || isReadingFile}
                       className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400 dark:text-stone-950 rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                     >
                       {isAnalyzing ? (
                         <>
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Recognizing with Gemini...</span>
+                          <span>Recognizing {cameraPhotos.length} photo{cameraPhotos.length === 1 ? '' : 's'}...</span>
                         </>
                       ) : (
                         <>
                           <Sparkles className="w-3.5 h-3.5" />
-                          <span>Recognize &amp; Fill Tabular Entry</span>
+                          <span>
+                            Recognize {cameraPhotos.length} Photo{cameraPhotos.length === 1 ? '' : 's'} &amp; Fill Tabular Entry
+                          </span>
                         </>
                       )}
                     </button>
@@ -1850,19 +2046,29 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             </div>
           )}
 
-          {/* MODE 2: PHOTO ENTRY (processed via Gemini -> fills Tabular Entry) */}
+          {/* MODE 2: PHOTO ENTRY (multiple photos/screenshots -> Gemini -> fills Tabular Entry) */}
           {entryMode === 'photo' && (
             <div
               onPaste={handlePhotoPaste}
-              className="rounded-2xl border border-stone-200 dark:border-stone-800 p-4 sm:p-5 space-y-4 bg-stone-50/50 dark:bg-stone-800/30"
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingPhoto(true);
+              }}
+              onDragLeave={() => setIsDraggingPhoto(false)}
+              onDrop={handlePhotoDrop}
+              className={`rounded-2xl border p-4 sm:p-5 space-y-4 transition-colors ${
+                isDraggingPhoto
+                  ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/30'
+                  : 'border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30'
+              }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="text-xs font-bold text-stone-900 dark:text-white">
-                    Photo Entry (Gemini Recognition)
+                    Photo Entry (Gemini Recognition — Multiple Photos Supported)
                   </h4>
                   <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                    Choose, drop, or paste a photo or screenshot of feeding logs, baby tracker apps, or growth charts. Gemini will recognize the fields and populate Tabular Entry.
+                    Choose, drop, or paste one or more photos/screenshots (up to {MAX_MULTI_FILES}). Gemini recognizes all photos in one go and populates Tabular Entry.
                   </p>
                 </div>
                 <label
@@ -1872,37 +2078,61 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                   <ImageIcon className="w-3.5 h-3.5" />
                   <span>
                     {isReadingFile
-                      ? 'Loading Photo...'
-                      : selectedPhoto
-                        ? 'Choose Another Photo'
-                        : 'Select Photo / Screenshot'}
+                      ? 'Loading Photos...'
+                      : selectedPhotos.length > 0
+                        ? 'Add More Photos'
+                        : 'Select Photos / Screenshots'}
                   </span>
                 </label>
               </div>
 
-              {selectedPhoto ? (
+              {selectedPhotos.length > 0 ? (
                 <div className="space-y-3">
-                  {selectedPhoto.previewUrl ? (
-                    <div className="rounded-2xl overflow-hidden border border-stone-200 dark:border-stone-700 bg-stone-950/5 max-h-72 flex items-center justify-center">
-                      <img
-                        src={selectedPhoto.previewUrl}
-                        alt={selectedPhoto.fileName}
-                        className="max-h-72 object-contain"
-                      />
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-4 py-6 flex flex-col items-center justify-center gap-1.5 text-xs text-stone-600 dark:text-stone-300">
-                      <ImageIcon className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
-                      <span className="font-semibold">{selectedPhoto.fileName}</span>
-                      <span className="text-[11px] text-stone-500 dark:text-stone-400">
-                        Photo ready ({selectedPhoto.mimeType}) — tap Recognize below to extract entries.
-                      </span>
-                    </div>
-                  )}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                    {selectedPhotos.map((photo, idx) => (
+                      <div
+                        key={photo.id}
+                        className="relative group rounded-xl overflow-hidden border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900"
+                      >
+                        {photo.previewUrl ? (
+                          <img
+                            src={photo.previewUrl}
+                            alt={photo.fileName}
+                            className="w-full h-28 object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-28 flex flex-col items-center justify-center gap-1 p-2 text-[11px] text-stone-500 dark:text-stone-400 text-center">
+                            <ImageIcon className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                            <span className="truncate max-w-full font-medium">{photo.fileName}</span>
+                            <span className="text-[10px]">{photo.mimeType}</span>
+                          </div>
+                        )}
+                        <div className="px-2 py-1 text-[10px] font-medium text-stone-600 dark:text-stone-300 truncate bg-stone-50 dark:bg-stone-800/80 border-t border-stone-200 dark:border-stone-700">
+                          #{idx + 1} · {photo.fileName}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedPhotos((prev) => prev.filter((item) => item.id !== photo.id))
+                          }
+                          className="absolute top-1.5 right-1.5 p-1 rounded-lg bg-stone-900/75 text-white hover:bg-rose-600 transition-colors cursor-pointer"
+                          title="Remove photo"
+                          aria-label={`Remove ${photo.fileName}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate">
-                      {selectedPhoto.fileName}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPhotos([])}
+                      className="px-3 py-1.5 text-xs font-semibold text-stone-600 dark:text-stone-300 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-xl flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Clear All ({selectedPhotos.length})</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => void handleRecognizeWithGemini('photo')}
@@ -1912,12 +2142,14 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                       {isAnalyzing ? (
                         <>
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Recognizing with Gemini...</span>
+                          <span>Recognizing {selectedPhotos.length} photo{selectedPhotos.length === 1 ? '' : 's'}...</span>
                         </>
                       ) : (
                         <>
                           <Sparkles className="w-3.5 h-3.5" />
-                          <span>Recognize &amp; Fill Tabular Entry</span>
+                          <span>
+                            Recognize {selectedPhotos.length} Photo{selectedPhotos.length === 1 ? '' : 's'} &amp; Fill Tabular Entry
+                          </span>
                         </>
                       )}
                     </button>
@@ -1926,12 +2158,6 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
               ) : (
                 <label
                   htmlFor={photoInputId}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setIsDraggingPhoto(true);
-                  }}
-                  onDragLeave={() => setIsDraggingPhoto(false)}
-                  onDrop={handlePhotoDrop}
                   className={`w-full py-10 rounded-2xl border-2 border-dashed transition-colors flex flex-col items-center justify-center gap-2 text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none ${
                     isDraggingPhoto
                       ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30'
@@ -1942,17 +2168,17 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                     <>
                       <Loader2 className="w-7 h-7 text-emerald-500 animate-spin" />
                       <span className="font-semibold text-stone-700 dark:text-stone-300">
-                        Preparing photo...
+                        Preparing photos...
                       </span>
                     </>
                   ) : (
                     <>
                       <ImageIcon className="w-7 h-7 text-stone-400" />
                       <span className="font-semibold text-stone-700 dark:text-stone-300">
-                        Tap or drop a photo / screenshot (PNG, JPG, HEIC, WEBP)
+                        Tap or drop multiple photos / screenshots (PNG, JPG, HEIC, WEBP)
                       </span>
                       <span className="text-[11px]">
-                        Processed via Gemini API into Tabular Entry
+                        Up to {MAX_MULTI_FILES} photos recognized in a single Gemini call
                       </span>
                     </>
                   )}
@@ -1961,16 +2187,28 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             </div>
           )}
 
-          {/* MODE 3: FILE UPLOAD ENTRY (processed via Gemini -> fills Tabular Entry) */}
+          {/* MODE 3: FILE UPLOAD ENTRY (multiple files -> Gemini -> fills Tabular Entry) */}
           {entryMode === 'file' && (
-            <div className="rounded-2xl border border-stone-200 dark:border-stone-800 p-4 sm:p-5 space-y-3.5 bg-stone-50/50 dark:bg-stone-800/30">
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingFiles(true);
+              }}
+              onDragLeave={() => setIsDraggingFiles(false)}
+              onDrop={handleUploadFileDrop}
+              className={`rounded-2xl border p-4 sm:p-5 space-y-3.5 transition-colors ${
+                isDraggingFiles
+                  ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/30'
+                  : 'border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30'
+              }`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="text-xs font-bold text-stone-900 dark:text-white">
-                    File Upload Entry (Gemini Recognition)
+                    File Upload Entry (Gemini Recognition — Multiple Files Supported)
                   </h4>
                   <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                    Upload a CSV, TSV, TXT, JSON, PDF, or photo file (or paste raw notes/sheets below). Gemini will parse and fit the data into Tabular Entry.
+                    Upload or drop multiple CSV, TSV, TXT, JSON, PDF, or photo files (up to {MAX_MULTI_FILES}) — or paste raw notes below. Gemini parses everything together into Tabular Entry.
                   </p>
                 </div>
                 <label
@@ -1978,53 +2216,96 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                   className="px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl inline-flex items-center gap-1.5 cursor-pointer select-none"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>{isReadingFile ? 'Loading...' : 'Choose File'}</span>
+                  <span>
+                    {isReadingFile
+                      ? 'Loading Files...'
+                      : uploadedFiles.length > 0
+                        ? 'Add More Files'
+                        : 'Choose Files'}
+                  </span>
                 </label>
               </div>
 
-              {uploadedFileName && (
-                <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FileText className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <span className="font-semibold text-stone-800 dark:text-stone-200 truncate">
-                      {uploadedFileName}
+              {uploadedFiles.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[11px] text-stone-600 dark:text-stone-400">
+                    <span className="font-semibold">
+                      Queued Files ({uploadedFiles.length}/{MAX_MULTI_FILES})
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => setUploadedFiles([])}
+                      className="text-stone-500 hover:text-rose-600 dark:hover:text-rose-400 font-semibold cursor-pointer"
+                    >
+                      Clear All Files
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUploadedFileName(null);
-                      setUploadedTextContent('');
-                      setUploadedBinaryFile(null);
-                    }}
-                    className="text-stone-400 hover:text-rose-600 cursor-pointer p-1"
-                    title="Clear uploaded file"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {uploadedFiles.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {item.binary?.previewUrl ? (
+                            <img
+                              src={item.binary.previewUrl}
+                              alt={item.fileName}
+                              className="w-7 h-7 rounded-lg object-cover shrink-0 border border-stone-200 dark:border-stone-700"
+                            />
+                          ) : item.kind === 'binary' && item.binary?.mimeType.startsWith('image/') ? (
+                            <ImageIcon className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                          ) : (
+                            <FileText className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="font-semibold text-stone-800 dark:text-stone-200 truncate">
+                              {item.fileName}
+                            </div>
+                            <div className="text-[10px] text-stone-500 dark:text-stone-400">
+                              {item.kind === 'text'
+                                ? `${(item.textContent?.length ?? 0).toLocaleString()} chars`
+                                : item.binary?.mimeType === 'application/pdf'
+                                  ? 'PDF document'
+                                  : item.binary?.mimeType || 'Binary attachment'}
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setUploadedFiles((prev) => prev.filter((f) => f.id !== item.id))
+                          }
+                          className="text-stone-400 hover:text-rose-600 cursor-pointer p-1 shrink-0"
+                          title="Remove file"
+                          aria-label={`Remove ${item.fileName}`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
-              {!uploadedBinaryFile && (
-                <textarea
-                  rows={5}
-                  value={uploadedTextContent}
-                  onChange={(e) => setUploadedTextContent(e.target.value)}
-                  placeholder={
-                    targetTable === 'auto'
-                      ? 'Uploaded CSV/TXT content appears here — or paste mixed Routine & Growth notes directly:\n2026-11-24 07:30 Mom, 20min, EBM 90ml, Wet diaper\n2026-11-24 Mom, Weight 5.21 kg, Length 59 cm, Temp 36.7C'
-                      : targetTable === 'routine'
-                        ? 'Uploaded CSV/TXT content appears here — or paste spreadsheet rows / chat logs directly:\n2026-11-24 07:30 Mom, 20min, EBM 90ml, Formula 30ml, Wet diaper\n2026-11-24 10:45 Dad, 15min, EBM 110ml, Mixed, burped well'
-                        : 'Uploaded CSV/TXT content appears here — or paste growth logs directly:\n2026-11-22 Mom, 5.12 kg, 58.5 cm, 36.7C, morning check\n2026-11-24 Dad, 5210g, 59cm, 98.4F, before feed'
-                  }
-                  className="w-full px-3.5 py-2.5 text-xs font-mono bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-2xl focus:outline-hidden focus:border-emerald-500 resize-y"
-                />
-              )}
+              <textarea
+                rows={uploadedFiles.length > 0 ? 3 : 5}
+                value={uploadedTextContent}
+                onChange={(e) => setUploadedTextContent(e.target.value)}
+                placeholder={
+                  targetTable === 'auto'
+                    ? 'Optional: paste additional mixed Routine & Growth notes or CSV rows here:\n2026-11-24 07:30 Mom, 20min, EBM 90ml, Wet diaper\n2026-11-24 Mom, Weight 5.21 kg, Length 59 cm, Temp 36.7C'
+                    : targetTable === 'routine'
+                      ? 'Optional: paste additional Routine rows or chat logs here:\n2026-11-24 07:30 Mom, 20min, EBM 90ml, Formula 30ml, Wet diaper\n2026-11-24 10:45 Dad, 15min, EBM 110ml, Mixed, burped well'
+                      : 'Optional: paste additional Growth logs here:\n2026-11-22 Mom, 5.12 kg, 58.5 cm, 36.7C, morning check\n2026-11-24 Dad, 5210g, 59cm, 98.4F, before feed'
+                }
+                className="w-full px-3.5 py-2.5 text-xs font-mono bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-2xl focus:outline-hidden focus:border-emerald-500 resize-y"
+              />
 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[11px] text-stone-500 dark:text-stone-400">
                   {targetTable === 'auto'
-                    ? 'Auto-splits Routine (feeds/diapers) & Growth (weight/length/temp) from a single upload.'
+                    ? 'Auto-splits Routine (feeds/diapers) & Growth (weight/length/temp) across all uploaded files.'
                     : targetTable === 'routine'
                       ? 'Auto-maps to Routine fields (converts oz → mL, 12h → 24h time).'
                       : 'Auto-maps to Growth fields (converts g/lb → kg, in → cm, °F → °C).'}
@@ -2032,18 +2313,31 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 <button
                   type="button"
                   onClick={() => void handleRecognizeWithGemini('file')}
-                  disabled={isAnalyzing || (!uploadedTextContent.trim() && !uploadedBinaryFile)}
+                  disabled={
+                    isAnalyzing ||
+                    isReadingFile ||
+                    (uploadedFiles.length === 0 && !uploadedTextContent.trim())
+                  }
                   className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400 dark:text-stone-950 rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isAnalyzing ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Recognizing with Gemini...</span>
+                      <span>
+                        Recognizing
+                        {uploadedFiles.length > 0
+                          ? ` ${uploadedFiles.length} file${uploadedFiles.length === 1 ? '' : 's'}...`
+                          : ' with Gemini...'}
+                      </span>
                     </>
                   ) : (
                     <>
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>Recognize &amp; Fill Tabular Entry</span>
+                      <span>
+                        {uploadedFiles.length > 1
+                          ? `Recognize ${uploadedFiles.length} Files & Fill Tabular Entry`
+                          : 'Recognize & Fill Tabular Entry'}
+                      </span>
                     </>
                   )}
                 </button>

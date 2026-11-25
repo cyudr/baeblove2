@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import type {
   BabyMeasurement,
@@ -58,6 +58,46 @@ function AppContent({ isPasswordProtected, onLockPortal }: AppContentProps) {
   const [isLoveNoteModalOpen, setIsLoveNoteModalOpen] = useState(false);
   const [isFormulaModalOpen, setIsFormulaModalOpen] = useState(false);
   const [loveNoteStageLabel, setLoveNoteStageLabel] = useState('Today');
+
+  useEffect(() => {
+    const NON_BLUR_INPUT_TYPES = new Set([
+      'button',
+      'checkbox',
+      'color',
+      'file',
+      'hidden',
+      'image',
+      'password',
+      'radio',
+      'range',
+      'reset',
+      'submit',
+    ]);
+
+    const handleGlobalEnterBlur = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Enter' ||
+        event.isComposing ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (target.readOnly || target.disabled) return;
+      if (NON_BLUR_INPUT_TYPES.has((target.type || 'text').toLowerCase())) return;
+
+      event.preventDefault();
+      target.blur();
+    };
+
+    document.addEventListener('keydown', handleGlobalEnterBlur);
+    return () => document.removeEventListener('keydown', handleGlobalEnterBlur);
+  }, []);
 
   const navigateToTab = (tab: string) => {
     if (tab === 'stages') {

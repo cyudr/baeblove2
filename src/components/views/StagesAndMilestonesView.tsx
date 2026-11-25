@@ -69,6 +69,7 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
   const [noteAuthor, setNoteAuthor] = useState('');
   const [noteBody, setNoteBody] = useState('');
+  const [noteRemark, setNoteRemark] = useState('');
   const [noteError, setNoteError] = useState<string | null>(null);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
@@ -83,6 +84,7 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
     setEditingNoteId(null);
     if (!preserveAuthor) setNoteAuthor('');
     setNoteBody('');
+    setNoteRemark('');
     setNoteError(null);
   };
 
@@ -100,6 +102,7 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
       const payload = {
         name: noteAuthor.trim() || null,
         notes: noteBody.trim(),
+        remark: noteRemark.trim() || null,
       };
 
       const res =
@@ -121,6 +124,7 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
     setEditingNoteId(note.id);
     setNoteAuthor(note.name ?? '');
     setNoteBody(note.notes ?? '');
+    setNoteRemark(note.remark ?? '');
     setNoteError(null);
     setShowQuickComposer(true);
     setSubTab('notes');
@@ -199,6 +203,19 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
             className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-sky-500"
           />
         </div>
+      </div>
+
+      <div>
+        <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+          Remark
+        </label>
+        <input
+          type="text"
+          value={noteRemark}
+          onChange={(e) => setNoteRemark(e.target.value)}
+          placeholder="Optional remark or tag (e.g. pediatrician visit, follow-up)"
+          className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-sky-500"
+        />
       </div>
 
       {noteError && (
@@ -280,6 +297,12 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
                 <p className="text-xs sm:text-sm text-stone-800 dark:text-stone-100 whitespace-pre-wrap break-words leading-relaxed">
                   {note.notes || '—'}
                 </p>
+                {note.remark && (
+                  <p className="text-[11px] text-stone-500 dark:text-stone-400 break-words">
+                    <span className="font-semibold text-stone-600 dark:text-stone-300">Remark:</span>{' '}
+                    {note.remark}
+                  </p>
+                )}
               </div>
 
               <div className="inline-flex items-center gap-1 shrink-0">
