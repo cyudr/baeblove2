@@ -416,18 +416,6 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Date
-            </label>
-            <input
-              type="date"
-              value={growthDate}
-              onChange={(e) => setGrowthDate(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Logged By
             </label>
             <input
@@ -435,6 +423,18 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               value={loggedBy}
               onChange={(e) => setLoggedBy(e.target.value)}
               placeholder="e.g. Mom, Dad, Caregiver"
+              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+              Date
+            </label>
+            <input
+              type="date"
+              value={growthDate}
+              onChange={(e) => setGrowthDate(e.target.value)}
               className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
