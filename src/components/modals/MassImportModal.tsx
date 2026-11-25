@@ -20,7 +20,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 
-export type MassImportTable = 'routine' | 'growth';
+export type MassImportTable = 'auto' | 'routine' | 'growth';
 type ImportSourceMode = 'tabular' | 'camera' | 'photo' | 'file';
 
 const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
@@ -127,7 +127,7 @@ const BINARY_FILE_MIMES = new Set(['application/pdf', ...IMAGE_MIMES]);
 
 export const MassImportModal: React.FC<MassImportModalProps> = ({
   isOpen,
-  initialTable = 'routine',
+  initialTable = 'auto',
   onClose,
 }) => {
   const { activeProfile, addRoutineRecordsBulk, addGrowthRecordsBulk } = useApp();
@@ -303,23 +303,78 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     file: File,
     onLoaded: (att: BinaryAttachment) => void
   ) => {
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMessage('Image is too large. Please choose an image smaller than 10 MB.');
+    if (file.size > 15 * 1024 * 1024) {
+      setErrorMessage('Image is too large. Please choose an image smaller than 15 MB.');
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : '';
       const commaIdx = dataUrl.indexOf(',');
-      const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
-      if (!base64) {
+      const rawBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
+      if (!rawBase64) {
         setErrorMessage('Failed to read the selected image.');
         return;
       }
       const mimeType = IMAGE_MIMES.has(file.type) ? file.type : 'image/jpeg';
+
+      // Resize/compress large photos client-side so serverless /api/mass-import payloads stay fast & reliable
+      if (mimeType !== 'image/gif') {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1600;
+          const needsResize =
+            img.width > maxDim || img.height > maxDim || file.size > 1.5 * 1024 * 1024;
+          if (!needsResize) {
+            onLoaded({
+              mimeType,
+              data: rawBase64,
+              fileName: file.name,
+              previewUrl: dataUrl,
+            });
+            return;
+          }
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          const width = Math.max(1, Math.round(img.width * scale));
+          const height = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            onLoaded({
+              mimeType,
+              data: rawBase64,
+              fileName: file.name,
+              previewUrl: dataUrl,
+            });
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const compressedBase64 = compressedUrl.slice(compressedUrl.indexOf(',') + 1);
+          onLoaded({
+            mimeType: 'image/jpeg',
+            data: compressedBase64,
+            fileName: file.name,
+            previewUrl: compressedUrl,
+          });
+        };
+        img.onerror = () => {
+          onLoaded({
+            mimeType,
+            data: rawBase64,
+            fileName: file.name,
+            previewUrl: dataUrl,
+          });
+        };
+        img.src = dataUrl;
+        return;
+      }
+
       onLoaded({
         mimeType,
-        data: base64,
+        data: rawBase64,
         fileName: file.name,
         previewUrl: dataUrl,
       });
@@ -455,7 +510,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
 
     setIsAnalyzing(true);
     try {
-      const response = await fetch('/api/gemini/mass-import', {
+      const response = await fetch('/api/mass-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -472,6 +527,8 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         error?: string;
         summary?: string;
         rows?: Record<string, unknown>[];
+        routineRows?: Record<string, unknown>[];
+        growthRows?: Record<string, unknown>[];
       } = {};
       if (rawResponseText) {
         try {
@@ -482,23 +539,41 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       }
 
       if (!response.ok) {
+        const plainDetail = rawResponseText
+          ? rawResponseText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180)
+          : '';
         setErrorMessage(
           payload.error ||
-            `Gemini analysis failed (HTTP ${response.status}). Check /api/health to verify API connectivity.`
+            (plainDetail
+              ? `Gemini analysis failed (HTTP ${response.status}): ${plainDetail}`
+              : `Gemini analysis failed (HTTP ${response.status}). Check /api/health to verify API connectivity.`)
         );
         return;
       }
 
-      const rows = Array.isArray(payload.rows) ? payload.rows : [];
-      if (rows.length === 0) {
+      const incomingRoutineRows = Array.isArray(payload.routineRows)
+        ? payload.routineRows
+        : targetTable === 'routine' && Array.isArray(payload.rows)
+          ? payload.rows
+          : [];
+
+      const incomingGrowthRows = Array.isArray(payload.growthRows)
+        ? payload.growthRows
+        : targetTable === 'growth' && Array.isArray(payload.rows)
+          ? payload.rows
+          : [];
+
+      if (incomingRoutineRows.length === 0 && incomingGrowthRows.length === 0) {
         setErrorMessage(
-          `Gemini could not recognize any ${targetTable} rows from this ${source}. Try a clearer capture or verify the target table.`
+          targetTable === 'auto'
+            ? `Gemini could not recognize any Routine or Growth rows from this ${source}. Try a clearer capture or file.`
+            : `Gemini could not recognize any ${targetTable} rows from this ${source}. Try a clearer capture or switch Target to Auto (Both).`
         );
         return;
       }
 
-      if (targetTable === 'routine') {
-        const recognized: RoutineDraftRow[] = rows.map((r, idx) => ({
+      if (incomingRoutineRows.length > 0) {
+        const recognizedRoutine: RoutineDraftRow[] = incomingRoutineRows.map((r, idx) => ({
           _key: makeRowKey('rt-ai', idx),
           selected: true,
           name: typeof r.name === 'string' ? r.name : defaultLogger.trim(),
@@ -508,7 +583,8 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             r['feed duration (min)'] !== null && r['feed duration (min)'] !== undefined
               ? String(r['feed duration (min)'])
               : '',
-          ebmMl: r['EBM (mL)'] !== null && r['EBM (mL)'] !== undefined ? String(r['EBM (mL)']) : '',
+          ebmMl:
+            r['EBM (mL)'] !== null && r['EBM (mL)'] !== undefined ? String(r['EBM (mL)']) : '',
           formulaMl:
             r['Formula (mL)'] !== null && r['Formula (mL)'] !== undefined
               ? String(r['Formula (mL)'])
@@ -517,7 +593,6 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
           remark: typeof r.remark === 'string' ? r.remark : '',
         }));
 
-        // Keep any non-empty user rows already in tabular entry, replace pure blank placeholder row
         setRoutineDrafts((prev) => {
           const nonEmptyExisting = prev.filter(
             (row) =>
@@ -527,10 +602,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
               row.diaper.trim() !== '' ||
               row.remark.trim() !== ''
           );
-          return [...nonEmptyExisting, ...recognized];
+          return [...nonEmptyExisting, ...recognizedRoutine];
         });
-      } else {
-        const recognized: GrowthDraftRow[] = rows.map((r, idx) => ({
+      }
+
+      if (incomingGrowthRows.length > 0) {
+        const recognizedGrowth: GrowthDraftRow[] = incomingGrowthRows.map((r, idx) => ({
           _key: makeRowKey('gr-ai', idx),
           selected: true,
           name: typeof r.name === 'string' ? r.name : defaultLogger.trim(),
@@ -552,21 +629,23 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
               row.temperature.trim() !== '' ||
               row.remark.trim() !== ''
           );
-          return [...nonEmptyExisting, ...recognized];
+          return [...nonEmptyExisting, ...recognizedGrowth];
         });
       }
 
-      setAiSummary(
-        payload.summary ||
-          `Gemini recognized ${rows.length} ${targetTable} row${rows.length === 1 ? '' : 's'} and loaded them into Tabular Data Entry.`
-      );
+      const fallbackSummary =
+        targetTable === 'auto'
+          ? `Auto-recognized ${incomingRoutineRows.length} routine row${incomingRoutineRows.length === 1 ? '' : 's'} and ${incomingGrowthRows.length} growth row${incomingGrowthRows.length === 1 ? '' : 's'} into Tabular Entry.`
+          : `Gemini recognized ${incomingRoutineRows.length + incomingGrowthRows.length} ${targetTable} row${incomingRoutineRows.length + incomingGrowthRows.length === 1 ? '' : 's'} and loaded them into Tabular Data Entry.`;
+
+      setAiSummary(payload.summary || fallbackSummary);
       // Automatically switch to Tabular Data Entry so user reviews/edits before writing to database
       setEntryMode('tabular');
     } catch (err) {
       setErrorMessage(
         err instanceof Error
-          ? `Network error contacting server: ${err.message}`
-          : 'Network error contacting the Gemini import endpoint.'
+          ? `Network error contacting /api/mass-import: ${err.message}`
+          : 'Network error contacting /api/mass-import.'
       );
     } finally {
       setIsAnalyzing(false);
@@ -594,18 +673,24 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
   ).length;
 
   const activeValidSelectedCount =
-    targetTable === 'routine' ? routineValidSelectedCount : growthValidSelectedCount;
+    targetTable === 'auto'
+      ? routineValidSelectedCount + growthValidSelectedCount
+      : targetTable === 'routine'
+        ? routineValidSelectedCount
+        : growthValidSelectedCount;
 
-  const toggleAllSelected = (checked: boolean) => {
-    if (targetTable === 'routine') {
+  const toggleAllSelected = (checked: boolean, scope: 'routine' | 'growth' | 'all' = 'all') => {
+    if (scope === 'routine' || (scope === 'all' && (targetTable === 'routine' || targetTable === 'auto'))) {
       setRoutineDrafts((prev) => prev.map((r) => ({ ...r, selected: checked })));
-    } else {
+    }
+    if (scope === 'growth' || (scope === 'all' && (targetTable === 'growth' || targetTable === 'auto'))) {
       setGrowthDrafts((prev) => prev.map((r) => ({ ...r, selected: checked })));
     }
   };
 
-  const addBlankRows = (count = 1) => {
-    if (targetTable === 'routine') {
+  const addBlankRows = (count = 1, which?: 'routine' | 'growth') => {
+    const target = which ?? (targetTable === 'growth' ? 'growth' : 'routine');
+    if (target === 'routine') {
       setRoutineDrafts((prev) => [
         ...prev,
         ...Array.from({ length: count }, (_, i) =>
@@ -626,9 +711,10 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     setAiSummary(null);
     setErrorMessage(null);
     setSuccessMessage(null);
-    if (targetTable === 'routine') {
+    if (targetTable === 'routine' || targetTable === 'auto') {
       setRoutineDrafts([createEmptyRoutineRow(defaultDate, defaultLogger.trim(), 0)]);
-    } else {
+    }
+    if (targetTable === 'growth' || targetTable === 'auto') {
       setGrowthDrafts([createEmptyGrowthRow(defaultDate, defaultLogger.trim(), 0)]);
     }
   };
@@ -640,81 +726,110 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
 
     if (activeValidSelectedCount === 0) {
       setErrorMessage(
-        targetTable === 'routine'
-          ? 'Enter at least one selected routine row with EBM, Formula, Feed Duration, Diaper, or Remark.'
-          : 'Enter at least one selected growth row with Daily Weight, Daily Length, Temperature, or Remark.'
+        targetTable === 'auto'
+          ? 'Enter at least one selected Routine or Growth row before saving to the database.'
+          : targetTable === 'routine'
+            ? 'Enter at least one selected routine row with EBM, Formula, Feed Duration, Diaper, or Remark.'
+            : 'Enter at least one selected growth row with Daily Weight, Daily Length, Temperature, or Remark.'
       );
       return;
     }
 
     setIsImporting(true);
     try {
-      if (targetTable === 'routine') {
-        const toInsert: NewRoutineRecordInput[] = routineDrafts
-          .filter((r) => r.selected)
-          .map((r) => ({
-            profile_id: activeProfile?.id ?? null,
-            name: r.name.trim() || null,
-            date: r.date.trim() || null,
-            time: r.time.trim() || null,
-            'feed duration (min)':
-              r.feedDurationMin.trim() !== '' ? parseInt(r.feedDurationMin, 10) : null,
-            'EBM (mL)': r.ebmMl.trim() !== '' ? parseInt(r.ebmMl, 10) : null,
-            'Formula (mL)': r.formulaMl.trim() !== '' ? parseInt(r.formulaMl, 10) : null,
-            Diaper: r.diaper.trim() || null,
-            remark: r.remark.trim() || null,
-          }))
-          .filter(
-            (r) =>
-              r['EBM (mL)'] !== null ||
-              r['Formula (mL)'] !== null ||
-              r['feed duration (min)'] !== null ||
-              r.Diaper !== null ||
-              r.remark !== null
-          );
+      const shouldSaveRoutine = targetTable === 'routine' || targetTable === 'auto';
+      const shouldSaveGrowth = targetTable === 'growth' || targetTable === 'auto';
 
-        const res = await addRoutineRecordsBulk(toInsert);
+      const routineToInsert: NewRoutineRecordInput[] = shouldSaveRoutine
+        ? routineDrafts
+            .filter((r) => r.selected)
+            .map((r) => ({
+              profile_id: activeProfile?.id ?? null,
+              name: r.name.trim() || null,
+              date: r.date.trim() || null,
+              time: r.time.trim() || null,
+              'feed duration (min)':
+                r.feedDurationMin.trim() !== '' ? parseInt(r.feedDurationMin, 10) : null,
+              'EBM (mL)': r.ebmMl.trim() !== '' ? parseInt(r.ebmMl, 10) : null,
+              'Formula (mL)': r.formulaMl.trim() !== '' ? parseInt(r.formulaMl, 10) : null,
+              Diaper: r.diaper.trim() || null,
+              remark: r.remark.trim() || null,
+            }))
+            .filter(
+              (r) =>
+                r['EBM (mL)'] !== null ||
+                r['Formula (mL)'] !== null ||
+                r['feed duration (min)'] !== null ||
+                r.Diaper !== null ||
+                r.remark !== null
+            )
+        : [];
+
+      const growthToInsert: NewGrowthRecordInput[] = shouldSaveGrowth
+        ? growthDrafts
+            .filter((r) => r.selected)
+            .map((r) => ({
+              profile_id: activeProfile?.id ?? null,
+              name: r.name.trim() || null,
+              date: r.date.trim() || null,
+              daily_weight: r.dailyWeight.trim() !== '' ? parseFloat(r.dailyWeight) : null,
+              daily_length: r.dailyLength.trim() !== '' ? parseFloat(r.dailyLength) : null,
+              temperature: r.temperature.trim() !== '' ? parseFloat(r.temperature) : null,
+              remark: r.remark.trim() || null,
+            }))
+            .filter(
+              (r) =>
+                r.daily_weight !== null ||
+                r.daily_length !== null ||
+                r.temperature !== null ||
+                r.remark !== null
+            )
+        : [];
+
+      let savedRoutineCount = 0;
+      let savedGrowthCount = 0;
+      const errors: string[] = [];
+
+      if (routineToInsert.length > 0) {
+        const res = await addRoutineRecordsBulk(routineToInsert);
         if (res.error) {
-          setErrorMessage(res.error);
-          return;
+          errors.push(`Routine: ${res.error}`);
+        } else {
+          savedRoutineCount = res.records.length;
+          setRoutineDrafts([createEmptyRoutineRow(defaultDate, defaultLogger.trim(), 0)]);
         }
+      }
 
-        setSuccessMessage(
-          `Saved ${res.records.length} row${res.records.length === 1 ? '' : 's'} into the "routine" table.`
-        );
-        setRoutineDrafts([createEmptyRoutineRow(defaultDate, defaultLogger.trim(), 0)]);
-        setAiSummary(null);
-      } else {
-        const toInsert: NewGrowthRecordInput[] = growthDrafts
-          .filter((r) => r.selected)
-          .map((r) => ({
-            profile_id: activeProfile?.id ?? null,
-            name: r.name.trim() || null,
-            date: r.date.trim() || null,
-            daily_weight: r.dailyWeight.trim() !== '' ? parseFloat(r.dailyWeight) : null,
-            daily_length: r.dailyLength.trim() !== '' ? parseFloat(r.dailyLength) : null,
-            temperature: r.temperature.trim() !== '' ? parseFloat(r.temperature) : null,
-            remark: r.remark.trim() || null,
-          }))
-          .filter(
-            (r) =>
-              r.daily_weight !== null ||
-              r.daily_length !== null ||
-              r.temperature !== null ||
-              r.remark !== null
-          );
-
-        const res = await addGrowthRecordsBulk(toInsert);
+      if (growthToInsert.length > 0) {
+        const res = await addGrowthRecordsBulk(growthToInsert);
         if (res.error) {
-          setErrorMessage(res.error);
-          return;
+          errors.push(`Growth: ${res.error}`);
+        } else {
+          savedGrowthCount = res.records.length;
+          setGrowthDrafts([createEmptyGrowthRow(defaultDate, defaultLogger.trim(), 0)]);
         }
+      }
 
-        setSuccessMessage(
-          `Saved ${res.records.length} row${res.records.length === 1 ? '' : 's'} into the "growth" table.`
-        );
-        setGrowthDrafts([createEmptyGrowthRow(defaultDate, defaultLogger.trim(), 0)]);
-        setAiSummary(null);
+      if (errors.length > 0) {
+        setErrorMessage(errors.join(' | '));
+      }
+
+      if (savedRoutineCount > 0 || savedGrowthCount > 0) {
+        const parts: string[] = [];
+        if (savedRoutineCount > 0) {
+          parts.push(
+            `${savedRoutineCount} row${savedRoutineCount === 1 ? '' : 's'} into "routine"`
+          );
+        }
+        if (savedGrowthCount > 0) {
+          parts.push(
+            `${savedGrowthCount} row${savedGrowthCount === 1 ? '' : 's'} into "growth"`
+          );
+        }
+        setSuccessMessage(`Saved ${parts.join(' and ')}.`);
+        if (errors.length === 0) {
+          setAiSummary(null);
+        }
       }
     } finally {
       setIsImporting(false);
@@ -776,41 +891,53 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
           {/* Top Bar: Target Table + Defaults */}
           <div className="grid grid-cols-2 md:grid-cols-12 gap-2.5 sm:gap-3 items-end">
-            <div className="col-span-2 md:col-span-5">
+            <div className="col-span-2 md:col-span-6">
               <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1.5">
                 Target Table
               </label>
-              <div className="grid grid-cols-2 gap-1.5 p-1 bg-stone-100 dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700">
+              <div className="grid grid-cols-3 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchTable('auto')}
+                  className={`px-2 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                    targetTable === 'auto'
+                      ? 'bg-white dark:bg-stone-900 text-indigo-700 dark:text-indigo-400 shadow-2xs'
+                      : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Auto (Both)</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => handleSwitchTable('routine')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`px-2 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
                     targetTable === 'routine'
                       ? 'bg-white dark:bg-stone-900 text-emerald-700 dark:text-emerald-400 shadow-2xs'
                       : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
                   }`}
                 >
-                  <Droplets className="w-3.5 h-3.5" />
+                  <Droplets className="w-3.5 h-3.5 shrink-0" />
                   <span>Routine</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSwitchTable('growth')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`px-2 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
                     targetTable === 'growth'
                       ? 'bg-white dark:bg-stone-900 text-amber-700 dark:text-amber-400 shadow-2xs'
                       : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
                   }`}
                 >
-                  <Scale className="w-3.5 h-3.5" />
+                  <Scale className="w-3.5 h-3.5 shrink-0" />
                   <span>Growth</span>
                 </button>
               </div>
             </div>
 
-            <div className="min-w-0 col-span-1 md:col-span-4">
+            <div className="min-w-0 col-span-1 md:col-span-3">
               <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1.5">
-                Default Logged By <span className="text-stone-400 font-normal hidden sm:inline">(optional)</span>
+                Default Logged By
               </label>
               <input
                 type="text"
@@ -1173,9 +1300,11 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                   value={uploadedTextContent}
                   onChange={(e) => setUploadedTextContent(e.target.value)}
                   placeholder={
-                    targetTable === 'routine'
-                      ? 'Uploaded CSV/TXT content appears here — or paste spreadsheet rows / chat logs directly:\n2026-11-24 07:30 Mom, 20min, EBM 90ml, Formula 30ml, Wet diaper\n2026-11-24 10:45 Dad, 15min, EBM 110ml, Mixed, burped well'
-                      : 'Uploaded CSV/TXT content appears here — or paste growth logs directly:\n2026-11-22 Mom, 5.12 kg, 58.5 cm, 36.7C, morning check\n2026-11-24 Dad, 5210g, 59cm, 98.4F, before feed'
+                    targetTable === 'auto'
+                      ? 'Uploaded CSV/TXT content appears here — or paste mixed Routine & Growth notes directly:\n2026-11-24 07:30 Mom, 20min, EBM 90ml, Wet diaper\n2026-11-24 Mom, Weight 5.21 kg, Length 59 cm, Temp 36.7C'
+                      : targetTable === 'routine'
+                        ? 'Uploaded CSV/TXT content appears here — or paste spreadsheet rows / chat logs directly:\n2026-11-24 07:30 Mom, 20min, EBM 90ml, Formula 30ml, Wet diaper\n2026-11-24 10:45 Dad, 15min, EBM 110ml, Mixed, burped well'
+                        : 'Uploaded CSV/TXT content appears here — or paste growth logs directly:\n2026-11-22 Mom, 5.12 kg, 58.5 cm, 36.7C, morning check\n2026-11-24 Dad, 5210g, 59cm, 98.4F, before feed'
                   }
                   className="w-full px-3.5 py-2.5 text-xs font-mono bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-2xl focus:outline-hidden focus:border-emerald-500 resize-y"
                 />
@@ -1183,9 +1312,11 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[11px] text-stone-500 dark:text-stone-400">
-                  {targetTable === 'routine'
-                    ? 'Auto-maps to Routine fields (converts oz → mL, 12h → 24h time).'
-                    : 'Auto-maps to Growth fields (converts g/lb → kg, in → cm, °F → °C).'}
+                  {targetTable === 'auto'
+                    ? 'Auto-splits Routine (feeds/diapers) & Growth (weight/length/temp) from a single upload.'
+                    : targetTable === 'routine'
+                      ? 'Auto-maps to Routine fields (converts oz → mL, 12h → 24h time).'
+                      : 'Auto-maps to Growth fields (converts g/lb → kg, in → cm, °F → °C).'}
                 </span>
                 <button
                   type="button"
@@ -1216,8 +1347,10 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 <div className="space-y-0.5">
                   <div className="text-xs font-bold text-stone-900 dark:text-white">
                     Direct Tabular Data Entry —{' '}
-                    <span className="font-mono">{targetTable}</span> ({activeValidSelectedCount}{' '}
-                    ready to save)
+                    <span className="font-mono">
+                      {targetTable === 'auto' ? 'routine + growth' : targetTable}
+                    </span>{' '}
+                    ({activeValidSelectedCount} ready to save)
                   </div>
                   {aiSummary ? (
                     <div className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">
@@ -1226,7 +1359,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                   ) : (
                     <div className="text-[11px] text-stone-500 dark:text-stone-400">
                       Only rows here are written to the database. Layout matches the{' '}
-                      {targetTable === 'routine' ? 'Routine' : 'Growth'} logging grid.
+                      {targetTable === 'auto'
+                        ? 'Routine & Growth'
+                        : targetTable === 'routine'
+                          ? 'Routine'
+                          : 'Growth'}{' '}
+                      logging grid.
                     </div>
                   )}
                 </div>
@@ -1235,40 +1373,62 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                   <label className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-lg inline-flex items-center gap-1.5 cursor-pointer select-none">
                     <input
                       type="checkbox"
-                      aria-label={
-                        targetTable === 'routine'
-                          ? 'Select all routine rows'
-                          : 'Select all growth rows'
-                      }
+                      aria-label="Select all rows"
                       checked={
-                        targetTable === 'routine'
-                          ? routineDrafts.length > 0 && routineDrafts.every((r) => r.selected)
-                          : growthDrafts.length > 0 && growthDrafts.every((r) => r.selected)
+                        targetTable === 'auto'
+                          ? routineDrafts.every((r) => r.selected) &&
+                            growthDrafts.every((r) => r.selected)
+                          : targetTable === 'routine'
+                            ? routineDrafts.length > 0 && routineDrafts.every((r) => r.selected)
+                            : growthDrafts.length > 0 && growthDrafts.every((r) => r.selected)
                       }
-                      onChange={(e) => toggleAllSelected(e.target.checked)}
+                      onChange={(e) => toggleAllSelected(e.target.checked, 'all')}
                       className={
-                        targetTable === 'routine'
-                          ? 'accent-emerald-600 cursor-pointer'
-                          : 'accent-amber-600 cursor-pointer'
+                        targetTable === 'growth'
+                          ? 'accent-amber-600 cursor-pointer'
+                          : 'accent-emerald-600 cursor-pointer'
                       }
                     />
                     <span>All</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => addBlankRows(1)}
-                    className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-900 hover:bg-stone-100 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>Add Row</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => addBlankRows(5)}
-                    className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-900 hover:bg-stone-100 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg cursor-pointer"
-                  >
-                    +5 Rows
-                  </button>
+                  {targetTable === 'auto' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => addBlankRows(1, 'routine')}
+                        className="px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-white dark:bg-stone-900 hover:bg-emerald-50 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Routine</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addBlankRows(1, 'growth')}
+                        className="px-2.5 py-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300 bg-white dark:bg-stone-900 hover:bg-amber-50 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Growth</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => addBlankRows(1)}
+                        className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-900 hover:bg-stone-100 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Add Row</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addBlankRows(5)}
+                        className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-900 hover:bg-stone-100 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg cursor-pointer"
+                      >
+                        +5 Rows
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={clearTabularRows}
@@ -1279,10 +1439,26 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 </div>
               </div>
 
-              <div className="p-3 sm:p-4 space-y-3 max-h-[50vh] overflow-y-auto">
-                {targetTable === 'routine' ? (
-                  /* Exact RoutineView logging grid: grid-cols-2 lg:grid-cols-4 (Logged By, Date, Time, Feed Duration, EBM, Formula, Diaper col-span-2) + Remark */
-                  routineDrafts.map((row, idx) => (
+              <div className="p-3 sm:p-4 space-y-4 max-h-[50vh] overflow-y-auto">
+                {(targetTable === 'routine' || targetTable === 'auto') && (
+                  <div className="space-y-3">
+                    {targetTable === 'auto' && (
+                      <div className="flex items-center justify-between gap-2 px-1">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                          <Droplets className="w-3.5 h-3.5" />
+                          <span>Routine Entries ({routineValidSelectedCount} ready)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addBlankRows(1, 'routine')}
+                          className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 hover:underline cursor-pointer"
+                        >
+                          + Add Routine Row
+                        </button>
+                      </div>
+                    )}
+                    {/* Exact RoutineView logging grid: grid-cols-2 lg:grid-cols-4 (Logged By, Date, Time, Feed Duration, EBM, Formula, Diaper col-span-2) + Remark */}
+                    {routineDrafts.map((row, idx) => (
                     <div
                       key={row._key}
                       className={`rounded-2xl border p-3 sm:p-4 space-y-3 transition-opacity ${
@@ -1527,11 +1703,30 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                           className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
                         />
                       </div>
-                    </div>
-                  ))
-                ) : (
-                  /* Exact GrowthTabView logging grid: grid-cols-2 lg:grid-cols-5 (Logged By, Date, Daily Weight, Daily Length, Temperature col-span-2 lg:col-span-1) + Remark */
-                  growthDrafts.map((row, idx) => {
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {(targetTable === 'growth' || targetTable === 'auto') && (
+                  <div className="space-y-3">
+                    {targetTable === 'auto' && (
+                      <div className="flex items-center justify-between gap-2 px-1 pt-2 border-t border-stone-200/80 dark:border-stone-800">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-400">
+                          <Scale className="w-3.5 h-3.5" />
+                          <span>Growth Entries ({growthValidSelectedCount} ready)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addBlankRows(1, 'growth')}
+                          className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline cursor-pointer"
+                        >
+                          + Add Growth Row
+                        </button>
+                      </div>
+                    )}
+                    {/* Exact GrowthTabView logging grid: grid-cols-2 lg:grid-cols-5 (Logged By, Date, Daily Weight, Daily Length, Temperature col-span-2 lg:col-span-1) + Remark */}
+                    {growthDrafts.map((row, idx) => {
                     const parsedTemp = parseFloat(row.temperature);
                     const liveTempPreview =
                       row.temperature.trim() !== '' && Number.isFinite(parsedTemp)
@@ -1729,7 +1924,8 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                         </div>
                       </div>
                     );
-                  })
+                    })}
+                  </div>
                 )}
               </div>
             </div>
@@ -1763,9 +1959,17 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 <>
                   <Check className="w-3.5 h-3.5" />
                   <span>
-                    Save {activeValidSelectedCount}{' '}
-                    {targetTable === 'routine' ? 'Routine' : 'Growth'} Row
-                    {activeValidSelectedCount === 1 ? '' : 's'} to Database
+                    {targetTable === 'auto'
+                      ? `Save ${
+                          routineValidSelectedCount > 0 && growthValidSelectedCount > 0
+                            ? `${routineValidSelectedCount} Routine + ${growthValidSelectedCount} Growth`
+                            : routineValidSelectedCount > 0
+                              ? `${routineValidSelectedCount} Routine`
+                              : `${growthValidSelectedCount} Growth`
+                        } Row${activeValidSelectedCount === 1 ? '' : 's'} to Database`
+                      : `Save ${activeValidSelectedCount} ${
+                          targetTable === 'routine' ? 'Routine' : 'Growth'
+                        } Row${activeValidSelectedCount === 1 ? '' : 's'} to Database`}
                   </span>
                 </>
               )}

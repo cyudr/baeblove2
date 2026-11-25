@@ -818,7 +818,13 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
           <button
             type="button"
             onClick={() =>
-              setMassImportTable(activeSubTab === 'growth' ? 'growth' : 'routine')
+              setMassImportTable(
+                activeSubTab === 'growth'
+                  ? 'growth'
+                  : activeSubTab === 'routine'
+                    ? 'routine'
+                    : 'auto'
+              )
             }
             className="px-3 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-400 dark:text-stone-950 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >

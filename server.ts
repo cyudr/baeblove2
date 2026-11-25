@@ -1,8 +1,9 @@
 import dotenv from 'dotenv';
-import express from 'express';
+import express, { type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { createApiRouter } from './api/_lib/router';
+import healthHandler from './api/health';
+import massImportHandler from './api/mass-import';
 
 // Load local .env files if present without overriding runtime environment variables
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
@@ -14,8 +15,13 @@ async function createApp() {
   const app = express();
   app.use(express.json({ limit: '15mb' }));
 
-  // All API endpoints are managed under the root /api folder
-  app.use('/api', createApiRouter());
+  // Route all /api endpoints directly to standalone handlers in the root /api folder
+  app.all('/api/health', (req: Request, res: Response) => {
+    void healthHandler(req, res);
+  });
+  app.all('/api/mass-import', (req: Request, res: Response) => {
+    void massImportHandler(req, res);
+  });
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
