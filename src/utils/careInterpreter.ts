@@ -75,10 +75,16 @@ export function mergeProfileGrowthMeasurements(
     };
   });
 
-  const matchingGrowth = growthRecords.filter((g) => {
-    if (g.daily_weight === null && g.daily_length === null) return false;
-    return doesRecordMatchProfile(g, profile);
-  });
+  const matchingGrowth = growthRecords
+    .filter((g) => {
+      if (g.daily_weight === null && g.daily_length === null) return false;
+      return doesRecordMatchProfile(g, profile);
+    })
+    .sort((a, b) => {
+      const aKey = `${getGrowthRecordDate(a)}T${a.time ?? a.created_at.slice(11, 19)}`;
+      const bKey = `${getGrowthRecordDate(b)}T${b.time ?? b.created_at.slice(11, 19)}`;
+      return aKey.localeCompare(bKey);
+    });
 
   for (const g of matchingGrowth) {
     const dateStr = getGrowthRecordDate(g);
@@ -224,10 +230,10 @@ export function interpretGrowthTable(
   records: GrowthRecord[],
   profile?: ChildProfile
 ): GrowthInterpretation {
-  // Sort chronological ascending by recorded date (falling back to created_at)
+  // Sort chronological ascending by recorded date & time (falling back to created_at)
   const sorted = [...records].sort((a, b) => {
-    const aKey = `${getGrowthRecordDate(a)}T${a.created_at.slice(11, 19)}`;
-    const bKey = `${getGrowthRecordDate(b)}T${b.created_at.slice(11, 19)}`;
+    const aKey = `${getGrowthRecordDate(a)}T${a.time ?? a.created_at.slice(11, 19)}`;
+    const bKey = `${getGrowthRecordDate(b)}T${b.time ?? b.created_at.slice(11, 19)}`;
     return aKey.localeCompare(bKey);
   });
 
@@ -345,7 +351,11 @@ export function interpretGrowthTable(
   }
 
   if (insights.length === 0) {
-    insights.push('Log daily weight, length, or temperature entries to generate trend and WHO percentile interpretations.');
+    insights.push(
+      profile?.type === 'fetal'
+        ? 'Log ultrasound scans or daily maternal/fetal check-ins to generate fetal growth trend interpretations.'
+        : 'Log daily weight, length, or temperature entries to generate trend and WHO percentile interpretations.'
+    );
   }
 
   return {
@@ -1086,15 +1096,16 @@ export function buildDailyWeightResolver(
     const d = getGrowthRecordDate(g);
     if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
     const existing = byDate.get(d);
+    const sortStamp = `${g.time ?? ''}T${g.created_at ?? ''}`;
     if (
       !existing ||
       existing.priority < 3 ||
-      (existing.priority === 3 && (g.created_at ?? '') >= existing.createdAt)
+      (existing.priority === 3 && sortStamp >= existing.createdAt)
     ) {
       byDate.set(d, {
         weightKg: g.daily_weight,
         priority: 3,
-        createdAt: g.created_at ?? '',
+        createdAt: sortStamp,
       });
     }
   }

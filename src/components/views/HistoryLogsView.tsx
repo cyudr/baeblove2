@@ -34,11 +34,14 @@ import {
   AlertTriangle,
   CheckCircle2,
   X,
+  Wand2,
 } from 'lucide-react';
 import { AttachedPrenatalHistoryModal } from '../modals/AttachedPrenatalHistoryModal';
 import { EditAuthModal } from '../modals/EditAuthModal';
 import { EditCareRecordModal } from '../modals/EditCareRecordModal';
 import { MassImportModal, type MassImportTable } from '../modals/MassImportModal';
+import { OptimizeHistoryModal, type OptimizeScope } from '../modals/OptimizeHistoryModal';
+import { RemarkTooltipCell } from '../common/RemarkTooltipCell';
 import type {
   BabyMeasurement,
   FetalMeasurement,
@@ -146,6 +149,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
   const [editingRoutineInHistory, setEditingRoutineInHistory] = useState<RoutineRecord | null>(null);
   const [editingGrowthInHistory, setEditingGrowthInHistory] = useState<GrowthRecord | null>(null);
   const [massImportTable, setMassImportTable] = useState<MassImportTable | null>(null);
+  const [optimizeScope, setOptimizeScope] = useState<OptimizeScope | null>(null);
   const [isDuplicateScanOpen, setIsDuplicateScanOpen] = useState(false);
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
 
@@ -227,7 +231,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
       time: string,
       item: DuplicateItem
     ) => {
-      if (!date) return;
+      if (!date || !time) return;
       const key = `${entryType}|${date}|${time}`;
       const existing = groupsMap.get(key);
       if (existing) {
@@ -287,7 +291,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
 
     for (const row of filteredGrowth) {
       const date = getGrowthRecordDate(row);
-      const time = '';
+      const time = normalizeRoutineTimeHHMM(row.time);
       const parts: string[] = [];
       if (row.daily_weight !== null) {
         parts.push(`Weight ${UnitConverter.formatWeight(row.daily_weight, unitSystem)}`);
@@ -607,8 +611,8 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                         '—'
                       )}
                     </td>
-                    <td className="py-3 px-4 max-w-xs truncate text-stone-500 dark:text-stone-400">
-                      {row.remark || '—'}
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <RemarkTooltipCell remark={row.remark} />
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1">
@@ -695,7 +699,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-stone-50/80 dark:bg-stone-800/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
-                <th className="py-3 px-4">Date</th>
+                <th className="py-3 px-4">Date &amp; Time</th>
                 {isBaby && <th className="py-3 px-4">Age</th>}
                 <th className="py-3 px-4">Logged By</th>
                 <th className="py-3 px-4">Daily Weight</th>
@@ -727,7 +731,12 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                   >
                     <td className="py-3 px-4 whitespace-nowrap font-bold text-stone-900 dark:text-white">
                       <div>
-                        {recordDateStr}
+                        <span>{recordDateStr}</span>
+                        {row.time && (
+                          <span className="ml-1.5 font-mono text-[11px] text-stone-500 dark:text-stone-400 font-normal">
+                            {row.time.slice(0, 5)}
+                          </span>
+                        )}
                         {isDup && (
                           <span className="ml-2 text-[10px] font-bold text-amber-700 dark:text-amber-400">
                             · Duplicate
@@ -770,8 +779,8 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                         '—'
                       )}
                     </td>
-                    <td className="py-3 px-4 max-w-xs truncate text-stone-500 dark:text-stone-400">
-                      {row.remark || '—'}
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <RemarkTooltipCell remark={row.remark} />
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1">
@@ -934,8 +943,8 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                             ? UnitConverter.formatLength(m.headCircumferenceCm, unitSystem)
                             : '—'}
                         </td>
-                        <td className="py-3.5 px-4 max-w-xs truncate text-stone-500 dark:text-stone-400">
-                          {m.notes || '—'}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <RemarkTooltipCell remark={m.notes} label="Notes" />
                         </td>
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
                           <div className="inline-flex items-center gap-1">
@@ -1054,8 +1063,8 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                             : `${(m.maternalWeightKg * 2.20462).toFixed(1)} lb`
                           : '—'}
                       </td>
-                      <td className="py-3.5 px-4 max-w-xs truncate text-stone-500 dark:text-stone-400">
-                        {m.notes || m.scanLocation || '—'}
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <RemarkTooltipCell remark={m.notes || m.scanLocation} label="Clinic / Notes" />
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1">
@@ -1160,8 +1169,8 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                   <td className="py-3.5 px-4 whitespace-nowrap">
                     {m.fundalHeightCm ? `${m.fundalHeightCm} cm` : '—'}
                   </td>
-                  <td className="py-3.5 px-4 font-sans max-w-xs truncate text-stone-500 dark:text-stone-400">
-                    {m.notes || m.scanLocation || '—'}
+                  <td className="py-3.5 px-4 font-sans whitespace-nowrap">
+                    <RemarkTooltipCell remark={m.notes || m.scanLocation} label="Clinic / Notes" />
                   </td>
                 </tr>
               ))}
@@ -1227,6 +1236,24 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
 
           <button
             type="button"
+            onClick={() =>
+              setOptimizeScope(
+                activeSubTab === 'growth'
+                  ? 'growth'
+                  : activeSubTab === 'routine'
+                    ? 'routine'
+                    : 'both'
+              )
+            }
+            className="px-3 py-2 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200/60 dark:border-stone-700/60 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            title="Let Gemini suggest consistency cleanups and move structured details from remarks into the right columns"
+          >
+            <Wand2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>Optimise with Gemini</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => {
               setIsDuplicateScanOpen((prev) => {
                 if (prev) setShowDuplicatesOnly(false);
@@ -1238,7 +1265,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                 ? 'text-amber-950 dark:text-amber-100 bg-amber-100 dark:bg-amber-950/70 border-amber-300 dark:border-amber-700 shadow-2xs'
                 : 'text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border-stone-200/60 dark:border-stone-700/60'
             }`}
-            title="Check history entries for duplicates by date, time, and entry type"
+            title="Check history entries for duplicates when both date and time match"
           >
             <Copy className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
             <span>Detect Duplicates</span>
@@ -1299,7 +1326,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     : 'No duplicates detected'}
                 </h3>
                 <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                  Checked by matching date, time, and entry type across visible history records.
+                  Checked entries with matching date, time, and entry type (entries without a time are skipped).
                 </p>
               </div>
             </div>
@@ -1585,6 +1612,15 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
         isOpen={massImportTable !== null}
         initialTable={massImportTable ?? 'routine'}
         onClose={() => setMassImportTable(null)}
+      />
+
+      {/* Gemini Data Consistency & Remark Extraction Optimiser Modal */}
+      <OptimizeHistoryModal
+        isOpen={optimizeScope !== null}
+        initialScope={optimizeScope ?? 'both'}
+        routineRecords={filteredRoutine}
+        growthRecords={filteredGrowth}
+        onClose={() => setOptimizeScope(null)}
       />
     </div>
   );

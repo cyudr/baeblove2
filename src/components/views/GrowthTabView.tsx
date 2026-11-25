@@ -7,12 +7,14 @@ import {
   getGrowthRecordDate,
   interpretGrowthTable,
   mergeProfileGrowthMeasurements,
+  normalizeRoutineTimeHHMM,
 } from '../../utils/careInterpreter';
 import { formatAgeFromBirthDate } from '../../utils/ageCalculator';
 import { InteractiveGrowthChart } from '../charts/InteractiveGrowthChart';
 import { FetalBiometricsChart } from '../charts/FetalBiometricsChart';
 import { EditAuthModal } from '../modals/EditAuthModal';
 import { AskGeminiModal } from '../modals/AskGeminiModal';
+import { RemarkTooltipCell } from '../common/RemarkTooltipCell';
 import type { BabyMeasurement, GrowthRecord } from '../../types';
 import {
   Scale,
@@ -37,6 +39,13 @@ function getCurrentDateStr(): string {
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+function getCurrentTimeStr(): string {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
 }
 
 function formatDateTime(iso: string): string {
@@ -95,6 +104,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
   // Growth form state (`name` column = person logging the info; `profile_id` = active profile from entries)
   const [editingGrowthId, setEditingGrowthId] = useState<number | null>(null);
   const [growthDate, setGrowthDate] = useState<string>(getCurrentDateStr);
+  const [growthTime, setGrowthTime] = useState<string>(getCurrentTimeStr);
   const [loggedBy, setLoggedBy] = useState<string>('');
   const [dailyWeight, setDailyWeight] = useState<string>('');
   const [dailyLength, setDailyLength] = useState<string>('');
@@ -117,6 +127,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     if (!initialEditRecord) return;
     setEditingGrowthId(initialEditRecord.id);
     setGrowthDate(getGrowthRecordDate(initialEditRecord));
+    setGrowthTime(initialEditRecord.time ? initialEditRecord.time.slice(0, 5) : '');
     setLoggedBy(initialEditRecord.name ?? '');
     setDailyWeight(
       initialEditRecord.daily_weight !== null ? String(initialEditRecord.daily_weight) : ''
@@ -173,14 +184,15 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     return classifyTemperature(parsed);
   }, [temperature]);
 
-  // Detect potentially duplicated or conflicting growth entry by Date
+  // Detect potentially duplicated or conflicting growth entry strictly when BOTH Date and Time match
   const dateCollision = useMemo<{
     level: 'duplicate' | 'conflict';
     existing: GrowthRecord;
     summary: string;
   } | null>(() => {
     const cleanDate = growthDate.trim().slice(0, 10);
-    if (!cleanDate) return null;
+    const cleanTime = normalizeRoutineTimeHHMM(growthTime);
+    if (!cleanDate || !cleanTime) return null;
 
     const parsedWeight = dailyWeight.trim() !== '' ? parseFloat(dailyWeight) : null;
     const parsedLength = dailyLength.trim() !== '' ? parseFloat(dailyLength) : null;
@@ -196,9 +208,10 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     for (const rec of profileGrowthRecords) {
       if (editingGrowthId !== null && rec.id === editingGrowthId) continue;
       const recDate = getGrowthRecordDate(rec);
-      if (recDate !== cleanDate) continue;
+      const recTime = normalizeRoutineTimeHHMM(rec.time);
+      if (recDate !== cleanDate || !recTime || recTime !== cleanTime) continue;
 
-      const summaryParts: string[] = [recDate];
+      const summaryParts: string[] = [`${recDate} ${recTime}`];
       if (rec.daily_weight !== null) summaryParts.push(`${rec.daily_weight} kg`);
       if (rec.daily_length !== null) summaryParts.push(`${rec.daily_length} cm`);
       if (rec.temperature !== null) summaryParts.push(`${rec.temperature}°C`);
@@ -229,6 +242,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     return null;
   }, [
     growthDate,
+    growthTime,
     dailyWeight,
     dailyLength,
     temperature,
@@ -240,6 +254,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
   const resetGrowthForm = (preserveLogger = false) => {
     setEditingGrowthId(null);
     setGrowthDate(getCurrentDateStr());
+    setGrowthTime(getCurrentTimeStr());
     if (!preserveLogger) setLoggedBy('');
     setDailyWeight('');
     setDailyLength('');
@@ -253,6 +268,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     if (!latestGrowthRecord) return;
     setEditingGrowthId(null);
     setGrowthDate(getCurrentDateStr());
+    setGrowthTime(getCurrentTimeStr());
     setLoggedBy(latestGrowthRecord.name ?? '');
     setDailyWeight(
       latestGrowthRecord.daily_weight !== null ? String(latestGrowthRecord.daily_weight) : ''
@@ -273,6 +289,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
   const applyEditGrowth = (row: GrowthRecord) => {
     setEditingGrowthId(row.id);
     setGrowthDate(getGrowthRecordDate(row));
+    setGrowthTime(row.time ? row.time.slice(0, 5) : '');
     setLoggedBy(row.name ?? '');
     setDailyWeight(row.daily_weight !== null ? String(row.daily_weight) : '');
     setDailyLength(row.daily_length !== null ? String(row.daily_length) : '');
@@ -311,6 +328,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
       const payload = {
         profile_id: activeProfile?.id ?? null,
         date: growthDate || null,
+        time: growthTime || null,
         daily_weight: parsedWeight,
         daily_length: parsedLength,
         temperature: parsedTemp,
@@ -349,13 +367,13 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
             </h2>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-nowrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setIsAskGeminiOpen(true)}
-              className="px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 text-xs font-bold text-emerald-900 dark:text-emerald-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 text-xs font-bold text-emerald-900 dark:text-emerald-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap shrink-0"
             >
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>Ask Gemini</span>
             </button>
 
@@ -363,9 +381,9 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenLogModal}
-                className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                className="px-2.5 sm:px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap shrink-0"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-3.5 h-3.5 shrink-0" />
                 <span>{activeProfile.type === 'baby' ? 'Log Pediatric Checkup' : 'Log Ultrasound'}</span>
               </button>
             ) : (
@@ -373,9 +391,9 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                 <button
                   type="button"
                   onClick={onOpenProfileModal}
-                  className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className="px-2.5 sm:px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap shrink-0"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-3.5 h-3.5 shrink-0" />
                   <span>Add Profile</span>
                 </button>
               )
@@ -488,7 +506,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
           </div>
         )}
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
           <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Logged By
@@ -511,6 +529,18 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               value={growthDate}
               onChange={(e) => setGrowthDate(e.target.value)}
               className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+            />
+          </div>
+
+          <div className="min-w-0">
+            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+              Time
+            </label>
+            <input
+              type="time"
+              value={growthTime}
+              onChange={(e) => setGrowthTime(e.target.value)}
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
 
@@ -544,7 +574,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
             />
           </div>
 
-          <div className="min-w-0 col-span-2 lg:col-span-1">
+          <div className="min-w-0">
             <div className="flex items-center justify-between mb-1">
               <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300">
                 Temperature (°C)
@@ -585,8 +615,8 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               <div className="min-w-0">
                 <span className="font-bold">
                   {dateCollision.level === 'duplicate'
-                    ? 'Duplicate entry detected (same date): '
-                    : 'Conflicting entry on same date: '}
+                    ? 'Duplicate entry detected (same date & time): '
+                    : 'Conflicting entry at same date & time: '}
                 </span>
                 <span className="break-words">{dateCollision.summary}</span>
               </div>
@@ -875,7 +905,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-stone-50/80 dark:bg-stone-800/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
-                  <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Date &amp; Time</th>
                   {activeProfile?.type === 'baby' && <th className="py-3 px-4">Age</th>}
                   <th className="py-3 px-4">Logged By</th>
                   <th className="py-3 px-4">Daily Weight</th>
@@ -900,7 +930,14 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                       className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors"
                     >
                       <td className="py-3 px-4 whitespace-nowrap font-bold text-stone-900 dark:text-white">
-                        <div>{recordDateStr}</div>
+                        <div>
+                          <span>{recordDateStr}</span>
+                          {row.time && (
+                            <span className="ml-1.5 font-mono text-[11px] text-stone-500 dark:text-stone-400 font-normal">
+                              {row.time.slice(0, 5)}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] font-normal text-stone-400 dark:text-stone-500">
                           {formatDateTime(row.created_at)}
                         </div>
@@ -937,8 +974,8 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                           '—'
                         )}
                       </td>
-                      <td className="py-3 px-4 max-w-xs truncate text-stone-500 dark:text-stone-400">
-                        {row.remark || '—'}
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <RemarkTooltipCell remark={row.remark} />
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1">

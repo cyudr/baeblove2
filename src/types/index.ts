@@ -162,6 +162,7 @@ export interface GrowthRecord {
   created_at: string;
   profile_id: string | null;
   date: string | null;
+  time: string | null;
   daily_weight: number | null;
   daily_length: number | null;
   temperature: number | null;
@@ -172,6 +173,7 @@ export interface GrowthRecord {
 export interface NewGrowthRecordInput {
   profile_id?: string | null;
   date?: string | null;
+  time?: string | null;
   daily_weight?: number | null;
   daily_length?: number | null;
   temperature?: number | null;

@@ -83,6 +83,7 @@ interface GrowthDraftRow {
   selected: boolean;
   name: string;
   date: string;
+  time: string;
   dailyWeight: string;
   dailyLength: string;
   temperature: string;
@@ -157,6 +158,7 @@ function createEmptyGrowthRow(defaultDate: string, defaultLogger: string, idx = 
     selected: true,
     name: defaultLogger,
     date: defaultDate,
+    time: getCurrentTimeStr(),
     dailyWeight: '',
     dailyLength: '',
     temperature: '',
@@ -218,13 +220,14 @@ const MASS_IMPORT_GROWTH_ITEM_SCHEMA = {
   type: 'OBJECT',
   properties: {
     date: { type: 'STRING', nullable: true, description: 'YYYY-MM-DD date' },
+    time: { type: 'STRING', nullable: true, description: '24-hour HH:MM time' },
     dailyWeight: { type: 'NUMBER', nullable: true, description: 'Weight in kg' },
     dailyLength: { type: 'NUMBER', nullable: true, description: 'Length in cm' },
     temperature: { type: 'NUMBER', nullable: true, description: 'Temperature in °C' },
     name: { type: 'STRING', nullable: true, description: 'Caregiver who logged the entry' },
     remark: { type: 'STRING', nullable: true, description: 'Optional notes' },
   },
-  required: ['date', 'dailyWeight', 'dailyLength', 'temperature', 'name', 'remark'],
+  required: ['date', 'time', 'dailyWeight', 'dailyLength', 'temperature', 'name', 'remark'],
 };
 
 function buildMassImportGeminiPayload(params: {
@@ -256,6 +259,7 @@ function buildMassImportGeminiPayload(params: {
   const growthFieldRules = [
     'GROWTH rows (daily weight, length, & body temperature):',
     '- date: YYYY-MM-DD format. Infer year from context or currentYear if omitted; use defaultDate if absent.',
+    '- time: 24-hour HH:MM format (e.g. "08:15", "19:30"). Convert AM/PM cleanly. Null if omitted.',
     '- dailyWeight: weight in kilograms (kg), decimal (e.g. 4.52). Convert grams (4520g -> 4.52) or lb/oz (1 lb = 0.453592 kg, 1 oz = 0.0283495 kg) to kg rounded to 2–3 decimals. Null if absent.',
     '- dailyLength: length/height in centimeters (cm), decimal (e.g. 58.5). Convert inches (1 in = 2.54 cm) or mm to cm rounded to 1 decimal. Null if absent.',
     '- temperature: body temperature in Celsius (°C), decimal (e.g. 36.8). Convert Fahrenheit (e.g. 98.6°F or values > 45) via (F - 32) * 5 / 9 rounded to 1 decimal. Null if absent.',
@@ -589,7 +593,8 @@ function findRoutineDuplicateMatch(
 }
 
 function formatGrowthSummary(rec: GrowthRecord, recDate: string): string {
-  const parts: string[] = [recDate];
+  const recTime = normalizeRoutineTimeHHMM(rec.time);
+  const parts: string[] = [recTime ? `${recDate} ${recTime}` : recDate];
   if (rec.daily_weight !== null) parts.push(`${rec.daily_weight} kg`);
   if (rec.daily_length !== null) parts.push(`${rec.daily_length} cm`);
   if (rec.temperature !== null) parts.push(`${rec.temperature}°C`);
@@ -598,7 +603,8 @@ function formatGrowthSummary(rec: GrowthRecord, recDate: string): string {
 
 function formatGrowthDraftSummary(row: GrowthDraftRow): string {
   const parts: string[] = [];
-  if (row.date) parts.push(row.date);
+  const rowTime = normalizeRoutineTimeHHMM(row.time);
+  if (row.date) parts.push(rowTime ? `${row.date} ${rowTime}` : row.date);
   if (row.dailyWeight.trim() !== '') parts.push(`${row.dailyWeight.trim()} kg`);
   if (row.dailyLength.trim() !== '') parts.push(`${row.dailyLength.trim()} cm`);
   if (row.temperature.trim() !== '') parts.push(`${row.temperature.trim()}°C`);
@@ -611,7 +617,8 @@ function findGrowthDuplicateMatch(
   siblingRows: GrowthDraftRow[] = []
 ): DuplicateMatch | null {
   const rowDate = normalizeDateStr(row.date);
-  if (!rowDate) return null;
+  const rowTime = normalizeRoutineTimeHHMM(row.time);
+  if (!rowDate || !rowTime) return null;
 
   const hasAnyMetric =
     row.dailyWeight.trim() !== '' ||
@@ -626,11 +633,15 @@ function findGrowthDuplicateMatch(
   const rowRemark = row.remark.trim().toLowerCase();
 
   let conflictMatch: DuplicateMatch | null = null;
+  const dateTimeLabel = `${rowDate} ${rowTime}`;
 
-  // 1. Check against existing database records by Date
+  // 1. Check against existing database records by exact Date & Time
   for (const rec of existingRecords) {
     const recDate = normalizeDateStr(getGrowthRecordDate(rec));
     if (recDate !== rowDate) continue;
+
+    const recTime = normalizeRoutineTimeHHMM(rec.time);
+    if (!recTime || recTime !== rowTime) continue;
 
     const sameWeight =
       rowWeight === null
@@ -649,25 +660,28 @@ function findGrowthDuplicateMatch(
     if (sameWeight && sameLength && sameTemp && sameRemark) {
       return {
         level: 'duplicate',
-        reason: `Duplicate in DB (${recDate}): ${formatGrowthSummary(rec, recDate)}`,
+        reason: `Duplicate in DB (${dateTimeLabel}): ${formatGrowthSummary(rec, recDate)}`,
       };
     }
 
     if (!conflictMatch) {
       conflictMatch = {
         level: 'conflict',
-        reason: `Conflicting DB entry on ${recDate}: ${formatGrowthSummary(rec, recDate)}`,
+        reason: `Conflicting DB entry at ${dateTimeLabel}: ${formatGrowthSummary(rec, recDate)}`,
       };
     }
   }
 
-  // 2. Check against other rows in the same import batch by Date
+  // 2. Check against other rows in the same import batch by exact Date & Time
   for (let i = 0; i < siblingRows.length; i += 1) {
     const other = siblingRows[i];
     if (other._key === row._key) continue;
 
     const otherDate = normalizeDateStr(other.date);
     if (otherDate !== rowDate) continue;
+
+    const otherTime = normalizeRoutineTimeHHMM(other.time);
+    if (!otherTime || otherTime !== rowTime) continue;
 
     const otherWeight = other.dailyWeight.trim() !== '' ? parseFloat(other.dailyWeight) : null;
     const otherLength = other.dailyLength.trim() !== '' ? parseFloat(other.dailyLength) : null;
@@ -681,7 +695,7 @@ function findGrowthDuplicateMatch(
     const sameWeight =
       rowWeight === null
         ? otherWeight === null
-        : otherWeight !== null && Math.abs(otherWeight - rowWeight) <= 0.01;
+        : otherWeight !== null && Math.abs(otherWeight - rowWeight) < 0.0005;
     const sameLength =
       rowLength === null
         ? otherLength === null
@@ -695,14 +709,14 @@ function findGrowthDuplicateMatch(
     if (sameWeight && sameLength && sameTemp && sameRemark) {
       return {
         level: 'duplicate',
-        reason: `Duplicate of Growth Row #${i + 1} (${rowDate}): ${formatGrowthDraftSummary(other)}`,
+        reason: `Duplicate of Growth Row #${i + 1} (${dateTimeLabel}): ${formatGrowthDraftSummary(other)}`,
       };
     }
 
     if (!conflictMatch) {
       conflictMatch = {
         level: 'conflict',
-        reason: `Conflicting with Growth Row #${i + 1} on ${rowDate}: ${formatGrowthDraftSummary(other)}`,
+        reason: `Conflicting with Growth Row #${i + 1} at ${dateTimeLabel}: ${formatGrowthDraftSummary(other)}`,
       };
     }
   }
@@ -1543,6 +1557,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             selected: true,
             name: normalizeTextStr(obj.name, loggerFallback),
             date: normalizeDateStr(obj.date, defaultDate),
+            time: normalizeTimeStr(obj.time),
             dailyWeight: normalizeFloatStr(obj.dailyWeight ?? obj.daily_weight, 3),
             dailyLength: normalizeFloatStr(obj.dailyLength ?? obj.daily_length, 1),
             temperature: normalizeFloatStr(obj.temperature, 1),
@@ -1818,6 +1833,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
               profile_id: activeProfile?.id ?? null,
               name: r.name.trim() || null,
               date: r.date.trim() || null,
+              time: r.time.trim() || null,
               daily_weight: parseSafeFloat(r.dailyWeight),
               daily_length: parseSafeFloat(r.dailyLength),
               temperature: parseSafeFloat(r.temperature),
@@ -3200,7 +3216,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                           </div>
                         )}
 
-                        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
                           <div className="min-w-0">
                             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
                               Logged By
@@ -3239,6 +3255,26 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                                 )
                               }
                               className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+                            />
+                          </div>
+
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Time
+                            </label>
+                            <input
+                              type="time"
+                              value={row.time}
+                              onChange={(e) =>
+                                setGrowthDrafts((prev) =>
+                                  prev.map((item) =>
+                                    item._key === row._key
+                                      ? { ...item, time: e.target.value }
+                                      : item
+                                  )
+                                )
+                              }
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
                             />
                           </div>
 
@@ -3288,7 +3324,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                             />
                           </div>
 
-                          <div className="min-w-0 col-span-2 lg:col-span-1">
+                          <div className="min-w-0">
                             <div className="flex items-center justify-between mb-1">
                               <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300">
                                 Temperature (°C)

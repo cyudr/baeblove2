@@ -505,19 +505,33 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                     </h1>
                     <button
                       onClick={() =>
-                        openPointerModal(
-                          'Biological Profile & Calibration',
-                          `Current active profile: ${activeProfile.name}, biological gender: ${activeProfile.gender}. Growth calculations calibrate directly against WHO 2006 reference percentiles for ${activeProfile.gender === 'girl' ? 'girls' : 'boys'}.`,
-                          'WHO Child Growth Standards (2006) provide sex-specific LMS parameters (Box-Cox power, median, coefficient of variation) to model biological differences in weight, stature, and cranial expansion.',
-                          [
-                            'Verify birth date accuracy for accurate age normalization',
-                            'Calibrate metric or imperial measurement units',
-                            'Export pediatric growth summary for checkup visits',
-                          ],
-                          'Contact your pediatrician if weight or length crosses more than two major percentile canals.',
-                          'Profile Metadata',
-                          'Clinical Calibration'
-                        )
+                        isBaby
+                          ? openPointerModal(
+                              'Biological Profile & Calibration',
+                              `Current active profile: ${activeProfile.name}, biological gender: ${activeProfile.gender}. Growth calculations calibrate directly against WHO 2006 reference percentiles for ${activeProfile.gender === 'girl' ? 'girls' : 'boys'}.`,
+                              'WHO Child Growth Standards (2006) provide sex-specific LMS parameters (Box-Cox power, median, coefficient of variation) to model biological differences in weight, stature, and cranial expansion.',
+                              [
+                                'Verify birth date accuracy for accurate age normalization',
+                                'Calibrate metric or imperial measurement units',
+                                'Export pediatric growth summary for checkup visits',
+                              ],
+                              'Contact your pediatrician if weight or length crosses more than two major percentile canals.',
+                              'Profile Metadata',
+                              'Clinical Calibration'
+                            )
+                          : openPointerModal(
+                              'Prenatal Profile & Calibration',
+                              `Current active pregnancy profile: ${activeProfile.name}. Fetal weight and biometric curves calibrate against ${formulaSettings.fetalEfwFormula.toUpperCase()} ultrasound regression standards and ${formulaSettings.gestationalMethod} gestational dating.`,
+                              'Fetal biometric reference curves (BPD, HC, AC, FL, and EFW) are calibrated by gestational week from ultrasound regression standards such as Hadlock and INTERGROWTH-21st.',
+                              [
+                                'Verify estimated due date accuracy for gestational week alignment',
+                                'Log serial ultrasound measurements (BPD, HC, AC, FL) as scans are completed',
+                                'Configure your clinic’s preferred EFW formula in Formulas',
+                              ],
+                              'Share serial ultrasound biometrics with your OB-GYN or maternal-fetal medicine provider.',
+                              'Profile Metadata',
+                              'Obstetric Calibration'
+                            )
                       }
                       className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white/80 dark:bg-stone-800 text-stone-600 dark:text-stone-300 capitalize border border-stone-200/60 dark:border-stone-700 hover:border-emerald-400 transition-colors cursor-pointer"
                     >
@@ -669,32 +683,43 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
               {/* FEATURED SPOTLIGHT CARD (Spans 2 columns on lg): Weight Growth & Percentile */}
               <div className="md:col-span-2 bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 sm:p-6 shadow-xs flex flex-col justify-between transition-all hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-md">
-                <div className="flex items-center justify-between pb-3 border-b border-stone-100 dark:border-stone-800">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 flex items-center justify-center shadow-2xs">
+                <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-stone-100 dark:border-stone-800">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 flex items-center justify-center shadow-2xs shrink-0">
                       <Scale className="w-4 h-4" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <h3 className="text-sm sm:text-base font-black text-stone-900 dark:text-white">
-                        Weight & Growth Velocity Spotlight
+                        Weight &amp; Growth Velocity Spotlight
                       </h3>
                       <button
                         onClick={onOpenFormulaModal}
-                        className="text-[11px] text-stone-500 dark:text-stone-400 hover:text-emerald-700 underline text-left"
+                        className="text-[11px] text-stone-500 dark:text-stone-400 hover:text-emerald-700 underline text-left cursor-pointer"
                       >
                         WHO Multi-Center Growth Reference (LMS Calibrated)
                       </button>
                     </div>
                   </div>
 
-                  {/* Clickable pointer button */}
-                  <button
-                    onClick={() => openPopup('baby-weight')}
-                    className="px-3 py-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 rounded-xl flex items-center gap-1.5 transition-all shadow-2xs hover:scale-105"
-                  >
-                    <span>Full Analysis</span>
-                    <Info className="w-3.5 h-3.5" />
-                  </button>
+                  {/* Card action buttons */}
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab('charts')}
+                      className="px-3 py-1.5 text-xs font-bold text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      <span>Open Growth Log</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openPopup('baby-weight')}
+                      className="px-3 py-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 rounded-xl flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer whitespace-nowrap"
+                    >
+                      <span>Full Analysis</span>
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 my-4">

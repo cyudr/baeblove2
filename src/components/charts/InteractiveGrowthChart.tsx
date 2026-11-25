@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   MetricType,
   WHODataPoint,
@@ -472,8 +472,9 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     updateScrubberBySvgX(svgX);
   };
 
-  const handleSvgTouchMove = (e: React.TouchEvent<SVGSVGElement>) => {
+  const handleSvgTouch = (e: React.TouchEvent<SVGSVGElement>) => {
     if (e.touches.length === 0) return;
+    setHoveredPoint(null);
     const touch = e.touches[0];
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
@@ -481,6 +482,11 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     const svgX = (clientX / rect.width) * width;
     updateScrubberBySvgX(svgX);
   };
+
+  useEffect(() => {
+    setScrubberState(null);
+    setHoveredPoint(null);
+  }, [metric, zoomMode, timeScaleMode, profile.id]);
 
   const rangeSummaryLabel = useMemo(() => {
     const minU = daysToAgeUnit(xMinDays, effectiveUnit);
@@ -657,68 +663,114 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
         </div>
       </div>
 
-      {/* Dynamic Scrubber / Latest measurement summary strip */}
-      {scrubberState ? (
-        <div className="mt-3 py-2 px-3 bg-emerald-50/80 dark:bg-emerald-950/40 rounded-xl flex flex-wrap items-center justify-between text-xs text-stone-800 dark:text-stone-200 gap-2 border border-emerald-300 dark:border-emerald-800">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-emerald-950 dark:text-emerald-200">
-              Inspecting Age: {scrubberAgeLabel}
-            </span>
-            <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">|</span>
-            <span>WHO 50th (Median): <strong>{displayValue(scrubberState.p50)}</strong></span>
-            <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">|</span>
-            <span className="text-stone-600 dark:text-stone-400">
-              Expected Band: {displayValue(scrubberState.p3)} – {displayValue(scrubberState.p97)}
-            </span>
-          </div>
-          {scrubberState.nearestMeasurement ? (
-            <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px]">
-                Logged: {displayValue(scrubberState.nearestMeasurement.val)} ({scrubberState.nearestMeasurement.percentile}th %)
+      {/* Static-Height Scrubber / Latest measurement summary strip (zero layout shift) */}
+      <div
+        className={`mt-3 h-14 px-3.5 rounded-xl flex flex-col justify-center gap-1 border text-xs overflow-hidden transition-colors ${
+          scrubberState
+            ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-stone-800 dark:text-stone-200'
+            : 'bg-stone-50 dark:bg-stone-800/60 border-stone-200/60 dark:border-stone-700/60 text-stone-700 dark:text-stone-300'
+        }`}
+      >
+        {scrubberState ? (
+          <>
+            <div className="flex items-center justify-between gap-2 min-w-0 leading-tight">
+              <span className="font-bold text-emerald-950 dark:text-emerald-200 truncate">
+                Inspecting Age: {scrubberAgeLabel}
               </span>
-              <span className="text-[11px] text-stone-500 dark:text-stone-400">
-                {scrubberState.nearestMeasurement.date} · {scrubberState.nearestMeasurement.ageLabel}
+              <div className="flex items-center gap-2 shrink-0">
+                {scrubberState.nearestMeasurement && (
+                  <span className="px-1.5 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px] font-mono tabular-nums whitespace-nowrap">
+                    Logged: {displayValue(scrubberState.nearestMeasurement.val)} ({scrubberState.nearestMeasurement.percentile}%)
+                  </span>
+                )}
+                {latest && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScrubberState(null);
+                      setHoveredPoint(null);
+                    }}
+                    className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 hover:underline cursor-pointer whitespace-nowrap"
+                  >
+                    Latest
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-2 min-w-0 text-[11px] leading-tight">
+              <div className="flex items-center gap-2 min-w-0 truncate font-mono tabular-nums">
+                <span className="shrink-0">
+                  <span className="font-sans text-stone-600 dark:text-stone-400">Median: </span>
+                  <strong className="text-stone-900 dark:text-white">{displayValue(scrubberState.p50)}</strong>
+                </span>
+                <span aria-hidden="true" className="text-stone-300 dark:text-stone-600 shrink-0">|</span>
+                <span className="text-stone-600 dark:text-stone-400 truncate">
+                  <span className="font-sans">Expected Band: </span>
+                  {displayValue(scrubberState.p3)}–{displayValue(scrubberState.p97)}
+                </span>
+              </div>
+              {scrubberState.nearestMeasurement && (
+                <span className="hidden sm:inline text-[10px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0 whitespace-nowrap">
+                  {scrubberState.nearestMeasurement.date}
+                </span>
+              )}
+            </div>
+          </>
+        ) : latest ? (
+          <>
+            <div className="flex items-center justify-between gap-2 min-w-0 leading-tight">
+              <div className="flex items-center gap-1.5 min-w-0 truncate">
+                <span className="font-bold text-stone-900 dark:text-white shrink-0">Latest:</span>
+                <span className="font-mono tabular-nums font-bold text-stone-900 dark:text-white shrink-0">
+                  {displayValue(latest.val)}
+                </span>
+                <span aria-hidden="true" className="text-stone-300 dark:text-stone-600 shrink-0">·</span>
+                <span className="truncate">
+                  Age: <strong className="text-stone-900 dark:text-white">{latest.ageLabel}</strong>
+                </span>
+              </div>
+              <span className="inline-flex items-center gap-1 font-bold text-emerald-800 dark:text-emerald-400 shrink-0 whitespace-nowrap">
+                <TrendingUp className="w-3.5 h-3.5" />
+                <span>{latest.percentile}th %ile</span>
               </span>
             </div>
-          ) : (
-            <span className="text-[10px] text-stone-400 italic">
-              Move cursor or drag along curve to inspect WHO percentiles
-            </span>
-          )}
-        </div>
-      ) : latest ? (
-        <div className="mt-3 py-2.5 px-3.5 bg-stone-50 dark:bg-stone-800/60 rounded-xl flex flex-wrap items-center justify-between text-xs text-stone-700 dark:text-stone-300 gap-2 border border-stone-200/60 dark:border-stone-700/60 transition-colors">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-stone-900 dark:text-white">Latest Recorded:</span>
-            <span className="font-mono font-bold text-stone-900 dark:text-white">{displayValue(latest.val)}</span>
-            <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
-            <span>Age: <strong>{latest.ageLabel}</strong></span>
-            <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
-            <span>Date: {latest.date}</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1 font-bold text-emerald-800 dark:text-emerald-400">
-              <TrendingUp className="w-3.5 h-3.5" />
-              {latest.percentile}th Percentile
-            </span>
-            <span className="text-stone-500 dark:text-stone-400 font-mono">Z-score: {latest.zScore > 0 ? `+${latest.zScore}` : latest.zScore}</span>
-          </div>
-        </div>
-      ) : null}
+            <div className="flex items-center justify-between gap-2 min-w-0 text-[11px] leading-tight">
+              <div className="flex items-center gap-2 min-w-0 truncate font-mono tabular-nums text-stone-500 dark:text-stone-400">
+                <span className="truncate">Date: {latest.date}</span>
+                <span aria-hidden="true" className="text-stone-300 dark:text-stone-600 shrink-0">|</span>
+                <span className="shrink-0">
+                  Z-score: {latest.zScore > 0 ? `+${latest.zScore}` : latest.zScore}
+                </span>
+              </div>
+              <span className="hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 shrink-0 whitespace-nowrap">
+                Hover or touch chart to inspect
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="font-bold text-stone-800 dark:text-stone-200 leading-tight truncate">
+              WHO Growth Reference Curve
+            </div>
+            <div className="text-[11px] text-stone-500 dark:text-stone-400 leading-tight truncate">
+              Hover or touch along the chart to inspect median and expected band values
+            </div>
+          </>
+        )}
+      </div>
 
       {/* SVG Interactive Canvas */}
       <div className="relative mt-4 w-full overflow-hidden select-none">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full h-auto cursor-crosshair"
+          className="w-full h-auto cursor-crosshair touch-pan-y"
           style={{ maxHeight: '420px' }}
           onMouseMove={handleSvgMouseMove}
           onMouseLeave={() => {
-            setScrubberState(null);
             setHoveredPoint(null);
           }}
-          onTouchMove={handleSvgTouchMove}
-          onTouchEnd={() => setScrubberState(null)}
+          onTouchStart={handleSvgTouch}
+          onTouchMove={handleSvgTouch}
         >
           <defs>
             {/* Soft gradient for 15th-85th percentile band */}

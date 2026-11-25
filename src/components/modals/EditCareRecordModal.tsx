@@ -61,6 +61,7 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
 
     if (growthRecord) {
       setDate(getGrowthRecordDate(growthRecord));
+      setTime(growthRecord.time ? growthRecord.time.slice(0, 5) : '');
       setLoggedBy(growthRecord.name ?? '');
       setDailyWeight(growthRecord.daily_weight !== null ? String(growthRecord.daily_weight) : '');
       setDailyLength(growthRecord.daily_length !== null ? String(growthRecord.daily_length) : '');
@@ -135,6 +136,7 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
 
         const res = await editGrowthRecord(growthRecord.id, {
           date: date || null,
+          time: time || null,
           daily_weight: parsedWeight,
           daily_length: parsedLength,
           temperature: parsedTemp,
@@ -241,7 +243,7 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           {isGrowth ? (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
                     Date
@@ -251,6 +253,17 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
                     className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                    Time
+                  </label>
+                  <input
+                    type="time"
+                    value={time}
+                    onChange={(e) => setTime(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
                   />
                 </div>
                 <div>

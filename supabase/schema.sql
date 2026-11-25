@@ -26,6 +26,7 @@ create table if not exists public.growth (
   created_at timestamptz not null default now(),
   profile_id bigint,
   date date,
+  time time,
   daily_weight real,
   daily_length real,
   temperature real,
@@ -34,6 +35,7 @@ create table if not exists public.growth (
 );
 
 alter table public.growth add column if not exists date date;
+alter table public.growth add column if not exists time time;
 alter table public.growth add column if not exists remark text;
 create index if not exists growth_profile_id_idx on public.growth (profile_id);
 

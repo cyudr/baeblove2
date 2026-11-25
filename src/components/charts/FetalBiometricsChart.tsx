@@ -541,67 +541,114 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
         </div>
       </div>
 
-      {/* Dynamic Scrubber / Latest measurement summary strip */}
-      {scrubberState ? (
-        <div className="mt-3 py-2 px-3 bg-amber-50/90 dark:bg-amber-950/40 rounded-xl flex flex-wrap items-center justify-between text-xs text-stone-800 dark:text-stone-200 gap-2 border border-amber-300 dark:border-amber-800">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
-              Inspecting:{' '}
-              <strong>{formatGestationalWeeksLabel(scrubberState.week)}</strong>
-            </span>
-            <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">|</span>
-            <span>Hadlock 50th %: <strong>{currentCfg.formatVal(scrubberState.ref50)}</strong></span>
-            <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">|</span>
-            <span className="text-stone-600 dark:text-stone-400">
-              Normal 5th–95th: {currentCfg.formatVal(scrubberState.ref5)} – {currentCfg.formatVal(scrubberState.ref95)}
-            </span>
-          </div>
-          {scrubberState.nearestMeasurement ? (
-            <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded-md bg-amber-700 text-white font-bold text-[10px]">
-                Scan Logged: {currentCfg.formatVal(scrubberState.nearestMeasurement.val)}
+      {/* Static-Height Scrubber / Latest measurement summary strip (zero layout shift) */}
+      <div
+        className={`mt-3 h-14 px-3.5 rounded-xl flex flex-col justify-center gap-1 border text-xs overflow-hidden transition-colors ${
+          scrubberState
+            ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-stone-800 dark:text-stone-200'
+            : 'bg-stone-50 dark:bg-stone-800/60 border-stone-200/60 dark:border-stone-700/60 text-stone-700 dark:text-stone-300'
+        }`}
+      >
+        {scrubberState ? (
+          <>
+            <div className="flex items-center justify-between gap-2 min-w-0 leading-tight">
+              <span className="font-bold text-amber-950 dark:text-amber-200 truncate">
+                Inspecting: <strong>{formatGestationalWeeksLabel(scrubberState.week)}</strong>
               </span>
-              <span className="text-[11px] text-stone-500 dark:text-stone-400">
-                {scrubberState.nearestMeasurement.date} · {scrubberState.nearestMeasurement.weekLabel}
+              <div className="flex items-center gap-2 shrink-0">
+                {scrubberState.nearestMeasurement && (
+                  <span className="px-1.5 py-0.5 rounded-md bg-amber-700 text-white font-bold text-[10px] font-mono tabular-nums whitespace-nowrap">
+                    Scan: {currentCfg.formatVal(scrubberState.nearestMeasurement.val)}
+                  </span>
+                )}
+                {latest && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScrubberState(null);
+                      setHoveredPoint(null);
+                    }}
+                    className="text-[10px] font-semibold text-amber-900 dark:text-amber-300 hover:underline cursor-pointer whitespace-nowrap"
+                  >
+                    Latest
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-2 min-w-0 text-[11px] leading-tight">
+              <div className="flex items-center gap-2 min-w-0 truncate font-mono tabular-nums">
+                <span className="shrink-0">
+                  <span className="font-sans text-stone-600 dark:text-stone-400">Median: </span>
+                  <strong className="text-stone-900 dark:text-white">{currentCfg.formatVal(scrubberState.ref50)}</strong>
+                </span>
+                <span aria-hidden="true" className="text-stone-300 dark:text-stone-600 shrink-0">|</span>
+                <span className="text-stone-600 dark:text-stone-400 truncate">
+                  <span className="font-sans">Expected Band: </span>
+                  {currentCfg.formatVal(scrubberState.ref5)}–{currentCfg.formatVal(scrubberState.ref95)}
+                </span>
+              </div>
+              {scrubberState.nearestMeasurement && (
+                <span className="hidden sm:inline text-[10px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0 whitespace-nowrap">
+                  {scrubberState.nearestMeasurement.date}
+                </span>
+              )}
+            </div>
+          </>
+        ) : latest ? (
+          <>
+            <div className="flex items-center justify-between gap-2 min-w-0 leading-tight">
+              <div className="flex items-center gap-1.5 min-w-0 truncate">
+                <span className="font-bold text-stone-900 dark:text-white shrink-0">Latest Scan:</span>
+                <span className="font-mono tabular-nums font-bold text-amber-900 dark:text-amber-400 shrink-0">
+                  {currentCfg.formatVal(latest.val)}
+                </span>
+                <span aria-hidden="true" className="text-stone-300 dark:text-stone-600 shrink-0">·</span>
+                <span className="truncate">{latest.weekLabel}</span>
+              </div>
+              <span className="text-stone-600 dark:text-stone-400 font-mono tabular-nums shrink-0 whitespace-nowrap">
+                <span className="font-sans">Median: </span>
+                <strong className="text-stone-800 dark:text-stone-200">{currentCfg.formatVal(latest.ref50)}</strong>
               </span>
             </div>
-          ) : (
-            <span className="text-[10px] text-stone-400 italic">
-              Move cursor along curve to inspect gestational biometrics
-            </span>
-          )}
-        </div>
-      ) : latest ? (
-        <div className="mt-3 py-2.5 px-3.5 bg-stone-50 dark:bg-stone-800/60 rounded-xl flex flex-wrap items-center justify-between text-xs text-stone-700 dark:text-stone-300 gap-2 border border-stone-200/60 dark:border-stone-700/60 transition-colors">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-stone-900 dark:text-white">Latest Ultrasound Scan:</span>
-            <span className="font-mono font-bold text-amber-900 dark:text-amber-400">{currentCfg.formatVal(latest.val)}</span>
-            <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
-            <span>{latest.weekLabel}</span>
-            <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">·</span>
-            <span>Date: {latest.date}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-stone-600 dark:text-stone-400">
-              50th % Median: <strong className="text-stone-800 dark:text-stone-200">{currentCfg.formatVal(latest.ref50)}</strong>
-            </span>
-          </div>
-        </div>
-      ) : null}
+            <div className="flex items-center justify-between gap-2 min-w-0 text-[11px] leading-tight">
+              <span className="font-mono tabular-nums text-stone-500 dark:text-stone-400 truncate">
+                Date: {latest.date}
+              </span>
+              <span className="hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 shrink-0 whitespace-nowrap">
+                Hover or touch chart to inspect
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="font-bold text-stone-800 dark:text-stone-200 leading-tight truncate">
+              Hadlock Fetal Biometrics Reference
+            </div>
+            <div className="text-[11px] text-stone-500 dark:text-stone-400 leading-tight truncate">
+              Hover or touch along the chart to inspect median and expected band values
+            </div>
+          </>
+        )}
+      </div>
 
       {/* SVG Canvas */}
       <div className="relative mt-4 w-full overflow-hidden select-none">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full h-auto cursor-crosshair"
+          className="w-full h-auto cursor-crosshair touch-pan-y"
           style={{ maxHeight: '420px' }}
           onMouseMove={handleSvgMouseMove}
           onMouseLeave={() => {
-            setScrubberState(null);
             setHoveredPoint(null);
           }}
-          onTouchMove={handleSvgTouchMove}
-          onTouchEnd={() => setScrubberState(null)}
+          onTouchStart={(e) => {
+            setHoveredPoint(null);
+            handleSvgTouchMove(e);
+          }}
+          onTouchMove={(e) => {
+            setHoveredPoint(null);
+            handleSvgTouchMove(e);
+          }}
         >
           <defs>
             <linearGradient id="fetalBandGrad" x1="0%" y1="0%" x2="0%" y2="100%">

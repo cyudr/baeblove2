@@ -222,7 +222,12 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
             className="flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-300 hover:text-amber-800 dark:hover:text-amber-300 px-2.5 py-1.5 rounded-lg hover:bg-stone-50 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700 transition-colors self-start sm:self-auto"
           >
             <BookOpen className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
-            <span>Formula Sources: <strong>{formulaSettings.fetalEfwFormula.toUpperCase()}</strong></span>
+            <span>
+              Formula Sources:{' '}
+              <strong>
+                {isBaby ? 'WHO 2006 LMS' : formulaSettings.fetalEfwFormula.toUpperCase()}
+              </strong>
+            </span>
           </button>
         )}
       </div>

@@ -320,7 +320,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Quick Clinical Formulas Button */}
           <button
             onClick={onOpenFormulaModal}
-            title={`Clinical formulas: ${formulaSettings.fetalEfwFormula} & WHO LMS`}
+            title={
+              activeProfile?.type === 'fetal'
+                ? `Fetal formulas: ${formulaSettings.fetalEfwFormula.toUpperCase()} & ${formulaSettings.gestationalMethod}`
+                : activeProfile?.type === 'baby'
+                  ? 'Pediatric formulas: WHO 2006 LMS & Feeding Targets'
+                  : 'Clinical formulas & scientific sources'
+            }
             className="hidden sm:flex items-center gap-1 px-2.5 h-8 text-xs font-semibold text-stone-700 dark:text-stone-300 hover:text-amber-900 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 transition-colors cursor-pointer shadow-2xs"
           >
             <BookOpen className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />

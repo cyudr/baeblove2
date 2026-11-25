@@ -125,6 +125,7 @@ function normalizeGrowthRow(raw: Record<string, unknown>): GrowthRecord {
     created_at: String(raw.created_at ?? new Date().toISOString()),
     profile_id: toNullableText(raw.profile_id !== null && raw.profile_id !== undefined ? String(raw.profile_id) : null),
     date: raw.date !== null && raw.date !== undefined ? String(raw.date) : null,
+    time: raw.time !== null && raw.time !== undefined ? String(raw.time) : null,
     daily_weight: raw.daily_weight !== null && raw.daily_weight !== undefined ? Number(raw.daily_weight) : null,
     daily_length: raw.daily_length !== null && raw.daily_length !== undefined ? Number(raw.daily_length) : null,
     temperature: raw.temperature !== null && raw.temperature !== undefined ? Number(raw.temperature) : null,
@@ -220,6 +221,7 @@ export async function fetchGrowthRecords(): Promise<GrowthRecord[] | null> {
     .from(GROWTH_TABLE)
     .select('*')
     .order('date', { ascending: false, nullsFirst: false })
+    .order('time', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -235,6 +237,7 @@ function buildGrowthPayload(input: NewGrowthRecordInput, nonNullProfileId = fals
   return {
     profile_id: nonNullProfileId ? (numericProfileId ?? 0) : numericProfileId,
     date: toNullableDate(input.date),
+    time: toNullableTime(input.time),
     daily_weight: toNullableFloat(input.daily_weight),
     daily_length: toNullableFloat(input.daily_length),
     temperature: toNullableFloat(input.temperature),
@@ -392,6 +395,7 @@ export async function updateGrowthRecord(
   const payload: Record<string, unknown> = {};
   if ('profile_id' in updates) payload.profile_id = resolveNumericProfileId(updates.profile_id);
   if ('date' in updates) payload.date = toNullableDate(updates.date);
+  if ('time' in updates) payload.time = toNullableTime(updates.time);
   if ('daily_weight' in updates) payload.daily_weight = toNullableFloat(updates.daily_weight);
   if ('daily_length' in updates) payload.daily_length = toNullableFloat(updates.daily_length);
   if ('temperature' in updates) payload.temperature = toNullableFloat(updates.temperature);

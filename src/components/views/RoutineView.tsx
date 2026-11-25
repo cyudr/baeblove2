@@ -22,6 +22,7 @@ import { AskGeminiModal } from '../modals/AskGeminiModal';
 import { StoolSelect } from '../common/StoolSelect';
 import { DiaperLoadControl } from '../common/DiaperLoadControl';
 import { FeedingMethodSelect } from '../common/FeedingMethodSelect';
+import { RemarkTooltipCell } from '../common/RemarkTooltipCell';
 import { RoutineSummaryAndChartsGrid } from '../charts/RoutineTrendCharts';
 import type { RoutineRecord } from '../../types';
 import {
@@ -910,7 +911,8 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         )}
       </form>
 
-      {/* Compact Milk Intake Suggestion Card */}
+      {/* Compact Milk Intake Suggestion Card (Infant / Baby / Toddler profiles only) */}
+      {activeProfile?.type !== 'fetal' && (
       <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs space-y-4 transition-colors">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -1020,6 +1022,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {/* Analytics & Interactive Daily / Weekly / Monthly Box Plot Charts */}
       <RoutineSummaryAndChartsGrid
@@ -1144,8 +1147,8 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                           '—'
                         )}
                       </td>
-                      <td className="py-3 px-4 max-w-xs truncate text-stone-500 dark:text-stone-400">
-                        {row.remark || '—'}
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <RemarkTooltipCell remark={row.remark} />
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1">

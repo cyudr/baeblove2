@@ -523,8 +523,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ? prev.map((r) => (r.id === record.id ? record : r))
             : [record, ...prev];
           return next.sort((a, b) => {
-            const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.created_at.slice(11, 19)}`;
-            const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.created_at.slice(11, 19)}`;
+            const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.time ?? a.created_at.slice(11, 19)}`;
+            const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.time ?? b.created_at.slice(11, 19)}`;
             return bKey.localeCompare(aKey);
           });
         });
@@ -1224,8 +1224,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const exists = prev.some((r) => r.id === created.id);
         const next = exists ? prev.map((r) => (r.id === created.id ? created : r)) : [created, ...prev];
         return next.sort((a, b) => {
-          const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.created_at.slice(11, 19)}`;
-          const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.created_at.slice(11, 19)}`;
+          const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.time ?? a.created_at.slice(11, 19)}`;
+          const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.time ?? b.created_at.slice(11, 19)}`;
           return bKey.localeCompare(aKey);
         });
       });
@@ -1247,8 +1247,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         for (const r of prev) byId.set(r.id, r);
         for (const r of result.records) byId.set(r.id, r);
         return Array.from(byId.values()).sort((a, b) => {
-          const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.created_at.slice(11, 19)}`;
-          const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.created_at.slice(11, 19)}`;
+          const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.time ?? a.created_at.slice(11, 19)}`;
+          const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.time ?? b.created_at.slice(11, 19)}`;
           return bKey.localeCompare(aKey);
         });
       });
@@ -1264,8 +1264,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const result = await updateGrowthRecord(id, updates);
     const sortGrowth = (list: GrowthRecord[]) =>
       [...list].sort((a, b) => {
-        const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.created_at.slice(11, 19)}`;
-        const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.created_at.slice(11, 19)}`;
+        const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.time ?? a.created_at.slice(11, 19)}`;
+        const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.time ?? b.created_at.slice(11, 19)}`;
         return bKey.localeCompare(aKey);
       });
 
@@ -1281,6 +1281,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   ...r,
                   profile_id: 'profile_id' in updates ? (updates.profile_id ?? null) : r.profile_id,
                   date: 'date' in updates ? (updates.date ?? null) : r.date,
+                  time: 'time' in updates ? (updates.time ?? null) : r.time,
                   daily_weight: 'daily_weight' in updates ? (updates.daily_weight ?? null) : r.daily_weight,
                   daily_length: 'daily_length' in updates ? (updates.daily_length ?? null) : r.daily_length,
                   temperature: 'temperature' in updates ? (updates.temperature ?? null) : r.temperature,

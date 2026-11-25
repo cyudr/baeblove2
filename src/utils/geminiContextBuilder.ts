@@ -113,11 +113,13 @@ export function buildGeminiSystemInstruction(input: GeminiContextInput): string 
     lines.push('Recent daily growth rows (newest first):');
     for (const g of recentGrowth) {
       const d = getGrowthRecordDate(g);
+      const t = g.time ? g.time.slice(0, 5) : '';
+      const dateTimeLabel = t ? `${d} ${t}` : d;
       const age =
         activeProfile?.type === 'baby'
           ? formatAgeFromBirthDate(activeProfile.dateOfEvent, d, true)
           : null;
-      const parts: string[] = [age ? `${d} (age ${age})` : d];
+      const parts: string[] = [age ? `${dateTimeLabel} (age ${age})` : dateTimeLabel];
       if (g.daily_weight !== null) parts.push(`weight=${g.daily_weight}kg`);
       if (g.daily_length !== null) parts.push(`length=${g.daily_length}cm`);
       if (g.temperature !== null) parts.push(`temp=${g.temperature}°C`);
