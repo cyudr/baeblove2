@@ -610,6 +610,28 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, isAnalyzing, isImporting, onClose]);
 
+  // Real-time duplicate detection against existing database records
+  // (Must be declared before the conditional early return to satisfy React Rules of Hooks)
+  const routineDupMap = useMemo(() => {
+    const map = new Map<string, DuplicateMatch>();
+    if (!isOpen) return map;
+    for (const row of routineDrafts) {
+      const match = findRoutineDuplicateMatch(row, profileRoutineRecords);
+      if (match) map.set(row._key, match);
+    }
+    return map;
+  }, [isOpen, routineDrafts, profileRoutineRecords]);
+
+  const growthDupMap = useMemo(() => {
+    const map = new Map<string, DuplicateMatch>();
+    if (!isOpen) return map;
+    for (const row of growthDrafts) {
+      const match = findGrowthDuplicateMatch(row, profileGrowthRecords);
+      if (match) map.set(row._key, match);
+    }
+    return map;
+  }, [isOpen, growthDrafts, profileGrowthRecords]);
+
   if (!isOpen) return null;
 
   const handleSwitchTable = (next: MassImportTable) => {
@@ -1102,25 +1124,6 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       setIsAnalyzing(false);
     }
   };
-
-  // Real-time duplicate detection against existing database records
-  const routineDupMap = useMemo(() => {
-    const map = new Map<string, DuplicateMatch>();
-    for (const row of routineDrafts) {
-      const match = findRoutineDuplicateMatch(row, profileRoutineRecords);
-      if (match) map.set(row._key, match);
-    }
-    return map;
-  }, [routineDrafts, profileRoutineRecords]);
-
-  const growthDupMap = useMemo(() => {
-    const map = new Map<string, DuplicateMatch>();
-    for (const row of growthDrafts) {
-      const match = findGrowthDuplicateMatch(row, profileGrowthRecords);
-      if (match) map.set(row._key, match);
-    }
-    return map;
-  }, [growthDrafts, profileGrowthRecords]);
 
   const activeFlaggedCount =
     (targetTable === 'routine' || targetTable === 'auto' ? routineDupMap.size : 0) +
