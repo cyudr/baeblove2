@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   FETAL_BIOMETRIC_STANDARDS,
   FetalBiometricRef,
@@ -7,7 +7,12 @@ import {
 import { UnitConverter } from '../../data/growthStandards';
 import { FetalMeasurement, ChildProfile, UnitSystem } from '../../types';
 import { useApp } from '../../context/AppContext';
-import { Sparkles, Info, BookOpen } from 'lucide-react';
+import {
+  computeAutoZoomRange,
+  buildNiceTicks,
+  formatCompactNumber,
+} from '../../utils/chartZoom';
+import { Info, BookOpen } from 'lucide-react';
 
 interface FetalBiometricsChartProps {
   profile: ChildProfile;
@@ -17,6 +22,7 @@ interface FetalBiometricsChartProps {
 }
 
 type FetalMetricKey = 'efw' | 'bpd' | 'hc' | 'ac' | 'fl';
+type FetalZoomMode = 'auto' | 'full';
 
 export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
   profile,
@@ -26,6 +32,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
 }) => {
   const { formulaSettings } = useApp();
   const [selectedMetric, setSelectedMetric] = useState<FetalMetricKey>('efw');
+  const [zoomMode, setZoomMode] = useState<FetalZoomMode>('auto');
   const [hoveredPoint, setHoveredPoint] = useState<{
     week: number;
     value: number;
@@ -110,35 +117,136 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
   const height = 420;
   const padding = { top: 35, right: 35, bottom: 45, left: 60 };
 
-  const minWeek = 12;
-  const maxWeek = 40;
+  const domainMinWeek = 12;
+  const domainMaxWeek = 40;
 
-  // Compute Y range
+  // Compute visible gestational week range (Auto = 200% of current available data time range)
+  const [minWeek, maxWeek] = useMemo<[number, number]>(() => {
+    if (zoomMode === 'full') {
+      return [domainMinWeek, domainMaxWeek];
+    }
+
+    const metricWeeks = measurements
+      .filter((m) => {
+        const val = currentCfg.getMeasurementVal(m);
+        return val !== undefined && val > 0;
+      })
+      .map((m) => m.gestationalWeeks + (m.gestationalDays || 0) / 7);
+
+    const sourceWeeks =
+      metricWeeks.length > 0
+        ? metricWeeks
+        : measurements.map((m) => m.gestationalWeeks + (m.gestationalDays || 0) / 7);
+
+    return computeAutoZoomRange(sourceWeeks, {
+      domainMin: domainMinWeek,
+      domainMax: domainMaxWeek,
+      minSpan: 2,
+      emptyRange: [domainMinWeek, domainMaxWeek],
+      singlePointAnchorAtOrigin: false,
+      singlePointFallbackSpan: 6,
+    });
+  }, [zoomMode, measurements, currentCfg]);
+
+  const weekSpan = Math.max(0.0001, maxWeek - minWeek);
+
+  // Smooth interpolated reference curve across [minWeek, maxWeek]
+  const refCurve = useMemo<FetalBiometricRef[]>(() => {
+    const sampleWeeks = new Set<number>([minWeek, maxWeek]);
+    FETAL_BIOMETRIC_STANDARDS.forEach((pt) => {
+      if (pt.week > minWeek && pt.week < maxWeek) {
+        sampleWeeks.add(pt.week);
+      }
+    });
+    const minSteps = 20;
+    if (sampleWeeks.size < minSteps) {
+      for (let i = 1; i < minSteps; i++) {
+        sampleWeeks.add(minWeek + (weekSpan * i) / minSteps);
+      }
+    }
+    return Array.from(sampleWeeks)
+      .sort((a, b) => a - b)
+      .map((w) => getFetalBiometricRef(w));
+  }, [minWeek, maxWeek, weekSpan]);
+
+  // Compute Y range scaled to the visible zoomed window
   const { yMin, yMax } = useMemo(() => {
-    const minVal = Math.min(...FETAL_BIOMETRIC_STANDARDS.map((s) => s[currentCfg.keyP5]));
-    let maxVal = Math.max(...FETAL_BIOMETRIC_STANDARDS.map((s) => s[currentCfg.keyP95]));
-
-    measurements.forEach((m) => {
-      const val = currentCfg.getMeasurementVal(m);
-      if (val && val > maxVal) maxVal = val;
+    const visibleValues: number[] = [];
+    refCurve.forEach((s) => {
+      visibleValues.push(s[currentCfg.keyP5], s[currentCfg.keyP95]);
     });
 
+    measurements.forEach((m) => {
+      const totalWeeks = m.gestationalWeeks + (m.gestationalDays || 0) / 7;
+      if (totalWeeks < minWeek - 1e-6 || totalWeeks > maxWeek + 1e-6) return;
+      const val = currentCfg.getMeasurementVal(m);
+      if (val && val > 0) visibleValues.push(val);
+    });
+
+    if (visibleValues.length === 0) {
+      return { yMin: 0, yMax: 100 };
+    }
+
+    const rawMin = Math.min(...visibleValues);
+    const rawMax = Math.max(...visibleValues);
+    const rawSpan = Math.max(5, rawMax - rawMin);
+
+    const paddedMin = Math.max(0, Math.floor(rawMin - rawSpan * 0.1));
+    const paddedMax = Math.ceil(rawMax + rawSpan * 0.1);
+
     return {
-      yMin: Math.max(0, Math.floor(minVal * 0.8)),
-      yMax: Math.ceil(maxVal * 1.08),
+      yMin: paddedMin,
+      yMax: paddedMax > paddedMin ? paddedMax : paddedMin + 10,
     };
-  }, [currentCfg, measurements]);
+  }, [refCurve, currentCfg, measurements, minWeek, maxWeek]);
 
-  const scaleX = (week: number) => {
-    const usableW = width - padding.left - padding.right;
-    return padding.left + ((week - minWeek) / (maxWeek - minWeek)) * usableW;
-  };
+  const scaleX = useCallback(
+    (week: number) => {
+      const usableW = width - padding.left - padding.right;
+      return padding.left + ((week - minWeek) / weekSpan) * usableW;
+    },
+    [minWeek, weekSpan, width, padding.left, padding.right]
+  );
 
-  const scaleY = (val: number) => {
-    const usableH = height - padding.top - padding.bottom;
-    const norm = (val - yMin) / (yMax - yMin);
-    return height - padding.bottom - norm * usableH;
-  };
+  const scaleY = useCallback(
+    (val: number) => {
+      const usableH = height - padding.top - padding.bottom;
+      const norm = (val - yMin) / Math.max(0.0001, yMax - yMin);
+      return height - padding.bottom - norm * usableH;
+    },
+    [yMin, yMax, height, padding.top, padding.bottom]
+  );
+
+  // Valid measurements with coordinates inside [minWeek, maxWeek]
+  const validMeasurements = useMemo(() => {
+    return measurements
+      .map((m) => ({
+        measurement: m,
+        val: currentCfg.getMeasurementVal(m),
+        totalWeeks: m.gestationalWeeks + (m.gestationalDays || 0) / 7,
+      }))
+      .filter(
+        (item): item is { measurement: FetalMeasurement; val: number; totalWeeks: number } =>
+          item.val !== undefined &&
+          item.val > 0 &&
+          item.totalWeeks >= minWeek - 1e-6 &&
+          item.totalWeeks <= maxWeek + 1e-6
+      )
+      .sort((a, b) => a.totalWeeks - b.totalWeeks)
+      .map(({ measurement: m, val, totalWeeks }) => {
+        const ref = getFetalBiometricRef(totalWeeks);
+        return {
+          ...m,
+          val,
+          totalWeeks,
+          x: scaleX(totalWeeks),
+          y: scaleY(val),
+          ref5: ref[currentCfg.keyP5],
+          ref50: ref[currentCfg.keyP50],
+          ref95: ref[currentCfg.keyP95],
+        };
+      });
+  }, [measurements, currentCfg, minWeek, maxWeek, scaleX, scaleY]);
 
   const updateScrubberBySvgX = (svgX: number) => {
     const usableW = width - padding.left - padding.right;
@@ -147,13 +255,25 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
       return;
     }
     const ratio = (svgX - padding.left) / usableW;
-    const scrubbedWeek = Math.max(minWeek, Math.min(maxWeek, Math.round(minWeek + ratio * (maxWeek - minWeek))));
+    const rawWeek = minWeek + ratio * weekSpan;
+    const snapStep = weekSpan <= 6 ? 0.25 : weekSpan <= 14 ? 0.5 : 1;
+    const scrubbedWeek = Math.max(
+      minWeek,
+      Math.min(maxWeek, Number((Math.round(rawWeek / snapStep) * snapStep).toFixed(2)))
+    );
     const ref = getFetalBiometricRef(scrubbedWeek);
     if (!ref) return;
 
-    const nearest = validMeasurements.find(
-      (m) => Math.abs(m.gestationalWeeks - scrubbedWeek) <= 1
-    );
+    const tolerance = Math.max(0.35, weekSpan * 0.045);
+    let nearest: (typeof validMeasurements)[number] | undefined;
+    let bestDist = Infinity;
+    for (const m of validMeasurements) {
+      const dist = Math.abs(m.totalWeeks - scrubbedWeek);
+      if (dist <= tolerance && dist < bestDist) {
+        bestDist = dist;
+        nearest = m;
+      }
+    }
 
     setScrubberState({
       week: scrubbedWeek,
@@ -161,14 +281,16 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
       ref5: ref[currentCfg.keyP5],
       ref50: ref[currentCfg.keyP50],
       ref95: ref[currentCfg.keyP95],
-      nearestMeasurement: nearest ? {
-        week: nearest.gestationalWeeks,
-        val: nearest.val,
-        date: nearest.date,
-        notes: nearest.notes,
-        x: nearest.x,
-        y: nearest.y,
-      } : undefined,
+      nearestMeasurement: nearest
+        ? {
+            week: nearest.gestationalWeeks,
+            val: nearest.val,
+            date: nearest.date,
+            notes: nearest.notes,
+            x: nearest.x,
+            y: nearest.y,
+          }
+        : undefined,
     });
   };
 
@@ -191,49 +313,45 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
   };
 
   // Build SVG path
-  const makeRefPath = (key: 'efwP5' | 'efwP50' | 'efwP95' | 'bpdP5' | 'bpdP50' | 'bpdP95' | 'hcP5' | 'hcP50' | 'hcP95' | 'acP5' | 'acP50' | 'acP95' | 'flP5' | 'flP50' | 'flP95') => {
-    return FETAL_BIOMETRIC_STANDARDS.map((pt, i) => {
-      const x = scaleX(pt.week);
-      const y = scaleY(pt[key]);
-      return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    }).join(' ');
+  const makeRefPath = (
+    key:
+      | 'efwP5'
+      | 'efwP50'
+      | 'efwP95'
+      | 'bpdP5'
+      | 'bpdP50'
+      | 'bpdP95'
+      | 'hcP5'
+      | 'hcP50'
+      | 'hcP95'
+      | 'acP5'
+      | 'acP50'
+      | 'acP95'
+      | 'flP5'
+      | 'flP50'
+      | 'flP95'
+  ) => {
+    return refCurve
+      .map((pt, i) => {
+        const x = scaleX(pt.week);
+        const y = scaleY(pt[key]);
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      })
+      .join(' ');
   };
 
   const makeAreaBand = () => {
-    const topPts = FETAL_BIOMETRIC_STANDARDS.map(
+    if (refCurve.length === 0) return '';
+    const topPts = refCurve.map(
       (pt) => `${scaleX(pt.week).toFixed(1)},${scaleY(pt[currentCfg.keyP95]).toFixed(1)}`
     );
-    const bottomPts = [...FETAL_BIOMETRIC_STANDARDS]
+    const bottomPts = [...refCurve]
       .reverse()
       .map(
         (pt) => `${scaleX(pt.week).toFixed(1)},${scaleY(pt[currentCfg.keyP5]).toFixed(1)}`
       );
     return `M ${topPts.join(' L ')} L ${bottomPts.join(' L ')} Z`;
   };
-
-  // Valid measurements with coordinates
-  const validMeasurements = useMemo(() => {
-    return measurements
-      .filter((m) => {
-        const val = currentCfg.getMeasurementVal(m);
-        return val !== undefined && val > 0 && m.gestationalWeeks >= minWeek && m.gestationalWeeks <= maxWeek;
-      })
-      .map((m) => {
-        const val = currentCfg.getMeasurementVal(m)!;
-        const totalWeeks = m.gestationalWeeks + (m.gestationalDays || 0) / 7;
-        const ref = getFetalBiometricRef(Math.round(totalWeeks));
-        return {
-          ...m,
-          val,
-          totalWeeks,
-          x: scaleX(totalWeeks),
-          y: scaleY(val),
-          ref5: ref[currentCfg.keyP5],
-          ref50: ref[currentCfg.keyP50],
-          ref95: ref[currentCfg.keyP95],
-        };
-      });
-  }, [measurements, currentCfg, scaleX, scaleY]);
 
   const userPath = useMemo(() => {
     if (validMeasurements.length < 2) return '';
@@ -244,7 +362,10 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
 
   const latest = validMeasurements[validMeasurements.length - 1];
 
-  const weekTicks = [12, 16, 20, 24, 28, 32, 36, 40];
+  const weekTicks = useMemo(
+    () => buildNiceTicks(minWeek, maxWeek, [0.5, 1, 2, 4], 8),
+    [minWeek, maxWeek]
+  );
   const yTicks = useMemo(() => {
     const count = 5;
     const step = (yMax - yMin) / count;
@@ -264,6 +385,10 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             <h3 className="text-base font-bold text-stone-900 dark:text-white">
               Ultrasound Biometrics & Fetal Growth
             </h3>
+            <span className="text-xs text-stone-500 dark:text-stone-400">
+              {formatCompactNumber(minWeek, 1)}–{formatCompactNumber(maxWeek, 1)}w
+              {zoomMode === 'auto' ? ' · Auto' : ''}
+            </span>
             {onOpenFormulaModal ? (
               <button
                 onClick={onOpenFormulaModal}
@@ -284,58 +409,84 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
           </p>
         </div>
 
-        {/* Metric Segmented Control */}
-        <div className="inline-flex flex-wrap p-1 bg-stone-100 dark:bg-stone-800 rounded-xl border border-stone-200/60 dark:border-stone-700/60">
-          <button
-            onClick={() => setSelectedMetric('efw')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              selectedMetric === 'efw'
-                ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
-                : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-            }`}
-          >
-            Weight (EFW)
-          </button>
-          <button
-            onClick={() => setSelectedMetric('bpd')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              selectedMetric === 'bpd'
-                ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
-                : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-            }`}
-          >
-            BPD (Head)
-          </button>
-          <button
-            onClick={() => setSelectedMetric('hc')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              selectedMetric === 'hc'
-                ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
-                : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-            }`}
-          >
-            HC (Circumference)
-          </button>
-          <button
-            onClick={() => setSelectedMetric('ac')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              selectedMetric === 'ac'
-                ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
-                : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-            }`}
-          >
-            AC (Abdomen)
-          </button>
-          <button
-            onClick={() => setSelectedMetric('fl')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              selectedMetric === 'fl'
-                ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
-                : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-            }`}
-          >
-            FL (Femur)
-          </button>
+        {/* Metric & Zoom Segmented Controls */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex flex-wrap p-1 bg-stone-100 dark:bg-stone-800 rounded-xl border border-stone-200/60 dark:border-stone-700/60">
+            <button
+              onClick={() => setSelectedMetric('efw')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                selectedMetric === 'efw'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+              }`}
+            >
+              Weight (EFW)
+            </button>
+            <button
+              onClick={() => setSelectedMetric('bpd')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                selectedMetric === 'bpd'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+              }`}
+            >
+              BPD (Head)
+            </button>
+            <button
+              onClick={() => setSelectedMetric('hc')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                selectedMetric === 'hc'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+              }`}
+            >
+              HC (Circumference)
+            </button>
+            <button
+              onClick={() => setSelectedMetric('ac')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                selectedMetric === 'ac'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+              }`}
+            >
+              AC (Abdomen)
+            </button>
+            <button
+              onClick={() => setSelectedMetric('fl')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                selectedMetric === 'fl'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+              }`}
+            >
+              FL (Femur)
+            </button>
+          </div>
+
+          <div className="inline-flex p-1 bg-stone-100 dark:bg-stone-800 rounded-xl border border-stone-200/60 dark:border-stone-700/60">
+            <button
+              onClick={() => setZoomMode('auto')}
+              title="Auto-zoom to 200% of current available data time range"
+              className={`px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                zoomMode === 'auto'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+              }`}
+            >
+              Auto
+            </button>
+            <button
+              onClick={() => setZoomMode('full')}
+              className={`px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                zoomMode === 'full'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+              }`}
+            >
+              Full
+            </button>
+          </div>
         </div>
       </div>
 
@@ -345,7 +496,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              Scrubbing Week: <strong>Week {scrubberState.week}</strong>
+              Scrubbing Week: <strong>Week {formatCompactNumber(scrubberState.week, 1)}</strong>
             </span>
             <span aria-hidden="true" className="text-stone-300 dark:text-stone-600">|</span>
             <span>Hadlock 50th %: <strong>{currentCfg.formatVal(scrubberState.ref50)}</strong></span>
@@ -455,7 +606,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                   textAnchor="middle"
                   className="text-[10px] fill-stone-500 font-sans"
                 >
-                  {wk}w
+                  {formatCompactNumber(wk, 1)}w
                 </text>
               </g>
             );
@@ -485,27 +636,31 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             strokeDasharray="2 3"
           />
 
-          <text
-            x={width - padding.right + 4}
-            y={scaleY(FETAL_BIOMETRIC_STANDARDS[FETAL_BIOMETRIC_STANDARDS.length - 1][currentCfg.keyP95]) + 3}
-            className="text-[9px] fill-amber-700 font-sans font-medium"
-          >
-            95th
-          </text>
-          <text
-            x={width - padding.right + 4}
-            y={scaleY(FETAL_BIOMETRIC_STANDARDS[FETAL_BIOMETRIC_STANDARDS.length - 1][currentCfg.keyP50]) + 3}
-            className="text-[9px] fill-amber-900 font-sans font-semibold"
-          >
-            50th
-          </text>
-          <text
-            x={width - padding.right + 4}
-            y={scaleY(FETAL_BIOMETRIC_STANDARDS[FETAL_BIOMETRIC_STANDARDS.length - 1][currentCfg.keyP5]) + 3}
-            className="text-[9px] fill-amber-700 font-sans font-medium"
-          >
-            5th
-          </text>
+          {refCurve.length > 0 && (
+            <>
+              <text
+                x={width - padding.right + 4}
+                y={scaleY(refCurve[refCurve.length - 1][currentCfg.keyP95]) + 3}
+                className="text-[9px] fill-amber-700 font-sans font-medium"
+              >
+                95th
+              </text>
+              <text
+                x={width - padding.right + 4}
+                y={scaleY(refCurve[refCurve.length - 1][currentCfg.keyP50]) + 3}
+                className="text-[9px] fill-amber-900 font-sans font-semibold"
+              >
+                50th
+              </text>
+              <text
+                x={width - padding.right + 4}
+                y={scaleY(refCurve[refCurve.length - 1][currentCfg.keyP5]) + 3}
+                className="text-[9px] fill-amber-700 font-sans font-medium"
+              >
+                5th
+              </text>
+            </>
+          )}
 
           {/* User Logged Line */}
           {userPath && (
@@ -652,7 +807,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                   y="16"
                   className="text-[10px] font-bold fill-amber-400 font-sans tracking-wide uppercase"
                 >
-                  Gestational Week {scrubberState.week}
+                  Gestational Week {formatCompactNumber(scrubberState.week, 1)}
                 </text>
                 <text
                   x="10"

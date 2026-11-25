@@ -1,13 +1,20 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
+  DEFAULT_DIAPER_LOAD,
   DEFAULT_MILK_FORMULA,
   doesRecordMatchProfile,
+  formatDiaperLoad,
   getGrowthRecordDate,
   getRoutineRecordDate,
   interpretRoutineTable,
+  normalizeDiaperLoad,
+  normalizeStoolValue,
+  parseDiaperLoadCount,
 } from '../../utils/careInterpreter';
 import { EditAuthModal } from '../modals/EditAuthModal';
+import { StoolSelect } from '../common/StoolSelect';
+import { DiaperLoadControl } from '../common/DiaperLoadControl';
 import type { RoutineRecord } from '../../types';
 import {
   Droplets,
@@ -76,6 +83,8 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   const [formulaMl, setFormulaMl] = useState<string>('');
   const [feedDurationMin, setFeedDurationMin] = useState<string>('');
   const [diaper, setDiaper] = useState<string>('');
+  const [diaperLoad, setDiaperLoad] = useState<string>(DEFAULT_DIAPER_LOAD);
+  const [stool, setStool] = useState<string>('');
   const [routineRemark, setRoutineRemark] = useState<string>('');
   const [routineError, setRoutineError] = useState<string | null>(null);
   const [retrieveNotice, setRetrieveNotice] = useState<string | null>(null);
@@ -120,16 +129,18 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setRoutineTime(
       initialEditRecord.time ? initialEditRecord.time.slice(0, 5) : getCurrentTimeStr()
     );
-    setEbmMl(initialEditRecord['EBM (mL)'] !== null ? String(initialEditRecord['EBM (mL)']) : '');
+    setEbmMl(initialEditRecord.emb_mL !== null ? String(initialEditRecord.emb_mL) : '');
     setFormulaMl(
-      initialEditRecord['Formula (mL)'] !== null ? String(initialEditRecord['Formula (mL)']) : ''
+      initialEditRecord.formula_mL !== null ? String(initialEditRecord.formula_mL) : ''
     );
     setFeedDurationMin(
-      initialEditRecord['feed duration (min)'] !== null
-        ? String(initialEditRecord['feed duration (min)'])
+      initialEditRecord.feed_duration_min !== null
+        ? String(initialEditRecord.feed_duration_min)
         : ''
     );
-    setDiaper(initialEditRecord.Diaper ?? '');
+    setDiaper(initialEditRecord.diaper ?? '');
+    setDiaperLoad(normalizeDiaperLoad(initialEditRecord['diaper load'], DEFAULT_DIAPER_LOAD));
+    setStool(normalizeStoolValue(initialEditRecord.stool));
     setRoutineRemark(initialEditRecord.remark ?? '');
     setRoutineError(null);
     setRetrieveNotice(null);
@@ -277,6 +288,8 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setFormulaMl('');
     setFeedDurationMin('');
     setDiaper('');
+    setDiaperLoad(DEFAULT_DIAPER_LOAD);
+    setStool('');
     setRoutineRemark('');
     setRoutineError(null);
     setRetrieveNotice(null);
@@ -289,19 +302,21 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setRoutineTime(getCurrentTimeStr());
     setLoggedBy(latestRoutineRecord.name ?? '');
     setEbmMl(
-      latestRoutineRecord['EBM (mL)'] !== null ? String(latestRoutineRecord['EBM (mL)']) : ''
+      latestRoutineRecord.emb_mL !== null ? String(latestRoutineRecord.emb_mL) : ''
     );
     setFormulaMl(
-      latestRoutineRecord['Formula (mL)'] !== null
-        ? String(latestRoutineRecord['Formula (mL)'])
+      latestRoutineRecord.formula_mL !== null
+        ? String(latestRoutineRecord.formula_mL)
         : ''
     );
     setFeedDurationMin(
-      latestRoutineRecord['feed duration (min)'] !== null
-        ? String(latestRoutineRecord['feed duration (min)'])
+      latestRoutineRecord.feed_duration_min !== null
+        ? String(latestRoutineRecord.feed_duration_min)
         : ''
     );
-    setDiaper(latestRoutineRecord.Diaper ?? '');
+    setDiaper(latestRoutineRecord.diaper ?? '');
+    setDiaperLoad(normalizeDiaperLoad(latestRoutineRecord['diaper load'], DEFAULT_DIAPER_LOAD));
+    setStool(normalizeStoolValue(latestRoutineRecord.stool));
     setRoutineRemark(latestRoutineRecord.remark ?? '');
     setRoutineError(null);
     const whenLabel = [
@@ -318,12 +333,14 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setLoggedBy(row.name ?? '');
     setRoutineDate(row.date ? row.date.slice(0, 10) : getCurrentDateStr());
     setRoutineTime(row.time ? row.time.slice(0, 5) : getCurrentTimeStr());
-    setEbmMl(row['EBM (mL)'] !== null ? String(row['EBM (mL)']) : '');
-    setFormulaMl(row['Formula (mL)'] !== null ? String(row['Formula (mL)']) : '');
+    setEbmMl(row.emb_mL !== null ? String(row.emb_mL) : '');
+    setFormulaMl(row.formula_mL !== null ? String(row.formula_mL) : '');
     setFeedDurationMin(
-      row['feed duration (min)'] !== null ? String(row['feed duration (min)']) : ''
+      row.feed_duration_min !== null ? String(row.feed_duration_min) : ''
     );
-    setDiaper(row.Diaper ?? '');
+    setDiaper(row.diaper ?? '');
+    setDiaperLoad(normalizeDiaperLoad(row['diaper load'], DEFAULT_DIAPER_LOAD));
+    setStool(normalizeStoolValue(row.stool));
     setRoutineRemark(row.remark ?? '');
     setRoutineError(null);
     setRetrieveNotice(null);
@@ -341,16 +358,22 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     const parsedEbm = ebmMl.trim() !== '' ? parseInt(ebmMl, 10) : null;
     const parsedFormula = formulaMl.trim() !== '' ? parseInt(formulaMl, 10) : null;
     const parsedDuration = feedDurationMin.trim() !== '' ? parseInt(feedDurationMin, 10) : null;
+    const cleanStool = normalizeStoolValue(stool) || null;
+    const loadCount = parseDiaperLoadCount(diaperLoad, 1);
+    const loadChanged = loadCount !== 1;
+    const hasDiaperContext = Boolean(diaper.trim() || cleanStool || loadChanged);
 
     if (
       parsedEbm === null &&
       parsedFormula === null &&
       parsedDuration === null &&
       !diaper.trim() &&
+      !cleanStool &&
+      !loadChanged &&
       !routineRemark.trim()
     ) {
       setRoutineError(
-        'Enter at least one routine value (EBM, Formula, duration, diaper, or remark).'
+        'Enter at least one routine value (EBM, Formula, duration, diaper, stool, or remark).'
       );
       return;
     }
@@ -361,12 +384,14 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         profile_id: activeProfile?.id ?? null,
         date: routineDate || null,
         time: routineTime || null,
-        'EBM (mL)': parsedEbm,
-        'Formula (mL)': parsedFormula,
-        Diaper: diaper.trim() || null,
+        emb_mL: parsedEbm,
+        formula_mL: parsedFormula,
+        diaper: diaper.trim() || null,
+        'diaper load': hasDiaperContext ? loadCount : null,
+        stool: cleanStool,
         name: loggedBy.trim() || null,
         remark: routineRemark.trim() || null,
-        'feed duration (min)': parsedDuration,
+        feed_duration_min: parsedDuration,
       };
 
       const res =
@@ -591,7 +616,21 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
             />
           </div>
 
-          <div className="min-w-0 col-span-2">
+          <div className="min-w-0">
+            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+              Stool
+            </label>
+            <StoolSelect value={stool} onChange={setStool} />
+          </div>
+
+          <div className="min-w-0">
+            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+              Diaper Load
+            </label>
+            <DiaperLoadControl value={diaperLoad} onChange={setDiaperLoad} />
+          </div>
+
+          <div className="min-w-0 col-span-2 lg:col-span-4">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Diaper
             </label>
@@ -1008,13 +1047,15 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                   <th className="py-3 px-4">Total (mL)</th>
                   <th className="py-3 px-4">Duration</th>
                   <th className="py-3 px-4">Diaper</th>
+                  <th className="py-3 px-4">Diaper Load</th>
+                  <th className="py-3 px-4">Stool</th>
                   <th className="py-3 px-4">Remark</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
                 {filteredRoutine.map((row) => {
-                  const totalVol = (row['EBM (mL)'] ?? 0) + (row['Formula (mL)'] ?? 0);
+                  const totalVol = (row.emb_mL ?? 0) + (row.formula_mL ?? 0);
                   return (
                     <tr
                       key={row.id}
@@ -1030,23 +1071,41 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">{row.name || '—'}</td>
                       <td className="py-3 px-4 font-mono whitespace-nowrap text-emerald-700 dark:text-emerald-400 font-semibold">
-                        {row['EBM (mL)'] !== null ? `${row['EBM (mL)']} mL` : '—'}
+                        {row.emb_mL !== null ? `${row.emb_mL} mL` : '—'}
                       </td>
                       <td className="py-3 px-4 font-mono whitespace-nowrap text-amber-700 dark:text-amber-400 font-semibold">
-                        {row['Formula (mL)'] !== null ? `${row['Formula (mL)']} mL` : '—'}
+                        {row.formula_mL !== null ? `${row.formula_mL} mL` : '—'}
                       </td>
                       <td className="py-3 px-4 font-mono font-bold whitespace-nowrap">
                         {totalVol > 0 ? `${totalVol} mL` : '—'}
                       </td>
                       <td className="py-3 px-4 font-mono whitespace-nowrap">
-                        {row['feed duration (min)'] !== null
-                          ? `${row['feed duration (min)']} min`
+                        {row.feed_duration_min !== null
+                          ? `${row.feed_duration_min} min`
                           : '—'}
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">
-                        {row.Diaper ? (
+                        {row.diaper ? (
                           <span className="px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200 font-semibold">
-                            {row.Diaper}
+                            {row.diaper}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        {row['diaper load'] !== null ? (
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 font-mono font-semibold">
+                            {formatDiaperLoad(row['diaper load'])}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        {row.stool ? (
+                          <span className="px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 font-mono font-semibold">
+                            {row.stool}
                           </span>
                         ) : (
                           '—'

@@ -24,6 +24,21 @@ function toNullableInt(value: number | null | undefined): number | null {
   return Math.round(Number(value));
 }
 
+function toNullableDiaperLoadInt(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 1) return null;
+    return Math.min(32767, Math.round(value));
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/(?:^|\b)(?:x\s*(\d+)|(\d+)\s*x|(\d+))(?:\b|$)/i);
+  if (!match) return null;
+  const parsed = Number(match[1] || match[2] || match[3]);
+  if (!Number.isFinite(parsed) || parsed < 1) return null;
+  return Math.min(32767, Math.round(parsed));
+}
+
 function toNullableText(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   const trimmed = value.trim();
@@ -119,25 +134,31 @@ function normalizeGrowthRow(raw: Record<string, unknown>): GrowthRecord {
 }
 
 function normalizeRoutineRow(raw: Record<string, unknown>): RoutineRecord {
+  const rawEmb = raw.emb_mL ?? raw['EBM (mL)'] ?? raw.ebm_mL ?? raw.ebm_ml;
+  const rawFormula = raw.formula_mL ?? raw['Formula (mL)'] ?? raw.formula_ml;
+  const rawDiaper = raw.diaper ?? raw.Diaper;
+  const rawDiaperLoad = raw['diaper load'] ?? raw.diaper_load;
+  const rawDuration = raw.feed_duration_min ?? raw['feed duration (min)'];
+
   return {
     id: Number(raw.id),
     created_at: String(raw.created_at ?? new Date().toISOString()),
     profile_id: toNullableText(raw.profile_id !== null && raw.profile_id !== undefined ? String(raw.profile_id) : null),
     date: raw.date !== null && raw.date !== undefined ? String(raw.date) : null,
     time: raw.time !== null && raw.time !== undefined ? String(raw.time) : null,
-    'EBM (mL)':
-      raw['EBM (mL)'] !== null && raw['EBM (mL)'] !== undefined ? Number(raw['EBM (mL)']) : null,
-    'Formula (mL)':
-      raw['Formula (mL)'] !== null && raw['Formula (mL)'] !== undefined
-        ? Number(raw['Formula (mL)'])
-        : null,
-    Diaper: raw.Diaper !== null && raw.Diaper !== undefined ? String(raw.Diaper) : null,
+    emb_mL: rawEmb !== null && rawEmb !== undefined ? Number(rawEmb) : null,
+    formula_mL: rawFormula !== null && rawFormula !== undefined ? Number(rawFormula) : null,
+    diaper: rawDiaper !== null && rawDiaper !== undefined ? String(rawDiaper) : null,
+    'diaper load': toNullableDiaperLoadInt(
+      rawDiaperLoad !== null && rawDiaperLoad !== undefined
+        ? (typeof rawDiaperLoad === 'number' ? rawDiaperLoad : String(rawDiaperLoad))
+        : null
+    ),
+    stool: raw.stool !== null && raw.stool !== undefined ? String(raw.stool) : null,
     name: raw.name !== null && raw.name !== undefined ? String(raw.name) : null,
     remark: raw.remark !== null && raw.remark !== undefined ? String(raw.remark) : null,
-    'feed duration (min)':
-      raw['feed duration (min)'] !== null && raw['feed duration (min)'] !== undefined
-        ? Number(raw['feed duration (min)'])
-        : null,
+    feed_duration_min:
+      rawDuration !== null && rawDuration !== undefined ? Number(rawDuration) : null,
   };
 }
 
@@ -471,12 +492,14 @@ function buildRoutinePayload(input: NewRoutineRecordInput, nonNullProfileId = fa
     profile_id: nonNullProfileId ? (numericProfileId ?? 0) : numericProfileId,
     date: toNullableDate(input.date),
     time: toNullableTime(input.time),
-    'EBM (mL)': toNullableInt(input['EBM (mL)']),
-    'Formula (mL)': toNullableInt(input['Formula (mL)']),
-    Diaper: toNullableText(input.Diaper),
+    emb_mL: toNullableInt(input.emb_mL),
+    formula_mL: toNullableInt(input.formula_mL),
+    diaper: toNullableText(input.diaper),
+    'diaper load': toNullableDiaperLoadInt(input['diaper load']),
+    stool: toNullableText(input.stool),
     name: toNullableText(input.name),
     remark: toNullableText(input.remark),
-    'feed duration (min)': toNullableInt(input['feed duration (min)']),
+    feed_duration_min: toNullableInt(input.feed_duration_min),
   };
 }
 
@@ -629,13 +652,15 @@ export async function updateRoutineRecord(
   if ('profile_id' in updates) payload.profile_id = resolveNumericProfileId(updates.profile_id);
   if ('date' in updates) payload.date = toNullableDate(updates.date);
   if ('time' in updates) payload.time = toNullableTime(updates.time);
-  if ('EBM (mL)' in updates) payload['EBM (mL)'] = toNullableInt(updates['EBM (mL)']);
-  if ('Formula (mL)' in updates) payload['Formula (mL)'] = toNullableInt(updates['Formula (mL)']);
-  if ('Diaper' in updates) payload.Diaper = toNullableText(updates.Diaper);
+  if ('emb_mL' in updates) payload.emb_mL = toNullableInt(updates.emb_mL);
+  if ('formula_mL' in updates) payload.formula_mL = toNullableInt(updates.formula_mL);
+  if ('diaper' in updates) payload.diaper = toNullableText(updates.diaper);
+  if ('diaper load' in updates) payload['diaper load'] = toNullableDiaperLoadInt(updates['diaper load']);
+  if ('stool' in updates) payload.stool = toNullableText(updates.stool);
   if ('name' in updates) payload.name = toNullableText(updates.name);
   if ('remark' in updates) payload.remark = toNullableText(updates.remark);
-  if ('feed duration (min)' in updates) {
-    payload['feed duration (min)'] = toNullableInt(updates['feed duration (min)']);
+  if ('feed_duration_min' in updates) {
+    payload.feed_duration_min = toNullableInt(updates.feed_duration_min);
   }
 
   if (!supabase) {

@@ -45,14 +45,18 @@ create table if not exists public.routine (
   profile_id bigint,
   date date,
   time time,
-  "EBM (mL)" integer,
-  "Formula (mL)" integer,
-  "Diaper" varchar,
+  "emb_mL" integer,
+  "formula_mL" integer,
+  diaper varchar,
+  "diaper load" smallint,
+  stool varchar,
   name varchar,
   remark text,
-  "feed duration (min)" integer
+  feed_duration_min integer
 );
 
+alter table public.routine add column if not exists "diaper load" smallint;
+alter table public.routine add column if not exists stool varchar;
 alter table public.routine add column if not exists remark text;
 create index if not exists routine_profile_id_idx on public.routine (profile_id);
 

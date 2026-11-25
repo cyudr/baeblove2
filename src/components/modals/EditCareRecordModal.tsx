@@ -1,7 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Droplets, Scale, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { getGrowthRecordDate, getRoutineRecordDate } from '../../utils/careInterpreter';
+import {
+  DEFAULT_DIAPER_LOAD,
+  getGrowthRecordDate,
+  getRoutineRecordDate,
+  normalizeDiaperLoad,
+  normalizeStoolValue,
+  parseDiaperLoadCount,
+} from '../../utils/careInterpreter';
+import { StoolSelect } from '../common/StoolSelect';
+import { DiaperLoadControl } from '../common/DiaperLoadControl';
 import type { GrowthRecord, RoutineRecord } from '../../types';
 
 const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
@@ -35,6 +44,8 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
   const [formulaMl, setFormulaMl] = useState('');
   const [feedDurationMin, setFeedDurationMin] = useState('');
   const [diaper, setDiaper] = useState('');
+  const [diaperLoad, setDiaperLoad] = useState(DEFAULT_DIAPER_LOAD);
+  const [stool, setStool] = useState('');
 
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -54,16 +65,18 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
       setDate(getRoutineRecordDate(routineRecord));
       setTime(routineRecord.time ? routineRecord.time.slice(0, 5) : '');
       setLoggedBy(routineRecord.name ?? '');
-      setEbmMl(routineRecord['EBM (mL)'] !== null ? String(routineRecord['EBM (mL)']) : '');
+      setEbmMl(routineRecord.emb_mL !== null ? String(routineRecord.emb_mL) : '');
       setFormulaMl(
-        routineRecord['Formula (mL)'] !== null ? String(routineRecord['Formula (mL)']) : ''
+        routineRecord.formula_mL !== null ? String(routineRecord.formula_mL) : ''
       );
       setFeedDurationMin(
-        routineRecord['feed duration (min)'] !== null
-          ? String(routineRecord['feed duration (min)'])
+        routineRecord.feed_duration_min !== null
+          ? String(routineRecord.feed_duration_min)
           : ''
       );
-      setDiaper(routineRecord.Diaper ?? '');
+      setDiaper(routineRecord.diaper ?? '');
+      setDiaperLoad(normalizeDiaperLoad(routineRecord['diaper load'], DEFAULT_DIAPER_LOAD));
+      setStool(normalizeStoolValue(routineRecord.stool));
       setRemark(routineRecord.remark ?? '');
     }
   }, [growthRecord, routineRecord]);
@@ -112,16 +125,22 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
         const parsedEbm = ebmMl.trim() !== '' ? parseInt(ebmMl, 10) : null;
         const parsedFormula = formulaMl.trim() !== '' ? parseInt(formulaMl, 10) : null;
         const parsedDuration = feedDurationMin.trim() !== '' ? parseInt(feedDurationMin, 10) : null;
+        const cleanStool = normalizeStoolValue(stool) || null;
+        const loadCount = parseDiaperLoadCount(diaperLoad, 1);
+        const loadChanged = loadCount !== 1;
+        const hasDiaperContext = Boolean(diaper.trim() || cleanStool || loadChanged);
 
         if (
           parsedEbm === null &&
           parsedFormula === null &&
           parsedDuration === null &&
           !diaper.trim() &&
+          !cleanStool &&
+          !loadChanged &&
           !remark.trim()
         ) {
           setErrorMsg(
-            'Enter at least one routine value (EBM, Formula, duration, diaper, or remark).'
+            'Enter at least one routine value (EBM, Formula, duration, diaper, stool, or remark).'
           );
           return;
         }
@@ -129,10 +148,12 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
         const res = await editRoutineRecord(routineRecord.id, {
           date: date || null,
           time: time || null,
-          'EBM (mL)': parsedEbm,
-          'Formula (mL)': parsedFormula,
-          'feed duration (min)': parsedDuration,
-          Diaper: diaper.trim() || null,
+          emb_mL: parsedEbm,
+          formula_mL: parsedFormula,
+          feed_duration_min: parsedDuration,
+          diaper: diaper.trim() || null,
+          'diaper load': hasDiaperContext ? loadCount : null,
+          stool: cleanStool,
           name: loggedBy.trim() || null,
           remark: remark.trim() || null,
         });
@@ -338,6 +359,21 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
                     placeholder="e.g. 20"
                     className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                    Stool
+                  </label>
+                  <StoolSelect value={stool} onChange={setStool} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                    Diaper Load
+                  </label>
+                  <DiaperLoadControl value={diaperLoad} onChange={setDiaperLoad} />
                 </div>
               </div>
 

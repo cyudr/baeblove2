@@ -4,6 +4,7 @@ import { calculatePercentile, UnitConverter } from '../../data/growthStandards';
 import {
   classifyTemperature,
   doesRecordMatchProfile,
+  formatDiaperLoad,
   getGrowthRecordDate,
   getRoutineRecordDate,
 } from '../../utils/careInterpreter';
@@ -227,13 +228,15 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                 <th className="py-3 px-4">Total (mL)</th>
                 <th className="py-3 px-4">Duration</th>
                 <th className="py-3 px-4">Diaper</th>
+                <th className="py-3 px-4">Diaper Load</th>
+                <th className="py-3 px-4">Stool</th>
                 <th className="py-3 px-4">Remark</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
               {filteredRoutine.map((row) => {
-                const totalVol = (row['EBM (mL)'] ?? 0) + (row['Formula (mL)'] ?? 0);
+                const totalVol = (row.emb_mL ?? 0) + (row.formula_mL ?? 0);
                 const deleteKey = `routine-${row.id}`;
                 return (
                   <tr
@@ -250,23 +253,41 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">{row.name || '—'}</td>
                     <td className="py-3 px-4 font-mono whitespace-nowrap text-emerald-700 dark:text-emerald-400 font-semibold">
-                      {row['EBM (mL)'] !== null ? `${row['EBM (mL)']} mL` : '—'}
+                      {row.emb_mL !== null ? `${row.emb_mL} mL` : '—'}
                     </td>
                     <td className="py-3 px-4 font-mono whitespace-nowrap text-amber-700 dark:text-amber-400 font-semibold">
-                      {row['Formula (mL)'] !== null ? `${row['Formula (mL)']} mL` : '—'}
+                      {row.formula_mL !== null ? `${row.formula_mL} mL` : '—'}
                     </td>
                     <td className="py-3 px-4 font-mono font-bold whitespace-nowrap">
                       {totalVol > 0 ? `${totalVol} mL` : '—'}
                     </td>
                     <td className="py-3 px-4 font-mono whitespace-nowrap">
-                      {row['feed duration (min)'] !== null
-                        ? `${row['feed duration (min)']} min`
+                      {row.feed_duration_min !== null
+                        ? `${row.feed_duration_min} min`
                         : '—'}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      {row.Diaper ? (
+                      {row.diaper ? (
                         <span className="px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200 font-semibold">
-                          {row.Diaper}
+                          {row.diaper}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      {row['diaper load'] !== null ? (
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 font-mono font-semibold">
+                          {formatDiaperLoad(row['diaper load'])}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      {row.stool ? (
+                        <span className="px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 font-mono font-semibold">
+                          {row.stool}
                         </span>
                       ) : (
                         '—'

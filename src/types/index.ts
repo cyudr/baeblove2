@@ -188,24 +188,28 @@ export interface RoutineRecord {
   profile_id: string | null;
   date: string | null;
   time: string | null;
-  'EBM (mL)': number | null;
-  'Formula (mL)': number | null;
-  Diaper: string | null;
+  emb_mL: number | null;
+  formula_mL: number | null;
+  diaper: string | null;
+  'diaper load': number | null;
+  stool: string | null;
   name: string | null;
   remark: string | null;
-  'feed duration (min)': number | null;
+  feed_duration_min: number | null;
 }
 
 export interface NewRoutineRecordInput {
   profile_id?: string | null;
   date?: string | null;
   time?: string | null;
-  'EBM (mL)'?: number | null;
-  'Formula (mL)'?: number | null;
-  Diaper?: string | null;
+  emb_mL?: number | null;
+  formula_mL?: number | null;
+  diaper?: string | null;
+  'diaper load'?: number | null;
+  stool?: string | null;
   name?: string | null;
   remark?: string | null;
-  'feed duration (min)'?: number | null;
+  feed_duration_min?: number | null;
 }
 
 /**

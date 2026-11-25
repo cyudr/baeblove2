@@ -1,10 +1,18 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
+  DEFAULT_DIAPER_LOAD,
   classifyTemperature,
   doesRecordMatchProfile,
+  extractDiaperLoadFromText,
+  formatDiaperLoad,
   getGrowthRecordDate,
+  normalizeDiaperLoad,
+  normalizeStoolValue,
+  parseDiaperLoadCount,
 } from '../../utils/careInterpreter';
+import { StoolSelect } from '../common/StoolSelect';
+import { DiaperLoadControl } from '../common/DiaperLoadControl';
 import type {
   GrowthRecord,
   NewGrowthRecordInput,
@@ -58,6 +66,8 @@ interface RoutineDraftRow {
   ebmMl: string;
   formulaMl: string;
   diaper: string;
+  diaperLoad: string;
+  stool: string;
   remark: string;
 }
 
@@ -126,6 +136,8 @@ function createEmptyRoutineRow(defaultDate: string, defaultLogger: string, idx =
     ebmMl: '',
     formulaMl: '',
     diaper: '',
+    diaperLoad: DEFAULT_DIAPER_LOAD,
+    stool: '',
     remark: '',
   };
 }
@@ -160,6 +172,16 @@ const MASS_IMPORT_ROUTINE_ITEM_SCHEMA = {
     formulaMl: { type: 'INTEGER', nullable: true, description: 'Infant formula in mL' },
     feedDurationMin: { type: 'INTEGER', nullable: true, description: 'Feed duration in minutes' },
     diaper: { type: 'STRING', nullable: true, description: 'Wet, Dirty, Mixed, Dry, or custom' },
+    diaperLoad: {
+      type: 'STRING',
+      nullable: true,
+      description: 'Diaper/stool load multiplier formatted as "x1", "x2", "x3", etc. Default "x1" when diaper or stool is present.',
+    },
+    stool: {
+      type: 'STRING',
+      nullable: true,
+      description: 'Stool color code ONLY: "M", "G", "GY", or "Y" (no x1/x2 behind it)',
+    },
     name: { type: 'STRING', nullable: true, description: 'Caregiver who logged the entry' },
     remark: { type: 'STRING', nullable: true, description: 'Optional observation' },
   },
@@ -170,6 +192,8 @@ const MASS_IMPORT_ROUTINE_ITEM_SCHEMA = {
     'formulaMl',
     'feedDurationMin',
     'diaper',
+    'diaperLoad',
+    'stool',
     'name',
     'remark',
   ],
@@ -207,6 +231,8 @@ function buildMassImportGeminiPayload(params: {
     '- formulaMl: integer milliliters of infant formula (FM / formula). Convert fl oz to mL if needed. Null if absent.',
     '- feedDurationMin: integer minutes of feeding duration. Null if absent.',
     '- diaper: normalize to "Wet", "Dirty", "Mixed", or "Dry" when clearly matching (pee/urine -> "Wet", poop/stool/BM -> "Dirty", both -> "Mixed"), or keep a concise custom label. Null if absent.',
+    '- stool: baby stool color code ONLY using the legend M (Meconium), G (Greenish), GY (Greenish Yellow), Y (Yellow). Output ONLY the code ("M", "G", "GY", or "Y") with NO x1/x2/1x/2x behind it. Null if absent.',
+    '- diaperLoad: multiplier/count formatted as "x1", "x2", "x3", "x4", etc. If a log writes "y x2", "m x4", "GY 3x", put the color code ("Y", "M", "GY") in stool and the multiplier ("x2", "x4", "x3") in diaperLoad. Use "x1" if diaper or stool is present with no explicit multiplier, or null if neither diaper nor stool is logged.',
     '- name: person who logged the entry (e.g. "Mom", "Dad", "Caregiver"). Do NOT put the baby name here. Use defaultLogger if omitted, or null if both empty.',
     '- remark: concise additional feeding/diaper notes. Null if none.',
   ].join('\n');
@@ -386,10 +412,12 @@ function formatRoutineSummary(rec: RoutineRecord): string {
   const parts: string[] = [];
   if (rec.date) parts.push(rec.date);
   if (rec.time) parts.push(rec.time.slice(0, 5));
-  if (rec['EBM (mL)'] !== null) parts.push(`EBM ${rec['EBM (mL)']} mL`);
-  if (rec['Formula (mL)'] !== null) parts.push(`Formula ${rec['Formula (mL)']} mL`);
-  if (rec['feed duration (min)'] !== null) parts.push(`${rec['feed duration (min)']} min`);
-  if (rec.Diaper) parts.push(rec.Diaper);
+  if (rec.emb_mL !== null) parts.push(`EBM ${rec.emb_mL} mL`);
+  if (rec.formula_mL !== null) parts.push(`Formula ${rec.formula_mL} mL`);
+  if (rec.feed_duration_min !== null) parts.push(`${rec.feed_duration_min} min`);
+  if (rec.diaper) parts.push(rec.diaper);
+  if (rec['diaper load'] !== null) parts.push(formatDiaperLoad(rec['diaper load']));
+  if (rec.stool) parts.push(`Stool ${rec.stool}`);
   return parts.join(' · ') || `Entry #${rec.id}`;
 }
 
@@ -400,11 +428,15 @@ function findRoutineDuplicateMatch(
   const rowDate = normalizeDateStr(row.date);
   if (!rowDate) return null;
 
+  const rowLoadCount = parseDiaperLoadCount(row.diaperLoad, 1);
+  const rowLoadChanged = rowLoadCount !== 1;
   const hasAnyMetric =
     row.ebmMl.trim() !== '' ||
     row.formulaMl.trim() !== '' ||
     row.feedDurationMin.trim() !== '' ||
     row.diaper.trim() !== '' ||
+    row.stool.trim() !== '' ||
+    rowLoadChanged ||
     row.remark.trim() !== '';
   if (!hasAnyMetric) return null;
 
@@ -413,6 +445,9 @@ function findRoutineDuplicateMatch(
   const rowFormula = row.formulaMl.trim() !== '' ? parseInt(row.formulaMl, 10) : null;
   const rowDur = row.feedDurationMin.trim() !== '' ? parseInt(row.feedDurationMin, 10) : null;
   const rowDiaper = row.diaper.trim().toLowerCase();
+  const rowStool = row.stool.trim().toLowerCase();
+  const rowLoad: number | null =
+    rowDiaper || rowStool || rowLoadChanged ? rowLoadCount : null;
 
   let possibleMatch: DuplicateMatch | null = null;
 
@@ -421,19 +456,31 @@ function findRoutineDuplicateMatch(
     if (recDate !== rowDate) continue;
 
     const recMins = parseTimeToMinutes(rec.time);
-    const recEbm = rec['EBM (mL)'];
-    const recFormula = rec['Formula (mL)'];
-    const recDur = rec['feed duration (min)'];
-    const recDiaper = (rec.Diaper || '').trim().toLowerCase();
+    const recEbm = rec.emb_mL;
+    const recFormula = rec.formula_mL;
+    const recDur = rec.feed_duration_min;
+    const recDiaper = (rec.diaper || '').trim().toLowerCase();
+    const recStool = (rec.stool || '').trim().toLowerCase();
+    const recLoad = rec['diaper load'];
 
     const sameEbm = rowEbm === recEbm;
     const sameFormula = rowFormula === recFormula;
     const sameDur = rowDur === recDur;
     const sameDiaper = rowDiaper === recDiaper;
+    const sameStool = rowStool === recStool;
+    const sameLoad = rowLoad === recLoad;
 
     if (rowMins !== null && recMins !== null) {
       const diffMins = Math.abs(rowMins - recMins);
-      if (diffMins <= 5 && sameEbm && sameFormula && (sameDur || rowDur === null || recDur === null) && (sameDiaper || !rowDiaper || !recDiaper)) {
+      if (
+        diffMins <= 5 &&
+        sameEbm &&
+        sameFormula &&
+        (sameDur || rowDur === null || recDur === null) &&
+        (sameDiaper || !rowDiaper || !recDiaper) &&
+        (sameStool || !rowStool || !recStool) &&
+        (sameLoad || !rowLoad || !recLoad)
+      ) {
         return {
           level: 'exact',
           reason: `Already in DB: ${formatRoutineSummary(rec)}`,
@@ -446,10 +493,12 @@ function findRoutineDuplicateMatch(
         };
       }
     } else if (
-      (rowEbm !== null || rowFormula !== null || rowDiaper !== '') &&
+      (rowEbm !== null || rowFormula !== null || rowDiaper !== '' || rowStool !== '') &&
       sameEbm &&
       sameFormula &&
       sameDiaper &&
+      sameStool &&
+      (sameLoad || !rowLoad || !recLoad) &&
       !possibleMatch
     ) {
       possibleMatch = {
@@ -1287,6 +1336,14 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       const recognizedRoutine: RoutineDraftRow[] = rawRoutineItems
         .map((item, idx) => {
           const obj = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+          const rawStool = obj.stool ?? obj.Stool;
+          const rawDiaper = obj.diaper ?? obj.Diaper;
+          const extractedLoad =
+            extractDiaperLoadFromText(rawStool) || extractDiaperLoadFromText(rawDiaper);
+          const parsedDiaperLoad = normalizeDiaperLoad(
+            obj.diaperLoad ?? obj['diaper load'] ?? obj.diaper_load,
+            extractedLoad || DEFAULT_DIAPER_LOAD
+          );
           const draft: RoutineDraftRow = {
             _key: makeRowKey('rt-ai', idx),
             selected: true,
@@ -1294,11 +1351,13 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             date: normalizeDateStr(obj.date, defaultDate),
             time: normalizeTimeStr(obj.time),
             feedDurationMin: normalizeIntStr(
-              obj.feedDurationMin ?? obj['feed duration (min)'] ?? obj.feed_duration_min
+              obj.feedDurationMin ?? obj.feed_duration_min ?? obj['feed duration (min)']
             ),
-            ebmMl: normalizeIntStr(obj.ebmMl ?? obj['EBM (mL)'] ?? obj.ebm_ml),
-            formulaMl: normalizeIntStr(obj.formulaMl ?? obj['Formula (mL)'] ?? obj.formula_ml),
-            diaper: normalizeTextStr(obj.diaper ?? obj.Diaper),
+            ebmMl: normalizeIntStr(obj.ebmMl ?? obj.emb_mL ?? obj['EBM (mL)'] ?? obj.ebm_ml),
+            formulaMl: normalizeIntStr(obj.formulaMl ?? obj.formula_mL ?? obj['Formula (mL)'] ?? obj.formula_ml),
+            diaper: normalizeTextStr(rawDiaper),
+            diaperLoad: parsedDiaperLoad,
+            stool: normalizeStoolValue(rawStool),
             remark: normalizeTextStr(obj.remark),
           };
           const dup = findRoutineDuplicateMatch(draft, profileRoutineRecords);
@@ -1313,6 +1372,8 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             r.formulaMl !== '' ||
             r.feedDurationMin !== '' ||
             r.diaper !== '' ||
+            r.stool !== '' ||
+            r.diaperLoad !== DEFAULT_DIAPER_LOAD ||
             r.remark !== ''
         );
 
@@ -1360,6 +1421,8 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
               row.formulaMl.trim() !== '' ||
               row.feedDurationMin.trim() !== '' ||
               row.diaper.trim() !== '' ||
+              row.stool.trim() !== '' ||
+              row.diaperLoad !== DEFAULT_DIAPER_LOAD ||
               row.remark.trim() !== ''
           );
           return [...nonEmptyExisting, ...recognizedRoutine];
@@ -1443,6 +1506,8 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         r.formulaMl.trim() !== '' ||
         r.feedDurationMin.trim() !== '' ||
         r.diaper.trim() !== '' ||
+        r.stool.trim() !== '' ||
+        r.diaperLoad !== DEFAULT_DIAPER_LOAD ||
         r.remark.trim() !== '')
   ).length;
 
@@ -1540,23 +1605,34 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       const routineToInsert: NewRoutineRecordInput[] = shouldSaveRoutine
         ? routineDrafts
             .filter((r) => r.selected)
-            .map((r) => ({
-              profile_id: activeProfile?.id ?? null,
-              name: r.name.trim() || null,
-              date: r.date.trim() || null,
-              time: r.time.trim() || null,
-              'feed duration (min)': parseSafeInt(r.feedDurationMin),
-              'EBM (mL)': parseSafeInt(r.ebmMl),
-              'Formula (mL)': parseSafeInt(r.formulaMl),
-              Diaper: r.diaper.trim() || null,
-              remark: r.remark.trim() || null,
-            }))
+            .map((r) => {
+              const cleanDiaper = r.diaper.trim() || null;
+              const cleanStool = normalizeStoolValue(r.stool) || null;
+              const loadCount = parseDiaperLoadCount(r.diaperLoad, 1);
+              const loadChanged = loadCount !== 1;
+              const hasDiaperContext = Boolean(cleanDiaper || cleanStool || loadChanged);
+              return {
+                profile_id: activeProfile?.id ?? null,
+                name: r.name.trim() || null,
+                date: r.date.trim() || null,
+                time: r.time.trim() || null,
+                feed_duration_min: parseSafeInt(r.feedDurationMin),
+                emb_mL: parseSafeInt(r.ebmMl),
+                formula_mL: parseSafeInt(r.formulaMl),
+                diaper: cleanDiaper,
+                'diaper load': hasDiaperContext ? loadCount : null,
+                stool: cleanStool,
+                remark: r.remark.trim() || null,
+              };
+            })
             .filter(
               (r) =>
-                r['EBM (mL)'] !== null ||
-                r['Formula (mL)'] !== null ||
-                r['feed duration (min)'] !== null ||
-                r.Diaper !== null ||
+                r.emb_mL !== null ||
+                r.formula_mL !== null ||
+                r.feed_duration_min !== null ||
+                r.diaper !== null ||
+                r['diaper load'] !== null ||
+                r.stool !== null ||
                 r.remark !== null
             )
         : [];
@@ -2690,7 +2766,39 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                           />
                         </div>
 
-                        <div className="min-w-0 col-span-2">
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Stool
+                          </label>
+                          <StoolSelect
+                            value={row.stool}
+                            onChange={(val) =>
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key ? { ...item, stool: val } : item
+                                )
+                              )
+                            }
+                          />
+                        </div>
+
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Diaper Load
+                          </label>
+                          <DiaperLoadControl
+                            value={row.diaperLoad}
+                            onChange={(val) =>
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key ? { ...item, diaperLoad: val } : item
+                                )
+                              )
+                            }
+                          />
+                        </div>
+
+                        <div className="min-w-0 col-span-2 lg:col-span-4">
                           <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
                             Diaper
                           </label>

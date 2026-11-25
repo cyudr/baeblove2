@@ -347,6 +347,98 @@ export function getRoutineRecordDate(record: RoutineRecord): string {
   return record.created_at.slice(0, 10);
 }
 
+export const STOOL_TYPE_OPTIONS = [
+  { code: 'M', label: 'M - Meconium' },
+  { code: 'G', label: 'G - Greenish' },
+  { code: 'GY', label: 'GY - Greenish Yellow' },
+  { code: 'Y', label: 'Y - Yellow' },
+] as const;
+
+export const DEFAULT_DIAPER_LOAD = 'x1';
+
+export type StoolTypeCode = (typeof STOOL_TYPE_OPTIONS)[number]['code'];
+
+export interface ParsedStoolValue {
+  type: StoolTypeCode | '';
+  custom: string;
+}
+
+export function parseStoolValue(raw: string | null | undefined): ParsedStoolValue {
+  if (!raw || !raw.trim()) {
+    return { type: '', custom: '' };
+  }
+  const trimmed = raw.trim();
+  const lower = trimmed.toLowerCase();
+
+  let type: StoolTypeCode | '' = '';
+  if (
+    /\bgy\b/i.test(trimmed) ||
+    lower.includes('greenish yellow') ||
+    lower.includes('green-yellow') ||
+    lower.includes('green yellow')
+  ) {
+    type = 'GY';
+  } else if (/\bm\b/i.test(trimmed) || lower.includes('meconium')) {
+    type = 'M';
+  } else if (/\bg\b/i.test(trimmed) || lower.includes('greenish') || /\bgreen\b/i.test(lower)) {
+    type = 'G';
+  } else if (/\by\b/i.test(trimmed) || lower.includes('yellow')) {
+    type = 'Y';
+  }
+
+  if (type) {
+    return { type, custom: '' };
+  }
+
+  const strippedCount = trimmed.replace(/\b(?:\d+\s*x|x\s*\d+)\b/gi, '').trim();
+  return { type: '', custom: strippedCount || trimmed };
+}
+
+export function normalizeStoolValue(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const parsed = parseStoolValue(trimmed);
+  return parsed.type || parsed.custom;
+}
+
+export function parseDiaperLoadCount(raw: unknown, fallback = 1): number {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
+    return Math.round(raw);
+  }
+  if (typeof raw !== 'string') return fallback;
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  const match = trimmed.match(/(?:^|\b)(?:x\s*(\d+)|(\d+)\s*x|(\d+))(?:\b|$)/i);
+  if (!match) return fallback;
+  const parsed = Number(match[1] || match[2] || match[3]);
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : fallback;
+}
+
+export function formatDiaperLoad(count: number): string {
+  const safe = Number.isFinite(count) && count >= 1 ? Math.round(count) : 1;
+  return `x${safe}`;
+}
+
+export function normalizeDiaperLoad(raw: unknown, fallback = ''): string {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
+    return formatDiaperLoad(raw);
+  }
+  if (typeof raw !== 'string' || !raw.trim()) return fallback;
+  const match = raw.trim().match(/(?:^|\b)(?:x\s*(\d+)|(\d+)\s*x|(\d+))(?:\b|$)/i);
+  if (!match) return fallback;
+  const parsed = Number(match[1] || match[2] || match[3]);
+  return Number.isFinite(parsed) && parsed >= 1 ? formatDiaperLoad(parsed) : fallback;
+}
+
+export function extractDiaperLoadFromText(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) return '';
+  const match = raw.trim().match(/\b(?:x\s*(\d+)|(\d+)\s*x)\b/i);
+  if (!match) return '';
+  const parsed = Number(match[1] || match[2]);
+  return Number.isFinite(parsed) && parsed >= 1 ? formatDiaperLoad(parsed) : '';
+}
+
 export function classifyDiaperValue(diaper: string | null): 'wet' | 'dirty' | 'mixed' | 'other' | null {
   if (!diaper) return null;
   const val = diaper.trim().toLowerCase();
@@ -394,9 +486,9 @@ export function interpretRoutineTable(
     const dateKey = getRoutineRecordDate(r);
     const bucket = bucketMap.get(dateKey) ?? emptyBucket(dateKey);
 
-    const ebm = Math.max(0, r['EBM (mL)'] ?? 0);
-    const formula = Math.max(0, r['Formula (mL)'] ?? 0);
-    const duration = Math.max(0, r['feed duration (min)'] ?? 0);
+    const ebm = Math.max(0, r.emb_mL ?? 0);
+    const formula = Math.max(0, r.formula_mL ?? 0);
+    const duration = Math.max(0, r.feed_duration_min ?? 0);
 
     bucket.ebmMl += ebm;
     bucket.formulaMl += formula;
@@ -409,18 +501,27 @@ export function interpretRoutineTable(
       bucket.totalDurationMin += duration;
     }
 
-    const diaperKind = classifyDiaperValue(r.Diaper);
+    const diaperKind = classifyDiaperValue(r.diaper);
+    const hasStool = Boolean(r.stool && r.stool.trim().length > 0);
+    const loadCount = parseDiaperLoadCount(r['diaper load'], 1);
     if (diaperKind === 'wet') {
-      bucket.wetDiapers += 1;
-      bucket.totalDiapers += 1;
+      if (hasStool) {
+        bucket.mixedDiapers += loadCount;
+      } else {
+        bucket.wetDiapers += loadCount;
+      }
+      bucket.totalDiapers += loadCount;
     } else if (diaperKind === 'dirty') {
-      bucket.dirtyDiapers += 1;
-      bucket.totalDiapers += 1;
+      bucket.dirtyDiapers += loadCount;
+      bucket.totalDiapers += loadCount;
     } else if (diaperKind === 'mixed') {
-      bucket.mixedDiapers += 1;
-      bucket.totalDiapers += 1;
-    } else if (r.Diaper && r.Diaper.trim().length > 0 && r.Diaper.trim().toLowerCase() !== 'dry') {
-      bucket.totalDiapers += 1;
+      bucket.mixedDiapers += loadCount;
+      bucket.totalDiapers += loadCount;
+    } else if (r.diaper && r.diaper.trim().length > 0 && r.diaper.trim().toLowerCase() !== 'dry') {
+      bucket.totalDiapers += loadCount;
+    } else if (hasStool) {
+      bucket.dirtyDiapers += loadCount;
+      bucket.totalDiapers += loadCount;
     }
 
     bucketMap.set(dateKey, bucket);
@@ -502,7 +603,7 @@ export function interpretRoutineTable(
 
   // Latest feeding timestamp label
   const feedRecords = records.filter(
-    (r) => (r['EBM (mL)'] ?? 0) > 0 || (r['Formula (mL)'] ?? 0) > 0 || (r['feed duration (min)'] ?? 0) > 0
+    (r) => (r.emb_mL ?? 0) > 0 || (r.formula_mL ?? 0) > 0 || (r.feed_duration_min ?? 0) > 0
   );
   let lastFeedLabel: string | null = null;
   if (feedRecords.length > 0) {
@@ -511,7 +612,7 @@ export function interpretRoutineTable(
       const bKey = `${getRoutineRecordDate(b)}T${b.time || b.created_at.slice(11, 19)}`;
       return bKey.localeCompare(aKey);
     })[0];
-    const vol = (latestFeed['EBM (mL)'] ?? 0) + (latestFeed['Formula (mL)'] ?? 0);
+    const vol = (latestFeed.emb_mL ?? 0) + (latestFeed.formula_mL ?? 0);
     const timeDisplay = latestFeed.time ? latestFeed.time.slice(0, 5) : latestFeed.created_at.slice(11, 16);
     lastFeedLabel = `${getRoutineRecordDate(latestFeed)} · ${timeDisplay}${vol > 0 ? ` (${vol} mL)` : ''}`;
   }

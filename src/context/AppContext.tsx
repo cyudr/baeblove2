@@ -1263,16 +1263,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 profile_id: 'profile_id' in updates ? (updates.profile_id ?? null) : r.profile_id,
                 date: 'date' in updates ? (updates.date ?? null) : r.date,
                 time: 'time' in updates ? (updates.time ?? null) : r.time,
-                'EBM (mL)': 'EBM (mL)' in updates ? (updates['EBM (mL)'] ?? null) : r['EBM (mL)'],
-                'Formula (mL)':
-                  'Formula (mL)' in updates ? (updates['Formula (mL)'] ?? null) : r['Formula (mL)'],
-                Diaper: 'Diaper' in updates ? (updates.Diaper ?? null) : r.Diaper,
+                emb_mL: 'emb_mL' in updates ? (updates.emb_mL ?? null) : r.emb_mL,
+                formula_mL:
+                  'formula_mL' in updates ? (updates.formula_mL ?? null) : r.formula_mL,
+                diaper: 'diaper' in updates ? (updates.diaper ?? null) : r.diaper,
+                'diaper load':
+                  'diaper load' in updates ? (updates['diaper load'] ?? null) : r['diaper load'],
+                stool: 'stool' in updates ? (updates.stool ?? null) : r.stool,
                 name: 'name' in updates ? (updates.name ?? null) : r.name,
                 remark: 'remark' in updates ? (updates.remark ?? null) : r.remark,
-                'feed duration (min)':
-                  'feed duration (min)' in updates
-                    ? (updates['feed duration (min)'] ?? null)
-                    : r['feed duration (min)'],
+                feed_duration_min:
+                  'feed_duration_min' in updates
+                    ? (updates.feed_duration_min ?? null)
+                    : r.feed_duration_min,
               }
             : r
         )
