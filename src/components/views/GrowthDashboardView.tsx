@@ -362,7 +362,8 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
   const routineInsights = interpretRoutineTable(
     profileRoutineRecords,
     resolvedWeightKg ?? null,
-    DEFAULT_MILK_FORMULA
+    DEFAULT_MILK_FORMULA,
+    isBaby ? activeProfile.dateOfEvent : null
   );
 
   const daysToDueDate = !isBaby && gestationalAgeInfo

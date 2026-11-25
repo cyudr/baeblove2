@@ -8,6 +8,7 @@ import {
   buildDailyWeightResolver,
   buildMonthlyRoutineBoxPlots,
   buildWeeklyRoutineBoxPlots,
+  isMilkTargetEligibleOnDate,
   type BoxPlotStats,
   type DailyRoutineBucket,
   type DailySpanOption,
@@ -139,25 +140,22 @@ function formatUtcDateYMD(utcMs: number): string {
   return `${y}-${m}-${day}`;
 }
 
-function computePeriodRecommendedMl(
+function getPeriodEligibleMilkDates(
   granularity: 'weekly' | 'monthly',
   periodKey: string,
-  effectiveRateMlPerKg: number | null,
-  resolveWeight: (dateStr: string) => ResolvedDailyWeight | null,
-  focusDate?: string
-): { targetMl: number; avgWeightKg: number } | null {
-  if (!effectiveRateMlPerKg || effectiveRateMlPerKg <= 0) return null;
-
+  focusDate?: string,
+  birthDate?: string | null
+): string[] {
   const allDates: string[] = [];
   if (granularity === 'weekly') {
     const startUtc = parseCalendarDateUTC(periodKey);
-    if (startUtc === null) return null;
+    if (startUtc === null) return [];
     for (let i = 0; i < 7; i++) {
       allDates.push(formatUtcDateYMD(startUtc + i * 86_400_000));
     }
   } else {
     const match = /^(\d{4})-(\d{2})/.exec(periodKey);
-    if (!match) return null;
+    if (!match) return [];
     const y = Number(match[1]);
     const m = Number(match[2]);
     const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
@@ -168,9 +166,24 @@ function computePeriodRecommendedMl(
 
   const cappedDates = focusDate ? allDates.filter((d) => d <= focusDate) : allDates;
   const candidateDates = cappedDates.length > 0 ? cappedDates : allDates;
+  return candidateDates.filter((d) => isMilkTargetEligibleOnDate(d, birthDate));
+}
+
+function computePeriodRecommendedMl(
+  granularity: 'weekly' | 'monthly',
+  periodKey: string,
+  effectiveRateMlPerKg: number | null,
+  resolveWeight: (dateStr: string) => ResolvedDailyWeight | null,
+  focusDate?: string,
+  birthDate?: string | null
+): { targetMl: number; avgWeightKg: number } | null {
+  if (!effectiveRateMlPerKg || effectiveRateMlPerKg <= 0) return null;
+
+  const eligibleDates = getPeriodEligibleMilkDates(granularity, periodKey, focusDate, birthDate);
+  if (eligibleDates.length === 0) return null;
 
   const weights: number[] = [];
-  for (const dateStr of candidateDates) {
+  for (const dateStr of eligibleDates) {
     const resolved = resolveWeight(dateStr);
     if (resolved && resolved.weightKg > 0) {
       weights.push(resolved.weightKg);
@@ -682,6 +695,9 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
 
   const dailyTargets = useMemo(() => {
     return dailySeries.map((bucket) => {
+      if (!isMilkTargetEligibleOnDate(bucket.date, birthDate)) {
+        return null;
+      }
       if (resolveWeightForDate && effectiveTargetMlPerKg && effectiveTargetMlPerKg > 0) {
         const resolved = resolveWeightForDate(bucket.date);
         if (resolved && resolved.weightKg > 0) {
@@ -697,18 +713,28 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
       }
       return null;
     });
-  }, [dailySeries, resolveWeightForDate, effectiveTargetMlPerKg, estimatedTargetMl]);
+  }, [dailySeries, birthDate, resolveWeightForDate, effectiveTargetMlPerKg, estimatedTargetMl]);
 
   const periodTargets = useMemo(() => {
     if (granularity === 'daily') return [];
     return periodBuckets.map((period) => {
+      const eligibleDates = getPeriodEligibleMilkDates(
+        granularity,
+        period.key,
+        focusDate,
+        birthDate
+      );
+      if (eligibleDates.length === 0) {
+        return null;
+      }
       if (resolveWeightForDate && effectiveTargetMlPerKg && effectiveTargetMlPerKg > 0) {
         const computed = computePeriodRecommendedMl(
           granularity,
           period.key,
           effectiveTargetMlPerKg,
           resolveWeightForDate,
-          focusDate
+          focusDate,
+          birthDate
         );
         if (computed) return computed;
       }
@@ -720,6 +746,7 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
   }, [
     granularity,
     periodBuckets,
+    birthDate,
     resolveWeightForDate,
     effectiveTargetMlPerKg,
     focusDate,
@@ -737,10 +764,10 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
       0,
       ...periodBuckets.map((p) => p.milkStats?.max ?? 0),
       ...periodTargets.map((t) => t?.targetMl ?? 0),
-      estimatedTargetMl ?? 0
+      !birthDate ? (estimatedTargetMl ?? 0) : 0
     );
     return computeNiceAxisMax(maxVal, 200);
-  }, [periodBuckets, periodTargets, estimatedTargetMl]);
+  }, [periodBuckets, periodTargets, estimatedTargetMl, birthDate]);
 
   const dailyRecommendedPath = useMemo(() => {
     const pts: { x: number; y: number; idx: number }[] = [];
@@ -1058,7 +1085,9 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
           accent="emerald"
           referencePoints={periodTargets.map((t) => t?.targetMl ?? null)}
           referenceLine={
-            estimatedTargetMl ? { value: estimatedTargetMl, label: `${estimatedTargetMl} mL` } : null
+            !birthDate && estimatedTargetMl
+              ? { value: estimatedTargetMl, label: `${estimatedTargetMl} mL` }
+              : null
           }
           activeKey={hoveredKey}
           onHoverKey={setHoveredKey}

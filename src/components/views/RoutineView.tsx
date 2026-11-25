@@ -11,6 +11,7 @@ import {
   getGrowthRecordDate,
   getRoutineRecordDate,
   interpretRoutineTable,
+  MIN_MILK_TARGET_AGE_DAYS,
   normalizeDiaperLoad,
   normalizeFeedingMethod,
   normalizeRoutineTimeHHMM,
@@ -308,8 +309,14 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   };
 
   const routineInsights = useMemo(
-    () => interpretRoutineTable(filteredRoutine, currentWeightKg, milkFormulaConfig),
-    [filteredRoutine, currentWeightKg, milkFormulaConfig]
+    () =>
+      interpretRoutineTable(
+        filteredRoutine,
+        currentWeightKg,
+        milkFormulaConfig,
+        activeProfile?.type === 'baby' ? activeProfile.dateOfEvent : null
+      ),
+    [filteredRoutine, currentWeightKg, milkFormulaConfig, activeProfile]
   );
 
   // Detect potentially duplicated or conflicting routine entry strictly by Date & Time
@@ -1016,6 +1023,13 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               </div>
             </div>
           </div>
+        ) : !routineInsights.milkTargetEligible ? (
+          <div className="rounded-2xl border border-dashed border-stone-200 dark:border-stone-700 p-3.5 text-xs text-stone-500 dark:text-stone-400">
+            Weight-based recommended milk intake targets start from <strong>Day {MIN_MILK_TARGET_AGE_DAYS}</strong> onwards
+            {routineInsights.focusAgeDays !== null && routineInsights.focusAgeDays >= 0
+              ? ` (currently Day ${routineInsights.focusAgeDays})`
+              : ''}.
+          </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-stone-200 dark:border-stone-700 p-3.5 text-xs text-stone-500 dark:text-stone-400">
             Log baby&apos;s current weight in the <strong>Growth</strong> tab (or set birth weight in the profile) to calculate daily and per-feed milk intake targets.
@@ -1219,7 +1233,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                     Milk Intake Formula &amp; Configuration
                   </h3>
                   <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                    Calculated automatically from baby&apos;s current weight
+                    Calculated automatically from baby&apos;s current weight · Applies from Day {MIN_MILK_TARGET_AGE_DAYS} onwards
                   </p>
                 </div>
               </div>

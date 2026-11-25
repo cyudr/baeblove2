@@ -181,7 +181,12 @@ export function buildGeminiSystemInstruction(input: GeminiContextInput): string 
     babyMeasurements[babyMeasurements.length - 1]?.weightKg ??
     activeProfile?.birthWeightKg ??
     null;
-  const routineSummary = interpretRoutineTable(routineRecords, latestWeightForTarget);
+  const routineSummary = interpretRoutineTable(
+    routineRecords,
+    latestWeightForTarget,
+    undefined,
+    activeProfile?.type === 'baby' ? activeProfile.dateOfEvent : null
+  );
   lines.push('');
   lines.push(`=== LOADED ROUTINE DATA (${routineRecords.length} records) ===`);
   lines.push('Stool Legend: M = Meconium, G = Greenish, GY = Greenish Yellow, Y = Yellow. Diaper load is x1, x2, x3...');

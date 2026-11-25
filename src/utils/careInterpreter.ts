@@ -1,6 +1,11 @@
 import { calculatePercentile, UnitConverter } from '../data/growthStandards';
 import { getProfileNumericId } from '../lib/entriesStorage';
-import { computeExactAgeFromBirth, DAYS_PER_MONTH, DAYS_PER_WEEK } from './ageCalculator';
+import {
+  computeExactAgeFromBirth,
+  DAYS_PER_MONTH,
+  DAYS_PER_WEEK,
+  parseCalendarDateUTC,
+} from './ageCalculator';
 import type { BabyMeasurement, ChildProfile, GrowthRecord, NoteRecord, RoutineRecord } from '../types';
 
 export function doesRecordMatchProfile(
@@ -408,6 +413,28 @@ export const DEFAULT_MILK_FORMULA: MilkFormulaConfig = {
   targetRangePct: 80,
 };
 
+export const MIN_MILK_TARGET_AGE_DAYS = 6;
+
+export function getAgeDaysOnDate(
+  dateStr: string,
+  birthDate?: string | null
+): number | null {
+  if (!birthDate) return null;
+  const dateUtc = parseCalendarDateUTC(dateStr);
+  const birthUtc = parseCalendarDateUTC(birthDate);
+  if (dateUtc === null || birthUtc === null) return null;
+  return Math.round((dateUtc - birthUtc) / 86_400_000);
+}
+
+export function isMilkTargetEligibleOnDate(
+  dateStr: string,
+  birthDate?: string | null
+): boolean {
+  const ageDays = getAgeDaysOnDate(dateStr, birthDate);
+  if (ageDays === null) return true;
+  return ageDays >= MIN_MILK_TARGET_AGE_DAYS;
+}
+
 export interface RoutineInterpretation {
   activeDateLabel: string;
   isToday: boolean;
@@ -416,6 +443,8 @@ export interface RoutineInterpretation {
   ebmSharePct: number;
   formulaSharePct: number;
   avgMlPerFeed: number | null;
+  milkTargetEligible: boolean;
+  focusAgeDays: number | null;
   effectiveTargetMlPerKg: number | null;
   estimatedTargetMl: number | null;
   targetMinMl: number | null;
@@ -1165,7 +1194,8 @@ export function buildDailyWeightResolver(
 export function interpretRoutineTable(
   records: RoutineRecord[],
   latestWeightKg: number | null,
-  formulaConfig: MilkFormulaConfig = DEFAULT_MILK_FORMULA
+  formulaConfig: MilkFormulaConfig = DEFAULT_MILK_FORMULA,
+  birthDate?: string | null
 ): RoutineInterpretation {
   const todayStr = formatLocalDateYMD(new Date());
   const bucketMap = buildDailyRoutineBucketMap(records);
@@ -1174,6 +1204,10 @@ export function interpretRoutineTable(
   const hasToday = bucketMap.has(todayStr);
   const focusDate = hasToday ? todayStr : allDatesDesc[0] ?? todayStr;
   const todayBucket = bucketMap.get(focusDate) ?? emptyBucket(focusDate);
+
+  const focusAgeDays = getAgeDaysOnDate(focusDate, birthDate);
+  const milkTargetEligible =
+    focusAgeDays === null || focusAgeDays >= MIN_MILK_TARGET_AGE_DAYS;
 
   // Build 7-day series ending on focusDate
   const dailySeries = buildDailyRoutineSeries(records, 7, focusDate);
@@ -1194,6 +1228,7 @@ export function interpretRoutineTable(
       : null;
 
   // Weight-based milk intake formula: x to y mL/kg/day (defaults 150–200), target at z% in [x, y] (default 80%)
+  // Applies from Day 6 onwards only.
   const rawMin = Number.isFinite(formulaConfig.minMlPerKg) && formulaConfig.minMlPerKg > 0
     ? formulaConfig.minMlPerKg
     : DEFAULT_MILK_FORMULA.minMlPerKg;
@@ -1214,9 +1249,10 @@ export function interpretRoutineTable(
   const effectiveTargetMlPerKg =
     Math.round((lowRate + (clampedZ / 100) * (highRate - lowRate)) * 10) / 10;
 
-  const targetMinMl = hasValidWeight ? Math.round((latestWeightKg as number) * lowRate) : null;
-  const targetMaxMl = hasValidWeight ? Math.round((latestWeightKg as number) * highRate) : null;
-  const estimatedTargetMl = hasValidWeight
+  const canComputeMilkTargets = hasValidWeight && milkTargetEligible;
+  const targetMinMl = canComputeMilkTargets ? Math.round((latestWeightKg as number) * lowRate) : null;
+  const targetMaxMl = canComputeMilkTargets ? Math.round((latestWeightKg as number) * highRate) : null;
+  const estimatedTargetMl = canComputeMilkTargets
     ? Math.round((latestWeightKg as number) * (lowRate + (clampedZ / 100) * (highRate - lowRate)))
     : null;
 
@@ -1282,6 +1318,12 @@ export function interpretRoutineTable(
     );
   }
 
+  if (!milkTargetEligible && focusAgeDays !== null && focusAgeDays >= 0) {
+    insights.push(
+      `Weight-based recommended milk intake targets start from Day ${MIN_MILK_TARGET_AGE_DAYS} onwards (currently Day ${focusAgeDays}).`
+    );
+  }
+
   if (todayBucket.totalDiapers > 0) {
     const hydrationNote =
       effectiveWetCount >= 6
@@ -1310,6 +1352,8 @@ export function interpretRoutineTable(
     ebmSharePct,
     formulaSharePct,
     avgMlPerFeed,
+    milkTargetEligible,
+    focusAgeDays,
     effectiveTargetMlPerKg,
     estimatedTargetMl,
     targetMinMl,

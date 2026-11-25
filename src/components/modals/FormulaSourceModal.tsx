@@ -9,7 +9,7 @@ import {
   getInterpolatedWHOPoint,
   UnitConverter,
 } from '../../data/growthStandards';
-import { DEFAULT_MILK_FORMULA } from '../../utils/careInterpreter';
+import { DEFAULT_MILK_FORMULA, MIN_MILK_TARGET_AGE_DAYS } from '../../utils/careInterpreter';
 import {
   FetalFormulaId,
   GestationalMethodId,
@@ -187,12 +187,21 @@ export const FormulaSourceModal: React.FC<FormulaSourceModalProps> = ({
       ? calculatePercentile(parsedBabyHc, parsedBabyAge, 'headCircumference', babySandboxGender)
       : null;
 
+  const babySandboxAgeDays = parsedBabyAge * 30.4375;
+  const isSandboxMilkTargetEligible = babySandboxAgeDays >= MIN_MILK_TARGET_AGE_DAYS;
+
   const milkMinMl =
-    isBaby && Number.isFinite(parsedBabyWeight) && parsedBabyWeight > 0
+    isBaby &&
+    isSandboxMilkTargetEligible &&
+    Number.isFinite(parsedBabyWeight) &&
+    parsedBabyWeight > 0
       ? Math.round(parsedBabyWeight * DEFAULT_MILK_FORMULA.minMlPerKg)
       : null;
   const milkMaxMl =
-    isBaby && Number.isFinite(parsedBabyWeight) && parsedBabyWeight > 0
+    isBaby &&
+    isSandboxMilkTargetEligible &&
+    Number.isFinite(parsedBabyWeight) &&
+    parsedBabyWeight > 0
       ? Math.round(parsedBabyWeight * DEFAULT_MILK_FORMULA.maxMlPerKg)
       : null;
   const milkTargetMl =
@@ -861,13 +870,14 @@ export const FormulaSourceModal: React.FC<FormulaSourceModalProps> = ({
                     </span>
                   </div>
                   <div className="font-mono text-[11px] p-2.5 bg-white dark:bg-stone-800 rounded-xl border border-stone-200/70 dark:border-stone-700 space-y-1 text-stone-800 dark:text-stone-200">
+                    <div>Eligibility = Day {MIN_MILK_TARGET_AGE_DAYS} onwards</div>
                     <div>Daily Min (mL) = Weight (kg) × x mL/kg</div>
                     <div>Daily Max (mL) = Weight (kg) × y mL/kg</div>
                     <div>Daily Target (mL) = Min + (Max − Min) × (z / 100)</div>
                     <div>Per-Feed Target (mL) = Daily Target ÷ Feeds per Day</div>
                   </div>
                   <p className="text-stone-600 dark:text-stone-400">
-                    Used in the Routine tab and Feeding Rhythm chart to estimate recommended daily and per-feed breast milk / formula intake from baby&apos;s current or daily recorded weight (customizable in Routine → Formula &amp; Config).
+                    Applies from Day {MIN_MILK_TARGET_AGE_DAYS} onwards in the Routine tab and Feeding Rhythm chart to estimate recommended daily and per-feed breast milk / formula intake from baby&apos;s current or daily recorded weight (customizable in Routine → Formula &amp; Config).
                   </p>
                 </div>
 
@@ -1060,7 +1070,7 @@ export const FormulaSourceModal: React.FC<FormulaSourceModalProps> = ({
                 </div>
 
                 {/* Weight-Based Milk Target Preview */}
-                {milkTargetMl !== null && milkMinMl !== null && milkMaxMl !== null && milkPerFeedMl !== null && (
+                {milkTargetMl !== null && milkMinMl !== null && milkMaxMl !== null && milkPerFeedMl !== null ? (
                   <div className="p-3.5 rounded-2xl bg-stone-50 dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700 flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div>
                       <span className="font-bold text-stone-800 dark:text-stone-200">
@@ -1077,7 +1087,11 @@ export const FormulaSourceModal: React.FC<FormulaSourceModalProps> = ({
                       ~<strong>{milkPerFeedMl} mL</strong> / feed ({DEFAULT_MILK_FORMULA.feedsPerDay} feeds/day)
                     </div>
                   </div>
-                )}
+                ) : !isSandboxMilkTargetEligible ? (
+                  <div className="p-3.5 rounded-2xl bg-stone-50 dark:bg-stone-800/60 border border-dashed border-stone-200 dark:border-stone-700 text-xs text-stone-500 dark:text-stone-400">
+                    Weight-based recommended milk intake targets apply from <strong>Day {MIN_MILK_TARGET_AGE_DAYS}</strong> onwards.
+                  </div>
+                ) : null}
               </div>
             )}
           </>
