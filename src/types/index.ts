@@ -149,10 +149,12 @@ export interface LoveNote {
 
 /**
  * Matches Supabase Postgres table: public."growth"
+ * `profile_id` links to the active profile from `entries`; `name` is the person logging the entry.
  */
 export interface GrowthRecord {
   id: number;
   created_at: string;
+  profile_id: string | null;
   daily_weight: number | null;
   daily_length: number | null;
   temperature: number | null;
@@ -161,6 +163,7 @@ export interface GrowthRecord {
 }
 
 export interface NewGrowthRecordInput {
+  profile_id?: string | null;
   daily_weight?: number | null;
   daily_length?: number | null;
   temperature?: number | null;
@@ -170,10 +173,12 @@ export interface NewGrowthRecordInput {
 
 /**
  * Matches Supabase Postgres table: public."routine"
+ * `profile_id` links to the active profile from `entries`; `name` is the person logging the entry.
  */
 export interface RoutineRecord {
   id: number;
   created_at: string;
+  profile_id: string | null;
   date: string | null;
   time: string | null;
   'EBM (mL)': number | null;
@@ -185,6 +190,7 @@ export interface RoutineRecord {
 }
 
 export interface NewRoutineRecordInput {
+  profile_id?: string | null;
   date?: string | null;
   time?: string | null;
   'EBM (mL)'?: number | null;

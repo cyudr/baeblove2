@@ -31,6 +31,7 @@ function normalizeGrowthRow(raw: Record<string, unknown>): GrowthRecord {
   return {
     id: Number(raw.id),
     created_at: String(raw.created_at ?? new Date().toISOString()),
+    profile_id: toNullableText(raw.profile_id !== null && raw.profile_id !== undefined ? String(raw.profile_id) : null),
     daily_weight: raw.daily_weight !== null && raw.daily_weight !== undefined ? Number(raw.daily_weight) : null,
     daily_length: raw.daily_length !== null && raw.daily_length !== undefined ? Number(raw.daily_length) : null,
     temperature: raw.temperature !== null && raw.temperature !== undefined ? Number(raw.temperature) : null,
@@ -43,6 +44,7 @@ function normalizeRoutineRow(raw: Record<string, unknown>): RoutineRecord {
   return {
     id: Number(raw.id),
     created_at: String(raw.created_at ?? new Date().toISOString()),
+    profile_id: toNullableText(raw.profile_id !== null && raw.profile_id !== undefined ? String(raw.profile_id) : null),
     date: raw.date !== null && raw.date !== undefined ? String(raw.date) : null,
     time: raw.time !== null && raw.time !== undefined ? String(raw.time) : null,
     'EBM (mL)':
@@ -111,6 +113,7 @@ export async function insertGrowthRecord(
   input: NewGrowthRecordInput
 ): Promise<{ record: GrowthRecord | null; error?: string }> {
   const payload = {
+    profile_id: toNullableText(input.profile_id),
     daily_weight: toNullableFloat(input.daily_weight),
     daily_length: toNullableFloat(input.daily_length),
     temperature: toNullableFloat(input.temperature),
@@ -172,6 +175,7 @@ export async function updateGrowthRecord(
   updates: NewGrowthRecordInput
 ): Promise<{ record: GrowthRecord | null; error?: string }> {
   const payload: Record<string, unknown> = {};
+  if ('profile_id' in updates) payload.profile_id = toNullableText(updates.profile_id);
   if ('daily_weight' in updates) payload.daily_weight = toNullableFloat(updates.daily_weight);
   if ('daily_length' in updates) payload.daily_length = toNullableFloat(updates.daily_length);
   if ('temperature' in updates) payload.temperature = toNullableFloat(updates.temperature);
@@ -273,6 +277,7 @@ export async function insertRoutineRecord(
   input: NewRoutineRecordInput
 ): Promise<{ record: RoutineRecord | null; error?: string }> {
   const payload = {
+    profile_id: toNullableText(input.profile_id),
     date: toNullableText(input.date),
     time: toNullableText(input.time),
     'EBM (mL)': toNullableInt(input['EBM (mL)']),
@@ -337,6 +342,7 @@ export async function updateRoutineRecord(
   updates: NewRoutineRecordInput
 ): Promise<{ record: RoutineRecord | null; error?: string }> {
   const payload: Record<string, unknown> = {};
+  if ('profile_id' in updates) payload.profile_id = toNullableText(updates.profile_id);
   if ('date' in updates) payload.date = toNullableText(updates.date);
   if ('time' in updates) payload.time = toNullableText(updates.time);
   if ('EBM (mL)' in updates) payload['EBM (mL)'] = toNullableInt(updates['EBM (mL)']);

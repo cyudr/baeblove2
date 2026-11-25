@@ -2,15 +2,23 @@ import { calculatePercentile } from '../data/growthStandards';
 import type { BabyMeasurement, ChildProfile, GrowthRecord, RoutineRecord } from '../types';
 
 export function doesRecordMatchProfile(
-  recordName: string | null | undefined,
+  record: { profile_id?: string | null; name?: string | null } | null | undefined,
   profile: ChildProfile | undefined
 ): boolean {
   if (!profile) return true;
-  const rName = (recordName ?? '').trim().toLowerCase();
-  if (!rName) return false;
+  if (!record) return false;
+
+  const recordProfileId = (record.profile_id ?? '').trim();
+  if (recordProfileId) {
+    return recordProfileId === profile.id.trim();
+  }
+
+  // Fallback for legacy rows created before profile_id was added
+  const legacyName = (record.name ?? '').trim().toLowerCase();
+  if (!legacyName) return false;
   const fullName = profile.name.trim().toLowerCase();
   const firstName = fullName.split(/\s+/)[0];
-  return rName === fullName || (firstName.length > 0 && rName === firstName);
+  return legacyName === fullName || (firstName.length > 0 && legacyName === firstName);
 }
 
 export function mergeProfileGrowthMeasurements(
@@ -25,9 +33,7 @@ export function mergeProfileGrowthMeasurements(
 
   const matchingGrowth = growthRecords.filter((g) => {
     if (g.daily_weight === null && g.daily_length === null) return false;
-    const gName = (g.name ?? '').trim();
-    if (!gName) return true;
-    return doesRecordMatchProfile(gName, profile);
+    return doesRecordMatchProfile(g, profile);
   });
 
   const merged: BabyMeasurement[] = [...babyMeasurements];

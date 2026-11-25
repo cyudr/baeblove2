@@ -59,11 +59,11 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     removeRoutineRecord,
   } = useApp();
 
-  const [nameFilter, setNameFilter] = useState<string>('all');
+  const [loggerFilter, setLoggerFilter] = useState<string>('all');
 
-  // Routine form state
+  // Routine form state (`name` column = person logging the info; `profile_id` = active profile from entries)
   const [editingRoutineId, setEditingRoutineId] = useState<number | null>(null);
-  const [routineName, setRoutineName] = useState<string>(activeProfile?.name || '');
+  const [loggedBy, setLoggedBy] = useState<string>('');
   const [routineDate, setRoutineDate] = useState<string>(getCurrentDateStr);
   const [routineTime, setRoutineTime] = useState<string>(getCurrentTimeStr);
   const [ebmMl, setEbmMl] = useState<string>('');
@@ -78,16 +78,14 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!editingRoutineId && activeProfile?.name) {
-      setRoutineName(activeProfile.name);
-    }
-  }, [activeProfile?.name, editingRoutineId]);
+    setLoggerFilter('all');
+  }, [activeProfile?.id]);
 
   // Populate form when navigated from History tab to edit a specific record
   useEffect(() => {
     if (!initialEditRecord) return;
     setEditingRoutineId(initialEditRecord.id);
-    setRoutineName(initialEditRecord.name ?? activeProfile?.name ?? '');
+    setLoggedBy(initialEditRecord.name ?? '');
     setRoutineDate(
       initialEditRecord.date ? initialEditRecord.date.slice(0, 10) : getCurrentDateStr()
     );
@@ -107,48 +105,36 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setRoutineRemark(initialEditRecord.remark ?? '');
     setRoutineError(null);
     onClearInitialEdit?.();
-  }, [initialEditRecord, activeProfile?.name, onClearInitialEdit]);
+  }, [initialEditRecord, onClearInitialEdit]);
 
-  // When active profile from "entries" changes, align filter to that profile if matching routine rows exist
-  useEffect(() => {
-    if (!activeProfile) {
-      setNameFilter('all');
-      return;
-    }
-    const hasMatches = routineRecords.some((r) => doesRecordMatchProfile(r.name, activeProfile));
-    setNameFilter(hasMatches ? activeProfile.name : 'all');
-  }, [activeProfile?.id, activeProfile?.name, routineRecords.length > 0]);
+  // Scope routine & growth records to the active profile loaded from "entries" via profile_id
+  const profileRoutineRecords = useMemo(() => {
+    if (!activeProfile) return routineRecords;
+    return routineRecords.filter((r) => doesRecordMatchProfile(r, activeProfile));
+  }, [routineRecords, activeProfile]);
 
-  const availableNames = useMemo(() => {
+  const profileGrowthRecords = useMemo(() => {
+    if (!activeProfile) return growthRecords;
+    return growthRecords.filter((g) => doesRecordMatchProfile(g, activeProfile));
+  }, [growthRecords, activeProfile]);
+
+  const availableLoggers = useMemo(() => {
     const set = new Set<string>();
-    if (activeProfile?.name) set.add(activeProfile.name);
-    for (const r of routineRecords) {
+    for (const r of profileRoutineRecords) {
       if (r.name?.trim()) set.add(r.name.trim());
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [activeProfile?.name, routineRecords]);
+  }, [profileRoutineRecords]);
 
   const filteredRoutine = useMemo(() => {
-    if (nameFilter === 'all') return routineRecords;
-    if (activeProfile && nameFilter === activeProfile.name) {
-      return routineRecords.filter((r) => doesRecordMatchProfile(r.name, activeProfile));
-    }
-    const target = nameFilter.trim().toLowerCase();
-    return routineRecords.filter((r) => (r.name ?? '').trim().toLowerCase() === target);
-  }, [routineRecords, nameFilter, activeProfile]);
-
-  const filteredGrowth = useMemo(() => {
-    if (nameFilter === 'all') return growthRecords;
-    if (activeProfile && nameFilter === activeProfile.name) {
-      return growthRecords.filter((g) => doesRecordMatchProfile(g.name, activeProfile));
-    }
-    const target = nameFilter.trim().toLowerCase();
-    return growthRecords.filter((g) => (g.name ?? '').trim().toLowerCase() === target);
-  }, [growthRecords, nameFilter, activeProfile]);
+    if (loggerFilter === 'all') return profileRoutineRecords;
+    const target = loggerFilter.trim().toLowerCase();
+    return profileRoutineRecords.filter((r) => (r.name ?? '').trim().toLowerCase() === target);
+  }, [profileRoutineRecords, loggerFilter]);
 
   const growthInsights = useMemo(
-    () => interpretGrowthTable(filteredGrowth, activeProfile),
-    [filteredGrowth, activeProfile]
+    () => interpretGrowthTable(profileGrowthRecords, activeProfile),
+    [profileGrowthRecords, activeProfile]
   );
 
   const referenceWeightKg = useMemo(() => {
@@ -162,9 +148,9 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     [filteredRoutine, referenceWeightKg]
   );
 
-  const resetRoutineForm = () => {
+  const resetRoutineForm = (preserveLogger = false) => {
     setEditingRoutineId(null);
-    setRoutineName(activeProfile?.name || '');
+    if (!preserveLogger) setLoggedBy('');
     setRoutineDate(getCurrentDateStr());
     setRoutineTime(getCurrentTimeStr());
     setEbmMl('');
@@ -199,12 +185,13 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setIsSavingRoutine(true);
     try {
       const payload = {
+        profile_id: activeProfile?.id ?? null,
         date: routineDate || null,
         time: routineTime || null,
         'EBM (mL)': parsedEbm,
         'Formula (mL)': parsedFormula,
         Diaper: diaper.trim() || null,
-        name: routineName.trim() || activeProfile?.name || null,
+        name: loggedBy.trim() || null,
         remark: routineRemark.trim() || null,
         'feed duration (min)': parsedDuration,
       };
@@ -217,7 +204,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
       if (res.error) {
         setRoutineError(res.error);
       } else {
-        resetRoutineForm();
+        resetRoutineForm(editingRoutineId === null);
       }
     } finally {
       setIsSavingRoutine(false);
@@ -226,7 +213,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
 
   const handleEditRoutine = (row: RoutineRecord) => {
     setEditingRoutineId(row.id);
-    setRoutineName(row.name ?? activeProfile?.name ?? '');
+    setLoggedBy(row.name ?? '');
     setRoutineDate(row.date ? row.date.slice(0, 10) : getCurrentDateStr());
     setRoutineTime(row.time ? row.time.slice(0, 5) : getCurrentTimeStr());
     setEbmMl(row['EBM (mL)'] !== null ? String(row['EBM (mL)']) : '');
@@ -268,13 +255,13 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs">
             <Filter className="w-3.5 h-3.5 text-stone-400" />
             <select
-              aria-label="Filter routine records by child name"
-              value={nameFilter}
-              onChange={(e) => setNameFilter(e.target.value)}
+              aria-label="Filter routine records by person who logged them"
+              value={loggerFilter}
+              onChange={(e) => setLoggerFilter(e.target.value)}
               className="bg-transparent text-stone-700 dark:text-stone-200 font-semibold focus:outline-hidden cursor-pointer"
             >
-              <option value="all">All Names</option>
-              {availableNames.map((n) => (
+              <option value="all">All Loggers</option>
+              {availableLoggers.map((n) => (
                 <option key={n} value={n}>
                   {n}
                 </option>
@@ -299,19 +286,26 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         onSubmit={handleSaveRoutine}
         className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs space-y-4"
       >
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
-            <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>
-              {editingRoutineId !== null
-                ? `Edit Routine Entry #${editingRoutineId}`
-                : 'Log Routine Entry'}
-            </span>
-          </h3>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
+              <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>
+                {editingRoutineId !== null
+                  ? `Edit Routine Entry #${editingRoutineId}`
+                  : 'Log Routine Entry'}
+              </span>
+            </h3>
+            {activeProfile && (
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
+                Profile: {activeProfile.name}
+              </span>
+            )}
+          </div>
           {editingRoutineId !== null && (
             <button
               type="button"
-              onClick={resetRoutineForm}
+              onClick={() => resetRoutineForm(false)}
               className="text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
@@ -323,13 +317,13 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Name
+              Logged By
             </label>
             <input
               type="text"
-              value={routineName}
-              onChange={(e) => setRoutineName(e.target.value)}
-              placeholder="Baby name"
+              value={loggedBy}
+              onChange={(e) => setLoggedBy(e.target.value)}
+              placeholder="e.g. Mom, Dad, Caregiver"
               className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
             />
           </div>
@@ -692,7 +686,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               <thead>
                 <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                   <th className="py-3 px-4">Date &amp; Time</th>
-                  <th className="py-3 px-4">Name</th>
+                  <th className="py-3 px-4">Logged By</th>
                   <th className="py-3 px-4">EBM (mL)</th>
                   <th className="py-3 px-4">Formula (mL)</th>
                   <th className="py-3 px-4">Total (mL)</th>

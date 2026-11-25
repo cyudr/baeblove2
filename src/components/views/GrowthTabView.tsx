@@ -78,11 +78,11 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     removeGrowthRecord,
   } = useApp();
 
-  const [nameFilter, setNameFilter] = useState<string>('all');
+  const [loggerFilter, setLoggerFilter] = useState<string>('all');
 
-  // Growth form state
+  // Growth form state (`name` column = person logging the info; `profile_id` = active profile from entries)
   const [editingGrowthId, setEditingGrowthId] = useState<number | null>(null);
-  const [growthName, setGrowthName] = useState<string>(activeProfile?.name || '');
+  const [loggedBy, setLoggedBy] = useState<string>('');
   const [dailyWeight, setDailyWeight] = useState<string>('');
   const [dailyLength, setDailyLength] = useState<string>('');
   const [temperature, setTemperature] = useState<string>('');
@@ -93,15 +93,13 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!editingGrowthId && activeProfile?.name) {
-      setGrowthName(activeProfile.name);
-    }
-  }, [activeProfile?.name, editingGrowthId]);
+    setLoggerFilter('all');
+  }, [activeProfile?.id]);
 
   useEffect(() => {
     if (!initialEditRecord) return;
     setEditingGrowthId(initialEditRecord.id);
-    setGrowthName(initialEditRecord.name ?? activeProfile?.name ?? '');
+    setLoggedBy(initialEditRecord.name ?? '');
     setDailyWeight(
       initialEditRecord.daily_weight !== null ? String(initialEditRecord.daily_weight) : ''
     );
@@ -114,35 +112,27 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     setGrowthRemark(initialEditRecord.remark ?? '');
     setGrowthError(null);
     onClearInitialEdit?.();
-  }, [initialEditRecord, activeProfile?.name, onClearInitialEdit]);
+  }, [initialEditRecord, onClearInitialEdit]);
 
-  // When active profile from "entries" changes, align filter to that profile if matching growth rows exist
-  useEffect(() => {
-    if (!activeProfile) {
-      setNameFilter('all');
-      return;
-    }
-    const hasMatches = growthRecords.some((g) => doesRecordMatchProfile(g.name, activeProfile));
-    setNameFilter(hasMatches ? activeProfile.name : 'all');
-  }, [activeProfile?.id, activeProfile?.name, growthRecords.length > 0]);
+  // Scope growth records to the active profile loaded from "entries" via profile_id
+  const profileGrowthRecords = useMemo(() => {
+    if (!activeProfile) return growthRecords;
+    return growthRecords.filter((g) => doesRecordMatchProfile(g, activeProfile));
+  }, [growthRecords, activeProfile]);
 
-  const availableNames = useMemo(() => {
+  const availableLoggers = useMemo(() => {
     const set = new Set<string>();
-    if (activeProfile?.name) set.add(activeProfile.name);
-    for (const g of growthRecords) {
+    for (const g of profileGrowthRecords) {
       if (g.name?.trim()) set.add(g.name.trim());
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [activeProfile?.name, growthRecords]);
+  }, [profileGrowthRecords]);
 
   const filteredGrowth = useMemo(() => {
-    if (nameFilter === 'all') return growthRecords;
-    if (activeProfile && nameFilter === activeProfile.name) {
-      return growthRecords.filter((g) => doesRecordMatchProfile(g.name, activeProfile));
-    }
-    const target = nameFilter.trim().toLowerCase();
-    return growthRecords.filter((g) => (g.name ?? '').trim().toLowerCase() === target);
-  }, [growthRecords, nameFilter, activeProfile]);
+    if (loggerFilter === 'all') return profileGrowthRecords;
+    const target = loggerFilter.trim().toLowerCase();
+    return profileGrowthRecords.filter((g) => (g.name ?? '').trim().toLowerCase() === target);
+  }, [profileGrowthRecords, loggerFilter]);
 
   const growthInsights = useMemo(
     () => interpretGrowthTable(filteredGrowth, activeProfile),
@@ -161,9 +151,9 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     return classifyTemperature(parsed);
   }, [temperature]);
 
-  const resetGrowthForm = () => {
+  const resetGrowthForm = (preserveLogger = false) => {
     setEditingGrowthId(null);
-    setGrowthName(activeProfile?.name || '');
+    if (!preserveLogger) setLoggedBy('');
     setDailyWeight('');
     setDailyLength('');
     setTemperature('');
@@ -192,11 +182,12 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     setIsSavingGrowth(true);
     try {
       const payload = {
+        profile_id: activeProfile?.id ?? null,
         daily_weight: parsedWeight,
         daily_length: parsedLength,
         temperature: parsedTemp,
         remark: growthRemark.trim() || null,
-        name: growthName.trim() || activeProfile?.name || null,
+        name: loggedBy.trim() || null,
       };
 
       const res =
@@ -207,7 +198,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
       if (res.error) {
         setGrowthError(res.error);
       } else {
-        resetGrowthForm();
+        resetGrowthForm(editingGrowthId === null);
       }
     } finally {
       setIsSavingGrowth(false);
@@ -216,7 +207,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
 
   const handleEditGrowth = (row: GrowthRecord) => {
     setEditingGrowthId(row.id);
-    setGrowthName(row.name ?? activeProfile?.name ?? '');
+    setLoggedBy(row.name ?? '');
     setDailyWeight(row.daily_weight !== null ? String(row.daily_weight) : '');
     setDailyLength(row.daily_length !== null ? String(row.daily_length) : '');
     setTemperature(row.temperature !== null ? String(row.temperature) : '');
@@ -246,13 +237,13 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs">
             <Filter className="w-3.5 h-3.5 text-stone-400" />
             <select
-              aria-label="Filter growth records by child name"
-              value={nameFilter}
-              onChange={(e) => setNameFilter(e.target.value)}
+              aria-label="Filter growth records by person who logged them"
+              value={loggerFilter}
+              onChange={(e) => setLoggerFilter(e.target.value)}
               className="bg-transparent text-stone-700 dark:text-stone-200 font-semibold focus:outline-hidden cursor-pointer"
             >
-              <option value="all">All Names</option>
-              {availableNames.map((n) => (
+              <option value="all">All Loggers</option>
+              {availableLoggers.map((n) => (
                 <option key={n} value={n}>
                   {n}
                 </option>
@@ -308,19 +299,26 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
         onSubmit={handleSaveGrowth}
         className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs space-y-4"
       >
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
-            <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-            <span>
-              {editingGrowthId !== null
-                ? `Edit Growth Entry #${editingGrowthId}`
-                : 'Log Daily Growth & Vitals'}
-            </span>
-          </h3>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
+              <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              <span>
+                {editingGrowthId !== null
+                  ? `Edit Growth Entry #${editingGrowthId}`
+                  : 'Log Daily Growth & Vitals'}
+              </span>
+            </h3>
+            {activeProfile && (
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
+                Profile: {activeProfile.name}
+              </span>
+            )}
+          </div>
           {editingGrowthId !== null && (
             <button
               type="button"
-              onClick={resetGrowthForm}
+              onClick={() => resetGrowthForm(false)}
               className="text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
@@ -332,13 +330,13 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Name
+              Logged By
             </label>
             <input
               type="text"
-              value={growthName}
-              onChange={(e) => setGrowthName(e.target.value)}
-              placeholder="Baby name"
+              value={loggedBy}
+              onChange={(e) => setLoggedBy(e.target.value)}
+              placeholder="e.g. Mom, Dad, Caregiver"
               className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
@@ -626,7 +624,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               <thead>
                 <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                   <th className="py-3 px-4">Recorded At</th>
-                  <th className="py-3 px-4">Name</th>
+                  <th className="py-3 px-4">Logged By</th>
                   <th className="py-3 px-4">Daily Weight</th>
                   <th className="py-3 px-4">Daily Length</th>
                   <th className="py-3 px-4">Temperature</th>

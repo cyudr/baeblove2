@@ -1013,7 +1013,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addGrowthRecord = async (
     input: NewGrowthRecordInput
   ): Promise<{ record: GrowthRecord | null; error?: string }> => {
-    const result = await insertGrowthRecord(input);
+    const resolvedInput: NewGrowthRecordInput = {
+      ...input,
+      profile_id: input.profile_id !== undefined ? input.profile_id : activeProfile?.id || null,
+    };
+    const result = await insertGrowthRecord(resolvedInput);
     if (result.record) {
       const created = result.record;
       setGrowthRecords((prev) => {
@@ -1041,6 +1045,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           r.id === id
             ? {
                 ...r,
+                profile_id: 'profile_id' in updates ? (updates.profile_id ?? null) : r.profile_id,
                 daily_weight: 'daily_weight' in updates ? (updates.daily_weight ?? null) : r.daily_weight,
                 daily_length: 'daily_length' in updates ? (updates.daily_length ?? null) : r.daily_length,
                 temperature: 'temperature' in updates ? (updates.temperature ?? null) : r.temperature,
@@ -1062,7 +1067,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addRoutineRecord = async (
     input: NewRoutineRecordInput
   ): Promise<{ record: RoutineRecord | null; error?: string }> => {
-    const result = await insertRoutineRecord(input);
+    const resolvedInput: NewRoutineRecordInput = {
+      ...input,
+      profile_id: input.profile_id !== undefined ? input.profile_id : activeProfile?.id || null,
+    };
+    const result = await insertRoutineRecord(resolvedInput);
     if (result.record) {
       const created = result.record;
       setRoutineRecords((prev) => {
@@ -1092,6 +1101,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           r.id === id
             ? {
                 ...r,
+                profile_id: 'profile_id' in updates ? (updates.profile_id ?? null) : r.profile_id,
                 date: 'date' in updates ? (updates.date ?? null) : r.date,
                 time: 'time' in updates ? (updates.time ?? null) : r.time,
                 'EBM (mL)': 'EBM (mL)' in updates ? (updates['EBM (mL)'] ?? null) : r['EBM (mL)'],

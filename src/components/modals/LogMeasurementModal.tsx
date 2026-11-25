@@ -43,6 +43,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
   const [lengthInput, setLengthInput] = useState<string>(''); // cm or inches
   const [hcInput, setHcInput] = useState<string>(''); // cm or inches
   const [temperatureInput, setTemperatureInput] = useState<string>(''); // °C
+  const [loggedByInput, setLoggedByInput] = useState<string>('');
   const [pediatricianVisit, setPediatricianVisit] = useState(true);
   const [notes, setNotes] = useState('');
 
@@ -103,6 +104,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
           : ''
       );
       setTemperatureInput('');
+      setLoggedByInput('');
       setPediatricianVisit(Boolean(editingBabyMeasurement.pediatricianVisit));
       setNotes(editingBabyMeasurement.notes || '');
       return;
@@ -148,6 +150,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
     setLengthInput('');
     setHcInput('');
     setTemperatureInput('');
+    setLoggedByInput('');
     setPediatricianVisit(true);
     setEfwInput('');
     setCrlInput('');
@@ -277,11 +280,12 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
         const parsedTemp = temperatureInput.trim() ? parseFloat(temperatureInput) : null;
         if (!editingBabyMeasurement && (weightKg !== undefined || lengthCm !== undefined || parsedTemp !== null)) {
           const growthRes = await addGrowthRecord({
+            profile_id: activeProfile.id,
             daily_weight: weightKg ?? null,
             daily_length: lengthCm ?? null,
             temperature: parsedTemp,
             remark: notes.trim() || null,
-            name: activeProfile.name,
+            name: loggedByInput.trim() || null,
           });
           if (growthRes.error) {
             setSaveError(growthRes.error);
@@ -525,21 +529,35 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                 </div>
               </div>
 
-              {/* Optional Temperature (also synced to Supabase growth table) */}
-              <div>
-                <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                  Body Temperature (°C, optional)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="30"
-                  max="45"
-                  placeholder="e.g. 36.8"
-                  value={temperatureInput}
-                  onChange={(e) => setTemperatureInput(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-                />
+              {/* Optional Temperature & Logged By (synced to Supabase growth table) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                    Body Temperature (°C, optional)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="30"
+                    max="45"
+                    placeholder="e.g. 36.8"
+                    value={temperatureInput}
+                    onChange={(e) => setTemperatureInput(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                    Logged By (optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Mom, Dad, Caregiver"
+                    value={loggedByInput}
+                    onChange={(e) => setLoggedByInput(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                  />
+                </div>
               </div>
 
               {/* Checkup flag */}

@@ -94,7 +94,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
   } = useApp();
 
   const [activeSubTab, setActiveSubTab] = useState<HistorySubTab>('all');
-  const [nameFilter, setNameFilter] = useState<string>('all');
+  const [loggerFilter, setLoggerFilter] = useState<string>('all');
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
 
@@ -103,52 +103,43 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
   const attachedFetalScans =
     hasAttachedFetal && activeProfile ? getAttachedFetalMeasurements(activeProfile.id) : [];
 
-  // When active profile from "entries" changes, align filter to that profile if matching rows exist
   useEffect(() => {
-    if (!activeProfile) {
-      setNameFilter('all');
-      return;
-    }
-    const hasMatches =
-      routineRecords.some((r) => doesRecordMatchProfile(r.name, activeProfile)) ||
-      growthRecords.some((g) => doesRecordMatchProfile(g.name, activeProfile));
-    setNameFilter(hasMatches ? activeProfile.name : 'all');
-  }, [
-    activeProfile?.id,
-    activeProfile?.name,
-    routineRecords.length > 0,
-    growthRecords.length > 0,
-  ]);
+    setLoggerFilter('all');
+  }, [activeProfile?.id]);
 
-  const availableNames = useMemo(() => {
+  // Scope routine & growth history to the active profile loaded from "entries" via profile_id
+  const profileRoutineRecords = useMemo(() => {
+    if (!activeProfile) return routineRecords;
+    return routineRecords.filter((r) => doesRecordMatchProfile(r, activeProfile));
+  }, [routineRecords, activeProfile]);
+
+  const profileGrowthRecords = useMemo(() => {
+    if (!activeProfile) return growthRecords;
+    return growthRecords.filter((g) => doesRecordMatchProfile(g, activeProfile));
+  }, [growthRecords, activeProfile]);
+
+  const availableLoggers = useMemo(() => {
     const set = new Set<string>();
-    if (activeProfile?.name) set.add(activeProfile.name);
-    for (const r of routineRecords) {
+    for (const r of profileRoutineRecords) {
       if (r.name?.trim()) set.add(r.name.trim());
     }
-    for (const g of growthRecords) {
+    for (const g of profileGrowthRecords) {
       if (g.name?.trim()) set.add(g.name.trim());
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [activeProfile?.name, routineRecords, growthRecords]);
+  }, [profileRoutineRecords, profileGrowthRecords]);
 
   const filteredRoutine = useMemo(() => {
-    if (nameFilter === 'all') return routineRecords;
-    if (activeProfile && nameFilter === activeProfile.name) {
-      return routineRecords.filter((r) => doesRecordMatchProfile(r.name, activeProfile));
-    }
-    const target = nameFilter.trim().toLowerCase();
-    return routineRecords.filter((r) => (r.name ?? '').trim().toLowerCase() === target);
-  }, [routineRecords, nameFilter, activeProfile]);
+    if (loggerFilter === 'all') return profileRoutineRecords;
+    const target = loggerFilter.trim().toLowerCase();
+    return profileRoutineRecords.filter((r) => (r.name ?? '').trim().toLowerCase() === target);
+  }, [profileRoutineRecords, loggerFilter]);
 
   const filteredGrowth = useMemo(() => {
-    if (nameFilter === 'all') return growthRecords;
-    if (activeProfile && nameFilter === activeProfile.name) {
-      return growthRecords.filter((g) => doesRecordMatchProfile(g.name, activeProfile));
-    }
-    const target = nameFilter.trim().toLowerCase();
-    return growthRecords.filter((g) => (g.name ?? '').trim().toLowerCase() === target);
-  }, [growthRecords, nameFilter, activeProfile]);
+    if (loggerFilter === 'all') return profileGrowthRecords;
+    const target = loggerFilter.trim().toLowerCase();
+    return profileGrowthRecords.filter((g) => (g.name ?? '').trim().toLowerCase() === target);
+  }, [profileGrowthRecords, loggerFilter]);
 
   const clinicalCount = activeProfile
     ? isBaby
@@ -187,7 +178,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
             <thead>
               <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                 <th className="py-3 px-4">Date &amp; Time</th>
-                <th className="py-3 px-4">Name</th>
+                <th className="py-3 px-4">Logged By</th>
                 <th className="py-3 px-4">EBM (mL)</th>
                 <th className="py-3 px-4">Formula (mL)</th>
                 <th className="py-3 px-4">Total (mL)</th>
@@ -317,7 +308,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
             <thead>
               <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                 <th className="py-3 px-4">Recorded At</th>
-                <th className="py-3 px-4">Name</th>
+                <th className="py-3 px-4">Logged By</th>
                 <th className="py-3 px-4">Daily Weight</th>
                 <th className="py-3 px-4">Daily Length</th>
                 <th className="py-3 px-4">Temperature</th>
@@ -754,13 +745,13 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs">
             <Filter className="w-3.5 h-3.5 text-stone-400" />
             <select
-              aria-label="Filter history by name"
-              value={nameFilter}
-              onChange={(e) => setNameFilter(e.target.value)}
+              aria-label="Filter history by person who logged it"
+              value={loggerFilter}
+              onChange={(e) => setLoggerFilter(e.target.value)}
               className="bg-transparent text-stone-700 dark:text-stone-200 font-semibold focus:outline-hidden cursor-pointer"
             >
-              <option value="all">All Names</option>
-              {availableNames.map((n) => (
+              <option value="all">All Loggers</option>
+              {availableLoggers.map((n) => (
                 <option key={n} value={n}>
                   {n}
                 </option>
