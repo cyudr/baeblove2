@@ -508,8 +508,8 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Logged By
             </label>
@@ -518,11 +518,11 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               value={loggedBy}
               onChange={(e) => setLoggedBy(e.target.value)}
               placeholder="e.g. Mom, Dad, Caregiver"
-              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Date
             </label>
@@ -530,11 +530,11 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               type="date"
               value={routineDate}
               onChange={(e) => setRoutineDate(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Time
             </label>
@@ -542,11 +542,11 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               type="time"
               value={routineTime}
               onChange={(e) => setRoutineTime(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Feed Duration (min)
             </label>
@@ -557,11 +557,11 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               value={feedDurationMin}
               onChange={(e) => setFeedDurationMin(e.target.value)}
               placeholder="e.g. 20"
-              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               EBM (mL)
             </label>
@@ -572,11 +572,11 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               value={ebmMl}
               onChange={(e) => setEbmMl(e.target.value)}
               placeholder="e.g. 90"
-              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Formula (mL)
             </label>
@@ -587,11 +587,11 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               value={formulaMl}
               onChange={(e) => setFormulaMl(e.target.value)}
               placeholder="e.g. 60"
-              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
             />
           </div>
 
-          <div className="sm:col-span-2">
+          <div className="min-w-0 col-span-2">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Diaper
             </label>
@@ -615,14 +615,14 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                 value={diaper}
                 onChange={(e) => setDiaper(e.target.value)}
                 placeholder="Or custom..."
-                className="flex-1 min-w-[110px] px-3 py-1.5 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                className="flex-1 min-w-[110px] px-2.5 sm:px-3 py-1.5 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
               />
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
-          <div className="flex-1">
+        <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 items-stretch sm:items-end">
+          <div className="flex-1 min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Remark
             </label>
@@ -631,7 +631,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               value={routineRemark}
               onChange={(e) => setRoutineRemark(e.target.value)}
               placeholder="Optional observation (e.g. burped well, sleepy after feed)"
-              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
             />
           </div>
 

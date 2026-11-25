@@ -413,8 +413,8 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          <div>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Logged By
             </label>
@@ -423,11 +423,11 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               value={loggedBy}
               onChange={(e) => setLoggedBy(e.target.value)}
               placeholder="e.g. Mom, Dad, Caregiver"
-              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Date
             </label>
@@ -435,11 +435,11 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               type="date"
               value={growthDate}
               onChange={(e) => setGrowthDate(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Daily Weight (kg)
             </label>
@@ -450,11 +450,11 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               value={dailyWeight}
               onChange={(e) => setDailyWeight(e.target.value)}
               placeholder="e.g. 6.45"
-              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Daily Length (cm)
             </label>
@@ -465,11 +465,11 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               value={dailyLength}
               onChange={(e) => setDailyLength(e.target.value)}
               placeholder="e.g. 62.5"
-              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
 
-          <div>
+          <div className="min-w-0 col-span-2 lg:col-span-1">
             <div className="flex items-center justify-between mb-1">
               <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300">
                 Temperature (°C)
@@ -492,13 +492,13 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               value={temperature}
               onChange={(e) => setTemperature(e.target.value)}
               placeholder="e.g. 36.8"
-              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
-          <div className="flex-1">
+        <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 items-stretch sm:items-end">
+          <div className="flex-1 min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Remark
             </label>
@@ -507,7 +507,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               value={growthRemark}
               onChange={(e) => setGrowthRemark(e.target.value)}
               placeholder="Optional notes (e.g. morning weigh-in before feed, post-vaccine check)"
-              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
             />
           </div>
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { classifyTemperature } from '../../utils/careInterpreter';
 import type { NewGrowthRecordInput, NewRoutineRecordInput } from '../../types';
 import {
   Sparkles,
@@ -23,6 +24,19 @@ export type MassImportTable = 'routine' | 'growth';
 type ImportSourceMode = 'tabular' | 'camera' | 'photo' | 'file';
 
 const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
+
+function tempBadgeClasses(severity: 'low' | 'normal' | 'elevated' | 'fever'): string {
+  switch (severity) {
+    case 'normal':
+      return 'bg-emerald-100/80 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+    case 'elevated':
+      return 'bg-amber-100/80 dark:bg-amber-950/70 text-amber-900 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+    case 'fever':
+      return 'bg-rose-100/80 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800';
+    case 'low':
+      return 'bg-sky-100/80 dark:bg-sky-950/70 text-sky-800 dark:text-sky-300 border-sky-200 dark:border-sky-800';
+  }
+}
 
 interface RoutineDraftRow {
   _key: string;
@@ -750,8 +764,8 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         {/* Body */}
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
           {/* Top Bar: Target Table + Defaults */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-            <div className="md:col-span-5">
+          <div className="grid grid-cols-2 md:grid-cols-12 gap-2.5 sm:gap-3 items-end">
+            <div className="col-span-2 md:col-span-5">
               <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1.5">
                 Target Table
               </label>
@@ -783,20 +797,20 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
               </div>
             </div>
 
-            <div className="md:col-span-4">
+            <div className="min-w-0 col-span-1 md:col-span-4">
               <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1.5">
-                Default Logged By <span className="text-stone-400 font-normal">(optional)</span>
+                Default Logged By <span className="text-stone-400 font-normal hidden sm:inline">(optional)</span>
               </label>
               <input
                 type="text"
                 value={defaultLogger}
                 onChange={(e) => setDefaultLogger(e.target.value)}
-                placeholder="e.g. Mom, Dad, Caregiver"
-                className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                placeholder="e.g. Mom, Dad..."
+                className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
               />
             </div>
 
-            <div className="md:col-span-3">
+            <div className="min-w-0 col-span-1 md:col-span-3">
               <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1.5">
                 Default Date
               </label>
@@ -804,7 +818,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 type="date"
                 value={defaultDate}
                 onChange={(e) => setDefaultDate(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
               />
             </div>
           </div>
@@ -1184,9 +1198,9 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             </div>
           )}
 
-          {/* MODE 4: DIRECT TABULAR DATA ENTRY (sole direct writer to Supabase, matching Routine & Growth input formats) */}
+          {/* MODE 4: DIRECT TABULAR DATA ENTRY (sole direct writer to Supabase, matching Routine & Growth logging grids) */}
           {entryMode === 'tabular' && (
-            <div className="rounded-2xl border border-stone-200 dark:border-stone-800 overflow-hidden">
+            <div className="rounded-2xl border border-stone-200 dark:border-stone-800 overflow-hidden bg-stone-50/50 dark:bg-stone-950/30">
               <div className="px-4 py-3 bg-stone-50 dark:bg-stone-800/70 border-b border-stone-200 dark:border-stone-800 flex flex-wrap items-center justify-between gap-2">
                 <div className="space-y-0.5">
                   <div className="text-xs font-bold text-stone-900 dark:text-white">
@@ -1200,13 +1214,35 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                     </div>
                   ) : (
                     <div className="text-[11px] text-stone-500 dark:text-stone-400">
-                      Only rows in this table are written to the database. Formats match the{' '}
-                      {targetTable === 'routine' ? 'Routine' : 'Growth'} tab.
+                      Only rows here are written to the database. Layout matches the{' '}
+                      {targetTable === 'routine' ? 'Routine' : 'Growth'} logging grid.
                     </div>
                   )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5">
+                  <label className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-lg inline-flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      aria-label={
+                        targetTable === 'routine'
+                          ? 'Select all routine rows'
+                          : 'Select all growth rows'
+                      }
+                      checked={
+                        targetTable === 'routine'
+                          ? routineDrafts.length > 0 && routineDrafts.every((r) => r.selected)
+                          : growthDrafts.length > 0 && growthDrafts.every((r) => r.selected)
+                      }
+                      onChange={(e) => toggleAllSelected(e.target.checked)}
+                      className={
+                        targetTable === 'routine'
+                          ? 'accent-emerald-600 cursor-pointer'
+                          : 'accent-amber-600 cursor-pointer'
+                      }
+                    />
+                    <span>All</span>
+                  </label>
                   <button
                     type="button"
                     onClick={() => addBlankRows(1)}
@@ -1232,177 +1268,217 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 </div>
               </div>
 
-              <datalist id="mass-import-diaper-presets">
-                {DIAPER_PRESETS.map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
-
-              <div className="overflow-x-auto max-h-80 overflow-y-auto">
+              <div className="p-3 sm:p-4 space-y-3 max-h-[50vh] overflow-y-auto">
                 {targetTable === 'routine' ? (
-                  /* Exact RoutineView field order: Logged By, Date, Time, Feed Duration (min), EBM (mL), Formula (mL), Diaper, Remark */
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="sticky top-0 z-10 bg-stone-50 dark:bg-stone-850 border-b border-stone-200 dark:border-stone-800 text-[11px] text-stone-500 dark:text-stone-400">
-                      <tr>
-                        <th className="py-2.5 px-2.5 w-8">
+                  /* Exact RoutineView logging grid: grid-cols-2 lg:grid-cols-4 (Logged By, Date, Time, Feed Duration, EBM, Formula, Diaper col-span-2) + Remark */
+                  routineDrafts.map((row, idx) => (
+                    <div
+                      key={row._key}
+                      className={`rounded-2xl border p-3 sm:p-4 space-y-3 transition-opacity ${
+                        row.selected
+                          ? 'bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-800 shadow-2xs'
+                          : 'bg-stone-100/70 dark:bg-stone-900/40 border-stone-200/70 dark:border-stone-800/60 opacity-60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 pb-2 border-b border-stone-100 dark:border-stone-800">
+                        <label className="inline-flex items-center gap-2 text-xs font-bold text-stone-800 dark:text-stone-200 cursor-pointer select-none">
                           <input
                             type="checkbox"
-                            aria-label="Select all routine rows"
-                            checked={
-                              routineDrafts.length > 0 &&
-                              routineDrafts.every((r) => r.selected)
+                            checked={row.selected}
+                            onChange={(e) =>
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key
+                                    ? { ...item, selected: e.target.checked }
+                                    : item
+                                )
+                              )
                             }
-                            onChange={(e) => toggleAllSelected(e.target.checked)}
                             className="accent-emerald-600 cursor-pointer"
                           />
-                        </th>
-                        <th className="py-2.5 px-2">Logged By</th>
-                        <th className="py-2.5 px-2">Date</th>
-                        <th className="py-2.5 px-2">Time</th>
-                        <th className="py-2.5 px-2">Feed Duration (min)</th>
-                        <th className="py-2.5 px-2">EBM (mL)</th>
-                        <th className="py-2.5 px-2">Formula (mL)</th>
-                        <th className="py-2.5 px-2">Diaper</th>
-                        <th className="py-2.5 px-2">Remark</th>
-                        <th className="py-2.5 px-2 w-8" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-                      {routineDrafts.map((row) => (
-                        <tr
-                          key={row._key}
-                          className={
-                            row.selected
-                              ? 'bg-white dark:bg-stone-900'
-                              : 'bg-stone-50/60 dark:bg-stone-900/40 opacity-50'
+                          <span>Routine Row #{idx + 1}</span>
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRoutineDrafts((prev) =>
+                              prev.length > 1
+                                ? prev.filter((item) => item._key !== row._key)
+                                : [createEmptyRoutineRow(defaultDate, defaultLogger.trim(), 0)]
+                            )
                           }
+                          className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                          title="Remove row"
+                          aria-label={`Remove routine row ${idx + 1}`}
                         >
-                          <td className="py-1.5 px-2.5">
-                            <input
-                              type="checkbox"
-                              checked={row.selected}
-                              onChange={(e) =>
-                                setRoutineDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, selected: e.target.checked }
-                                      : item
-                                  )
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Logged By
+                          </label>
+                          <input
+                            type="text"
+                            value={row.name}
+                            onChange={(e) =>
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key
+                                    ? { ...item, name: e.target.value }
+                                    : item
                                 )
-                              }
-                              className="accent-emerald-600 cursor-pointer"
-                            />
-                          </td>
-                          <td className="py-1.5 px-1.5">
+                              )
+                            }
+                            placeholder="e.g. Mom, Dad, Caregiver"
+                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Date
+                          </label>
+                          <input
+                            type="date"
+                            value={row.date}
+                            onChange={(e) =>
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key
+                                    ? { ...item, date: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Time
+                          </label>
+                          <input
+                            type="time"
+                            value={row.time}
+                            onChange={(e) =>
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key
+                                    ? { ...item, time: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Feed Duration (min)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={row.feedDurationMin}
+                            onChange={(e) =>
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key
+                                    ? { ...item, feedDurationMin: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                            placeholder="e.g. 20"
+                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            EBM (mL)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="5"
+                            value={row.ebmMl}
+                            onChange={(e) =>
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key
+                                    ? { ...item, ebmMl: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                            placeholder="e.g. 90"
+                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Formula (mL)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="5"
+                            value={row.formulaMl}
+                            onChange={(e) =>
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key
+                                    ? { ...item, formulaMl: e.target.value }
+                                    : item
+                                )
+                              )
+                            }
+                            placeholder="e.g. 60"
+                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div className="min-w-0 col-span-2">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Diaper
+                          </label>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {DIAPER_PRESETS.map((preset) => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() =>
+                                  setRoutineDrafts((prev) =>
+                                    prev.map((item) =>
+                                      item._key === row._key
+                                        ? {
+                                            ...item,
+                                            diaper: item.diaper === preset ? '' : preset,
+                                          }
+                                        : item
+                                    )
+                                  )
+                                }
+                                className={`px-2.5 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer ${
+                                  row.diaper === preset
+                                    ? 'bg-emerald-600 text-white border-emerald-600'
+                                    : 'bg-stone-50 dark:bg-stone-800 text-stone-700 dark:text-stone-300 border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700'
+                                }`}
+                              >
+                                {preset}
+                              </button>
+                            ))}
                             <input
                               type="text"
-                              value={row.name}
-                              onChange={(e) =>
-                                setRoutineDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, name: e.target.value }
-                                      : item
-                                  )
-                                )
-                              }
-                              placeholder="Mom, Dad..."
-                              className="w-28 px-2 py-1.5 text-[11px] bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="py-1.5 px-1.5">
-                            <input
-                              type="date"
-                              value={row.date}
-                              onChange={(e) =>
-                                setRoutineDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, date: e.target.value }
-                                      : item
-                                  )
-                                )
-                              }
-                              className="w-32 px-2 py-1.5 text-[11px] font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="py-1.5 px-1.5">
-                            <input
-                              type="time"
-                              value={row.time}
-                              onChange={(e) =>
-                                setRoutineDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, time: e.target.value }
-                                      : item
-                                  )
-                                )
-                              }
-                              className="w-24 px-2 py-1.5 text-[11px] font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="py-1.5 px-1.5">
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={row.feedDurationMin}
-                              onChange={(e) =>
-                                setRoutineDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, feedDurationMin: e.target.value }
-                                      : item
-                                  )
-                                )
-                              }
-                              placeholder="e.g. 20"
-                              className="w-24 px-2 py-1.5 text-[11px] font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="py-1.5 px-1.5">
-                            <input
-                              type="number"
-                              min="0"
-                              step="5"
-                              value={row.ebmMl}
-                              onChange={(e) =>
-                                setRoutineDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, ebmMl: e.target.value }
-                                      : item
-                                  )
-                                )
-                              }
-                              placeholder="e.g. 90"
-                              className="w-20 px-2 py-1.5 text-[11px] font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="py-1.5 px-1.5">
-                            <input
-                              type="number"
-                              min="0"
-                              step="5"
-                              value={row.formulaMl}
-                              onChange={(e) =>
-                                setRoutineDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, formulaMl: e.target.value }
-                                      : item
-                                  )
-                                )
-                              }
-                              placeholder="e.g. 60"
-                              className="w-20 px-2 py-1.5 text-[11px] font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="py-1.5 px-1.5">
-                            <input
-                              type="text"
-                              list="mass-import-diaper-presets"
                               value={row.diaper}
                               onChange={(e) =>
                                 setRoutineDrafts((prev) =>
@@ -1413,84 +1489,55 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder="Wet/Dirty/Mixed"
-                              className="w-28 px-2 py-1.5 text-[11px] bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
+                              placeholder="Or custom..."
+                              className="flex-1 min-w-[110px] px-2.5 sm:px-3 py-1.5 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
                             />
-                          </td>
-                          <td className="py-1.5 px-1.5">
-                            <input
-                              type="text"
-                              value={row.remark}
-                              onChange={(e) =>
-                                setRoutineDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, remark: e.target.value }
-                                      : item
-                                  )
-                                )
-                              }
-                              placeholder="Optional observation"
-                              className="w-40 px-2 py-1.5 text-[11px] bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-emerald-500"
-                            />
-                          </td>
-                          <td className="py-1.5 px-1.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRoutineDrafts((prev) =>
-                                  prev.length > 1
-                                    ? prev.filter((item) => item._key !== row._key)
-                                    : [createEmptyRoutineRow(defaultDate, defaultLogger.trim(), 0)]
-                                )
-                              }
-                              className="p-1 text-stone-400 hover:text-rose-600 cursor-pointer"
-                              title="Remove row"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  /* Exact GrowthTabView field order: Logged By, Date, Daily Weight (kg), Daily Length (cm), Temperature (°C), Remark */
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="sticky top-0 z-10 bg-stone-50 dark:bg-stone-850 border-b border-stone-200 dark:border-stone-800 text-[11px] text-stone-500 dark:text-stone-400">
-                      <tr>
-                        <th className="py-2.5 px-2.5 w-8">
-                          <input
-                            type="checkbox"
-                            aria-label="Select all growth rows"
-                            checked={
-                              growthDrafts.length > 0 &&
-                              growthDrafts.every((r) => r.selected)
-                            }
-                            onChange={(e) => toggleAllSelected(e.target.checked)}
-                            className="accent-amber-600 cursor-pointer"
-                          />
-                        </th>
-                        <th className="py-2.5 px-2">Logged By</th>
-                        <th className="py-2.5 px-2">Date</th>
-                        <th className="py-2.5 px-2">Daily Weight (kg)</th>
-                        <th className="py-2.5 px-2">Daily Length (cm)</th>
-                        <th className="py-2.5 px-2">Temperature (°C)</th>
-                        <th className="py-2.5 px-2">Remark</th>
-                        <th className="py-2.5 px-2 w-8" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-                      {growthDrafts.map((row) => (
-                        <tr
-                          key={row._key}
-                          className={
-                            row.selected
-                              ? 'bg-white dark:bg-stone-900'
-                              : 'bg-stone-50/60 dark:bg-stone-900/40 opacity-50'
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="min-w-0">
+                        <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                          Remark
+                        </label>
+                        <input
+                          type="text"
+                          value={row.remark}
+                          onChange={(e) =>
+                            setRoutineDrafts((prev) =>
+                              prev.map((item) =>
+                                item._key === row._key
+                                  ? { ...item, remark: e.target.value }
+                                  : item
+                              )
+                            )
                           }
-                        >
-                          <td className="py-1.5 px-2.5">
+                          placeholder="Optional observation (e.g. burped well, sleepy after feed)"
+                          className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  /* Exact GrowthTabView logging grid: grid-cols-2 lg:grid-cols-5 (Logged By, Date, Daily Weight, Daily Length, Temperature col-span-2 lg:col-span-1) + Remark */
+                  growthDrafts.map((row, idx) => {
+                    const parsedTemp = parseFloat(row.temperature);
+                    const liveTempPreview =
+                      row.temperature.trim() !== '' && Number.isFinite(parsedTemp)
+                        ? classifyTemperature(parsedTemp)
+                        : null;
+
+                    return (
+                      <div
+                        key={row._key}
+                        className={`rounded-2xl border p-3 sm:p-4 space-y-3 transition-opacity ${
+                          row.selected
+                            ? 'bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-800 shadow-2xs'
+                            : 'bg-stone-100/70 dark:bg-stone-900/40 border-stone-200/70 dark:border-stone-800/60 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 pb-2 border-b border-stone-100 dark:border-stone-800">
+                          <label className="inline-flex items-center gap-2 text-xs font-bold text-stone-800 dark:text-stone-200 cursor-pointer select-none">
                             <input
                               type="checkbox"
                               checked={row.selected}
@@ -1505,8 +1552,31 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                               }
                               className="accent-amber-600 cursor-pointer"
                             />
-                          </td>
-                          <td className="py-1.5 px-1.5">
+                            <span>Growth Row #{idx + 1}</span>
+                          </label>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setGrowthDrafts((prev) =>
+                                prev.length > 1
+                                  ? prev.filter((item) => item._key !== row._key)
+                                  : [createEmptyGrowthRow(defaultDate, defaultLogger.trim(), 0)]
+                              )
+                            }
+                            className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                            title="Remove row"
+                            aria-label={`Remove growth row ${idx + 1}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Logged By
+                            </label>
                             <input
                               type="text"
                               value={row.name}
@@ -1519,11 +1589,15 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder="Mom, Dad..."
-                              className="w-32 px-2 py-1.5 text-[11px] bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                              placeholder="e.g. Mom, Dad, Caregiver"
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
                             />
-                          </td>
-                          <td className="py-1.5 px-1.5">
+                          </div>
+
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Date
+                            </label>
                             <input
                               type="date"
                               value={row.date}
@@ -1536,10 +1610,14 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                                   )
                                 )
                               }
-                              className="w-32 px-2 py-1.5 text-[11px] font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
                             />
-                          </td>
-                          <td className="py-1.5 px-1.5">
+                          </div>
+
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Daily Weight (kg)
+                            </label>
                             <input
                               type="number"
                               step="0.01"
@@ -1555,10 +1633,14 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                                 )
                               }
                               placeholder="e.g. 6.45"
-                              className="w-28 px-2 py-1.5 text-[11px] font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
                             />
-                          </td>
-                          <td className="py-1.5 px-1.5">
+                          </div>
+
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Daily Length (cm)
+                            </label>
                             <input
                               type="number"
                               step="0.1"
@@ -1574,10 +1656,25 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                                 )
                               }
                               placeholder="e.g. 62.5"
-                              className="w-28 px-2 py-1.5 text-[11px] font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
                             />
-                          </td>
-                          <td className="py-1.5 px-1.5">
+                          </div>
+
+                          <div className="min-w-0 col-span-2 lg:col-span-1">
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300">
+                                Temperature (°C)
+                              </label>
+                              {liveTempPreview && (
+                                <span
+                                  className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full border ${tempBadgeClasses(
+                                    liveTempPreview.severity
+                                  )}`}
+                                >
+                                  {liveTempPreview.label}
+                                </span>
+                              )}
+                            </div>
                             <input
                               type="number"
                               step="0.1"
@@ -1594,46 +1691,34 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                                 )
                               }
                               placeholder="e.g. 36.8"
-                              className="w-28 px-2 py-1.5 text-[11px] font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
                             />
-                          </td>
-                          <td className="py-1.5 px-1.5">
-                            <input
-                              type="text"
-                              value={row.remark}
-                              onChange={(e) =>
-                                setGrowthDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, remark: e.target.value }
-                                      : item
-                                  )
+                          </div>
+                        </div>
+
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Remark
+                          </label>
+                          <input
+                            type="text"
+                            value={row.remark}
+                            onChange={(e) =>
+                              setGrowthDrafts((prev) =>
+                                prev.map((item) =>
+                                  item._key === row._key
+                                    ? { ...item, remark: e.target.value }
+                                    : item
                                 )
-                              }
-                              placeholder="Optional notes"
-                              className="w-48 px-2 py-1.5 text-[11px] bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:border-amber-500"
-                            />
-                          </td>
-                          <td className="py-1.5 px-1.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setGrowthDrafts((prev) =>
-                                  prev.length > 1
-                                    ? prev.filter((item) => item._key !== row._key)
-                                    : [createEmptyGrowthRow(defaultDate, defaultLogger.trim(), 0)]
-                                )
-                              }
-                              className="p-1 text-stone-400 hover:text-rose-600 cursor-pointer"
-                              title="Remove row"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                              )
+                            }
+                            placeholder="Optional notes (e.g. morning weigh-in before feed, post-vaccine check)"
+                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
