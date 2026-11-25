@@ -33,8 +33,14 @@ interface GeminiInputPart {
   };
 }
 
+interface GeminiChatMessage {
+  role: 'user' | 'model';
+  text: string;
+}
+
 interface GeminiRequestBody {
   prompt?: string;
+  messages?: GeminiChatMessage[];
   parts?: GeminiInputPart[];
   attachment?: GeminiAttachment | null;
   attachments?: GeminiAttachment[] | null;
@@ -353,9 +359,22 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
       parts.push({ text: body.prompt });
     }
 
-    if (parts.length === 0) {
+    // Sanitize multi-turn chat messages if provided
+    const chatMessages: GeminiChatMessage[] = [];
+    if (Array.isArray(body.messages)) {
+      for (const msg of body.messages) {
+        if (!msg || typeof msg !== 'object') continue;
+        const role = msg.role === 'model' ? 'model' : msg.role === 'user' ? 'user' : null;
+        const text = typeof msg.text === 'string' ? msg.text.trim() : '';
+        if (role && text) {
+          chatMessages.push({ role, text });
+        }
+      }
+    }
+
+    if (parts.length === 0 && chatMessages.length === 0) {
       sendJson(res, 400, {
-        error: 'Provide a prompt, parts, or supported attachment for Gemini to process.',
+        error: 'Provide a prompt, messages, parts, or supported attachment for Gemini to process.',
       });
       return;
     }
@@ -378,8 +397,29 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     const thinkingLevel = resolveThinkingLevel(body.thinkingLevel);
 
     const runModel = (modelName: string) =>
-      generateWithRetry(() =>
-        ai.models.generateContent({
+      generateWithRetry(async () => {
+        if (chatMessages.length > 0 && parts.length === 0) {
+          const lastMsg = chatMessages[chatMessages.length - 1];
+          const history = chatMessages.slice(0, -1).map((m) => ({
+            role: m.role,
+            parts: [{ text: m.text }],
+          }));
+
+          const chat = ai.chats.create({
+            model: modelName,
+            history,
+            config: {
+              ...(systemInstruction ? { systemInstruction } : {}),
+              ...(responseMimeType ? { responseMimeType } : {}),
+              ...(responseSchema ? { responseSchema } : {}),
+              thinkingConfig: { thinkingLevel },
+            },
+          });
+
+          return chat.sendMessage({ message: lastMsg.text });
+        }
+
+        return ai.models.generateContent({
           model: modelName,
           contents: { parts },
           config: {
@@ -388,8 +428,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
             ...(responseSchema ? { responseSchema } : {}),
             thinkingConfig: { thinkingLevel },
           },
-        })
-      );
+        });
+      });
 
     let usedModel = primaryModel;
     let response;

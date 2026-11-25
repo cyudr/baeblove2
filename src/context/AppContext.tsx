@@ -156,6 +156,7 @@ interface AppContextType {
   noteRecords: NoteRecord[];
   isCareTablesLoading: boolean;
   refreshCareTables: () => Promise<void>;
+  refreshAllData: () => Promise<void>;
   addGrowthRecord: (input: NewGrowthRecordInput) => Promise<{ record: GrowthRecord | null; error?: string }>;
   addGrowthRecordsBulk: (
     inputs: NewGrowthRecordInput[]
@@ -1107,6 +1108,87 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
+  const refreshAllData = useCallback(async () => {
+    setIsEntriesLoading(true);
+    const refreshEntriesPromise = (async () => {
+      try {
+        const rows = await fetchAllEntries();
+        if (rows === null) return;
+
+        const loadedProfiles: ChildProfile[] = [];
+        const loadedBabyMeasurements: BabyMeasurement[] = [];
+        const loadedFetalMeasurements: FetalMeasurement[] = [];
+        const loadedMilestones: CompletedMilestone[] = [];
+        const loadedKicks: KickSession[] = [];
+        const loadedLoveNotes: LoveNote[] = [];
+        let loadedTheme: ThemeMode | null = null;
+        let loadedUnits: UnitSystem | null = null;
+        let loadedFormulaSettings: FormulaSettings | null = null;
+        let loadedActiveProfileId: string | null = null;
+
+        for (const row of rows) {
+          switch (row.entry_type) {
+            case 'profile':
+              if (row.payload) loadedProfiles.push(row.payload as ChildProfile);
+              break;
+            case 'baby_measurement':
+              if (row.payload) loadedBabyMeasurements.push(row.payload as BabyMeasurement);
+              break;
+            case 'fetal_measurement':
+              if (row.payload) loadedFetalMeasurements.push(row.payload as FetalMeasurement);
+              break;
+            case 'completed_milestone':
+              if (row.payload) loadedMilestones.push(row.payload as CompletedMilestone);
+              break;
+            case 'kick_session':
+              if (row.payload) loadedKicks.push(row.payload as KickSession);
+              break;
+            case 'love_note':
+              if (row.payload) loadedLoveNotes.push(row.payload as LoveNote);
+              break;
+            case 'setting': {
+              const setting = row.payload as SettingPayload | undefined;
+              if (!setting) break;
+              if (setting.key === 'theme' && (setting.value === 'light' || setting.value === 'dark')) {
+                loadedTheme = setting.value;
+              } else if (setting.key === 'units' && (setting.value === 'metric' || setting.value === 'imperial')) {
+                loadedUnits = setting.value;
+              } else if (setting.key === 'formula_settings' && setting.value && typeof setting.value === 'object') {
+                loadedFormulaSettings = setting.value as FormulaSettings;
+              } else if (setting.key === 'active_profile' && typeof setting.value === 'string') {
+                loadedActiveProfileId = setting.value;
+              }
+              break;
+            }
+          }
+        }
+
+        setProfiles(loadedProfiles);
+        setBabyMeasurements(loadedBabyMeasurements);
+        setFetalMeasurements(loadedFetalMeasurements);
+        setCompletedMilestones(loadedMilestones);
+        setKickSessions(loadedKicks.reverse());
+        setLoveNotes(loadedLoveNotes.reverse());
+
+        if (loadedTheme) setThemeState(loadedTheme);
+        if (loadedUnits) setUnitSystemState(loadedUnits);
+        if (loadedFormulaSettings) setFormulaSettings(loadedFormulaSettings);
+
+        setActiveProfileIdState((current) => {
+          if (current && loadedProfiles.some((p) => p.id === current)) return current;
+          if (loadedActiveProfileId && loadedProfiles.some((p) => p.id === loadedActiveProfileId)) {
+            return loadedActiveProfileId;
+          }
+          return loadedProfiles[0]?.id || '';
+        });
+      } finally {
+        setIsEntriesLoading(false);
+      }
+    })();
+
+    await Promise.all([refreshEntriesPromise, refreshCareTables()]);
+  }, [refreshCareTables]);
+
   const addGrowthRecord = async (
     input: NewGrowthRecordInput
   ): Promise<{ record: GrowthRecord | null; error?: string }> => {
@@ -1457,6 +1539,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         noteRecords,
         isCareTablesLoading,
         refreshCareTables,
+        refreshAllData,
         addGrowthRecord,
         addGrowthRecordsBulk,
         editGrowthRecord,

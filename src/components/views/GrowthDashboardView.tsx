@@ -62,6 +62,7 @@ import {
   Utensils,
   History,
   Pencil,
+  RefreshCw,
 } from 'lucide-react';
 import {
   CardDetailPopupModal,
@@ -115,6 +116,8 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
     growthRecords,
     routineRecords,
     isEntriesLoading,
+    isCareTablesLoading,
+    refreshAllData,
     addKickSession,
     deleteKickSession,
     toggleMilestone,
@@ -534,19 +537,6 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
 
               {/* Action Cluster */}
               <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0 flex-wrap">
-                {onOpenFormulaModal && (
-                  <button
-                    onClick={onOpenFormulaModal}
-                    title="View mathematical formulas and sources"
-                    className="px-3.5 py-2 text-xs font-semibold rounded-2xl border border-stone-200 dark:border-stone-700 bg-white/95 dark:bg-stone-800 hover:bg-stone-50 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 transition-all flex items-center gap-1.5 shadow-2xs hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-                  >
-                    <BookOpen className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
-                    <span className="font-bold text-amber-900 dark:text-amber-300 uppercase">
-                      {isBaby ? 'WHO 2006 Math' : formulaSettings.fetalEfwFormula}
-                    </span>
-                  </button>
-                )}
-
                 {!isBaby && (
                   <button
                     onClick={() => setIsGraduateModalOpen(true)}
@@ -569,23 +559,19 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                   </button>
                 )}
 
-                {onOpenEditProfileModal && (
-                  <button
-                    onClick={onOpenEditProfileModal}
-                    title={isBaby ? 'Edit birth date, birth weight, length, head circumference, and profile info' : 'Edit due date and pregnancy profile details'}
-                    className="px-3.5 py-2 text-xs font-semibold rounded-2xl border border-stone-200 dark:border-stone-700 bg-white/95 dark:bg-stone-800 hover:bg-stone-50 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 transition-all flex items-center gap-1.5 shadow-2xs hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-                  >
-                    <Pencil className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>{isBaby ? 'Edit Birth Data' : 'Edit Profile'}</span>
-                  </button>
-                )}
-
                 <button
-                  onClick={onOpenLogModal}
-                  className="px-4 py-2 text-xs font-bold rounded-2xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 transition-all flex items-center gap-1.5 shadow-sm hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                  type="button"
+                  onClick={() => void refreshAllData()}
+                  disabled={isEntriesLoading || isCareTablesLoading}
+                  title="Refresh all profile, growth, and routine data from Supabase"
+                  className="px-3.5 py-2 text-xs font-semibold rounded-2xl border border-stone-200 dark:border-stone-700 bg-white/95 dark:bg-stone-800 hover:bg-stone-50 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 transition-all flex items-center gap-1.5 shadow-2xs hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>{isBaby ? 'Log Pediatric Visit' : 'Log Ultrasound'}</span>
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${
+                      isEntriesLoading || isCareTablesLoading ? 'animate-spin' : ''
+                    }`}
+                  />
+                  <span>Refresh</span>
                 </button>
               </div>
             </div>
@@ -1420,15 +1406,6 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              {onOpenFormulaModal && (
-                <button
-                  onClick={onOpenFormulaModal}
-                  className="px-3 py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 hover:bg-stone-50 text-xs font-semibold text-stone-700 dark:text-stone-200 flex items-center gap-1 shadow-2xs"
-                >
-                  <BookOpen className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Formula Math</span>
-                </button>
-              )}
               <button
                 onClick={() => onNavigateTab('charts')}
                 className="px-3.5 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white text-white dark:text-stone-900 text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all hover:scale-105"

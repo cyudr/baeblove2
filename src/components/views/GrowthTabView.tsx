@@ -12,6 +12,7 @@ import { formatAgeFromBirthDate } from '../../utils/ageCalculator';
 import { InteractiveGrowthChart } from '../charts/InteractiveGrowthChart';
 import { FetalBiometricsChart } from '../charts/FetalBiometricsChart';
 import { EditAuthModal } from '../modals/EditAuthModal';
+import { AskGeminiModal } from '../modals/AskGeminiModal';
 import type { BabyMeasurement, GrowthRecord } from '../../types';
 import {
   Scale,
@@ -25,7 +26,6 @@ import {
   X,
   Sparkles,
   Filter,
-  BookOpen,
   RotateCcw,
   Lock,
 } from 'lucide-react';
@@ -107,6 +107,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
 
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [pendingAuthRecord, setPendingAuthRecord] = useState<GrowthRecord | null>(null);
+  const [isAskGeminiOpen, setIsAskGeminiOpen] = useState(false);
 
   useEffect(() => {
     setLoggerFilter('all');
@@ -313,11 +314,11 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
 
           <button
             type="button"
-            onClick={onOpenFormulaModal}
-            className="px-3 py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 text-xs font-semibold text-stone-700 dark:text-stone-200 hover:text-amber-900 dark:hover:text-amber-300 transition-colors flex items-center gap-1.5 cursor-pointer"
+            onClick={() => setIsAskGeminiOpen(true)}
+            className="px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 text-xs font-bold text-emerald-900 dark:text-emerald-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
           >
-            <BookOpen className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            <span>Formula Math</span>
+            <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>Ask Gemini</span>
           </button>
 
           {activeProfile ? (
@@ -846,6 +847,12 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
             applyEditGrowth(target);
           }
         }}
+      />
+
+      <AskGeminiModal
+        isOpen={isAskGeminiOpen}
+        onClose={() => setIsAskGeminiOpen(false)}
+        focus="growth"
       />
     </div>
   );

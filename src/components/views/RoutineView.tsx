@@ -13,6 +13,7 @@ import {
   parseDiaperLoadCount,
 } from '../../utils/careInterpreter';
 import { EditAuthModal } from '../modals/EditAuthModal';
+import { AskGeminiModal } from '../modals/AskGeminiModal';
 import { StoolSelect } from '../common/StoolSelect';
 import { DiaperLoadControl } from '../common/DiaperLoadControl';
 import type { RoutineRecord } from '../../types';
@@ -93,6 +94,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   // Two-step inline delete confirmation & bae_Key edit auth
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [pendingAuthRecord, setPendingAuthRecord] = useState<RoutineRecord | null>(null);
+  const [isAskGeminiOpen, setIsAskGeminiOpen] = useState(false);
 
   // Editable Milk Intake Formula state (x–y mL/kg/day, feeds/day, z% target in range)
   const [isFormulaModalOpen, setIsFormulaModalOpen] = useState(false);
@@ -459,6 +461,15 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isCareTablesLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsAskGeminiOpen(true)}
+            className="px-3.5 py-2 text-xs font-bold text-emerald-900 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>Ask Gemini</span>
           </button>
         </div>
       </div>
@@ -1457,6 +1468,12 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
             applyEditRoutine(target);
           }
         }}
+      />
+
+      <AskGeminiModal
+        isOpen={isAskGeminiOpen}
+        onClose={() => setIsAskGeminiOpen(false)}
+        focus="routine"
       />
     </div>
   );
