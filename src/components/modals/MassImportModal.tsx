@@ -467,14 +467,25 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         }),
       });
 
-      const payload = (await response.json().catch(() => ({}))) as {
+      const rawResponseText = await response.text();
+      let payload: {
         error?: string;
         summary?: string;
         rows?: Record<string, unknown>[];
-      };
+      } = {};
+      if (rawResponseText) {
+        try {
+          payload = JSON.parse(rawResponseText) as typeof payload;
+        } catch {
+          payload = {};
+        }
+      }
 
       if (!response.ok) {
-        setErrorMessage(payload.error || `Gemini analysis failed (HTTP ${response.status}).`);
+        setErrorMessage(
+          payload.error ||
+            `Gemini analysis failed (HTTP ${response.status}). Check /api/health to verify API connectivity.`
+        );
         return;
       }
 
