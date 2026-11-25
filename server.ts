@@ -3,7 +3,7 @@ import express, { type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import healthHandler from './api/health';
-import massImportHandler from './api/mass-import';
+import geminiHandler from './api/gemini';
 
 // Load local .env files if present without overriding runtime environment variables
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
@@ -19,8 +19,8 @@ async function createApp() {
   app.all('/api/health', (req: Request, res: Response) => {
     void healthHandler(req, res);
   });
-  app.all('/api/mass-import', (req: Request, res: Response) => {
-    void massImportHandler(req, res);
+  app.all('/api/gemini', (req: Request, res: Response) => {
+    void geminiHandler(req, res);
   });
 
   if (process.env.NODE_ENV !== 'production') {

@@ -1,7 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { classifyTemperature } from '../../utils/careInterpreter';
-import type { NewGrowthRecordInput, NewRoutineRecordInput } from '../../types';
+import {
+  classifyTemperature,
+  doesRecordMatchProfile,
+  getGrowthRecordDate,
+} from '../../utils/careInterpreter';
+import type {
+  GrowthRecord,
+  NewGrowthRecordInput,
+  NewRoutineRecordInput,
+  RoutineRecord,
+} from '../../types';
 import {
   Sparkles,
   Upload,
@@ -15,6 +24,7 @@ import {
   FileText,
   Image as ImageIcon,
   AlertCircle,
+  AlertTriangle,
   Table2,
   Camera,
   RotateCcw,
@@ -125,12 +135,394 @@ function createEmptyGrowthRow(defaultDate: string, defaultLogger: string, idx = 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const BINARY_FILE_MIMES = new Set(['application/pdf', ...IMAGE_MIMES]);
 
+// ============================================================================
+// Mass Import Gemini Prompts, Schemas, Normalizers & DB Duplicate Detection
+// (All Mass Import prompt logic lives here; /api/gemini stays reusable)
+// ============================================================================
+
+const MASS_IMPORT_ROUTINE_ITEM_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    date: { type: 'STRING', nullable: true, description: 'YYYY-MM-DD date' },
+    time: { type: 'STRING', nullable: true, description: '24-hour HH:MM time' },
+    ebmMl: { type: 'INTEGER', nullable: true, description: 'Expressed breast milk in mL' },
+    formulaMl: { type: 'INTEGER', nullable: true, description: 'Infant formula in mL' },
+    feedDurationMin: { type: 'INTEGER', nullable: true, description: 'Feed duration in minutes' },
+    diaper: { type: 'STRING', nullable: true, description: 'Wet, Dirty, Mixed, Dry, or custom' },
+    name: { type: 'STRING', nullable: true, description: 'Caregiver who logged the entry' },
+    remark: { type: 'STRING', nullable: true, description: 'Optional observation' },
+  },
+  required: [
+    'date',
+    'time',
+    'ebmMl',
+    'formulaMl',
+    'feedDurationMin',
+    'diaper',
+    'name',
+    'remark',
+  ],
+};
+
+const MASS_IMPORT_GROWTH_ITEM_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    date: { type: 'STRING', nullable: true, description: 'YYYY-MM-DD date' },
+    dailyWeight: { type: 'NUMBER', nullable: true, description: 'Weight in kg' },
+    dailyLength: { type: 'NUMBER', nullable: true, description: 'Length in cm' },
+    temperature: { type: 'NUMBER', nullable: true, description: 'Temperature in °C' },
+    name: { type: 'STRING', nullable: true, description: 'Caregiver who logged the entry' },
+    remark: { type: 'STRING', nullable: true, description: 'Optional notes' },
+  },
+  required: ['date', 'dailyWeight', 'dailyLength', 'temperature', 'name', 'remark'],
+};
+
+function buildMassImportGeminiPayload(params: {
+  targetTable: MassImportTable;
+  rawText: string;
+  defaultDate: string;
+  defaultLogger: string;
+  attachment: { mimeType: string; data: string; fileName?: string } | null;
+}) {
+  const { targetTable, rawText, defaultDate, defaultLogger, attachment } = params;
+  const currentYear = defaultDate.slice(0, 4);
+
+  const routineFieldRules = [
+    'ROUTINE rows (feeding & diaper events):',
+    '- date: YYYY-MM-DD format. Infer year from context or currentYear if only month/day is given; carry forward preceding date headings or use defaultDate.',
+    '- time: 24-hour HH:MM format (e.g. "07:30", "19:45"). Convert AM/PM cleanly. Null if omitted.',
+    '- ebmMl: integer milliliters of Expressed Breast Milk (EBM / breast milk / BM / pumped milk). Convert fl oz via 1 oz = 29.57 mL rounded to integer. Null if absent.',
+    '- formulaMl: integer milliliters of infant formula (FM / formula). Convert fl oz to mL if needed. Null if absent.',
+    '- feedDurationMin: integer minutes of feeding duration. Null if absent.',
+    '- diaper: normalize to "Wet", "Dirty", "Mixed", or "Dry" when clearly matching (pee/urine -> "Wet", poop/stool/BM -> "Dirty", both -> "Mixed"), or keep a concise custom label. Null if absent.',
+    '- name: person who logged the entry (e.g. "Mom", "Dad", "Caregiver"). Do NOT put the baby name here. Use defaultLogger if omitted, or null if both empty.',
+    '- remark: concise additional feeding/diaper notes. Null if none.',
+  ].join('\n');
+
+  const growthFieldRules = [
+    'GROWTH rows (daily weight, length, & body temperature):',
+    '- date: YYYY-MM-DD format. Infer year from context or currentYear if omitted; use defaultDate if absent.',
+    '- dailyWeight: weight in kilograms (kg), decimal (e.g. 4.52). Convert grams (4520g -> 4.52) or lb/oz (1 lb = 0.453592 kg, 1 oz = 0.0283495 kg) to kg rounded to 2–3 decimals. Null if absent.',
+    '- dailyLength: length/height in centimeters (cm), decimal (e.g. 58.5). Convert inches (1 in = 2.54 cm) or mm to cm rounded to 1 decimal. Null if absent.',
+    '- temperature: body temperature in Celsius (°C), decimal (e.g. 36.8). Convert Fahrenheit (e.g. 98.6°F or values > 45) via (F - 32) * 5 / 9 rounded to 1 decimal. Null if absent.',
+    '- name: person who logged the entry (e.g. "Mom", "Dad", "Nurse"). Do NOT put the baby name here. Use defaultLogger if omitted, or null if both empty.',
+    '- remark: concise growth/vitals notes (e.g. "before feed", "post-vaccine check"). Null if none.',
+  ].join('\n');
+
+  const systemInstruction =
+    targetTable === 'auto'
+      ? [
+          'You are a precise baby-care data classification and extraction engine.',
+          'A single photo, handwritten sheet, screenshot, PDF, or text file may contain BOTH Routine records (feeds, milk volumes, durations, diapers) AND Growth records (weight, length/height, temperature), or only one of the two.',
+          'Carefully classify and extract EVERY Routine event into `routineRows` AND EVERY Growth/Vitals measurement into `growthRows`.',
+          'If a single line/card contains both a feed/diaper AND a weight/length/temperature, place the feed/diaper fields into `routineRows` and the weight/length/temperature fields into `growthRows` using the same date/logger.',
+          `Context: defaultDate="${defaultDate}", currentYear="${currentYear}", defaultLogger="${defaultLogger}".`,
+          routineFieldRules,
+          growthFieldRules,
+          'Populate every recognized row object with all schema keys (using null for absent fields). Return empty arrays when a category has no records. Do not fabricate data.',
+        ].join('\n\n')
+      : targetTable === 'routine'
+        ? [
+            'You are a precise data extraction engine for a baby care Routine table.',
+            'Extract EVERY distinct feeding or diaper log entry from the provided text, CSV, table, chat log, screenshot, photo, or PDF into the rows array.',
+            `Context: defaultDate="${defaultDate}", currentYear="${currentYear}", defaultLogger="${defaultLogger}".`,
+            routineFieldRules,
+            'Populate every recognized row object with all fields (using null for absent fields). Do not fabricate rows. Skip header rows and empty lines.',
+          ].join('\n\n')
+        : [
+            'You are a precise data extraction engine for a baby daily Growth & Vitals table.',
+            'Extract EVERY distinct daily weight, length, or temperature measurement from the provided text, CSV, table, chat log, screenshot, photo, or PDF into the rows array.',
+            `Context: defaultDate="${defaultDate}", currentYear="${currentYear}", defaultLogger="${defaultLogger}".`,
+            growthFieldRules,
+            'Populate every recognized row object with all fields (using null for absent fields). Do not fabricate rows. Skip header rows and empty lines.',
+          ].join('\n\n');
+
+  const responseSchema =
+    targetTable === 'auto'
+      ? {
+          type: 'OBJECT',
+          properties: {
+            summary: {
+              type: 'STRING',
+              description:
+                'Short 1-sentence summary of recognized routine rows and growth rows, including any unit conversions performed.',
+            },
+            routineRows: {
+              type: 'ARRAY',
+              description: 'All extracted routine (feeding/diaper) rows.',
+              items: MASS_IMPORT_ROUTINE_ITEM_SCHEMA,
+            },
+            growthRows: {
+              type: 'ARRAY',
+              description: 'All extracted growth/vitals (weight/length/temperature) rows.',
+              items: MASS_IMPORT_GROWTH_ITEM_SCHEMA,
+            },
+          },
+          required: ['summary', 'routineRows', 'growthRows'],
+        }
+      : {
+          type: 'OBJECT',
+          properties: {
+            summary: {
+              type: 'STRING',
+              description:
+                'Short 1-sentence summary of recognized rows, detected columns, and any unit conversions performed.',
+            },
+            rows: {
+              type: 'ARRAY',
+              description: `All extracted ${targetTable} rows.`,
+              items:
+                targetTable === 'routine'
+                  ? MASS_IMPORT_ROUTINE_ITEM_SCHEMA
+                  : MASS_IMPORT_GROWTH_ITEM_SCHEMA,
+            },
+          },
+          required: ['summary', 'rows'],
+        };
+
+  const prompt = [
+    targetTable === 'auto'
+      ? 'Mode: AUTO-RECOGNIZE both "routine" (feeds/diapers) and "growth" (weight/length/temperature) records from this single input.'
+      : `Target table: "${targetTable}"`,
+    `Default date if missing: ${defaultDate}`,
+    defaultLogger ? `Default logger name if missing: ${defaultLogger}` : '',
+    rawText
+      ? `\nSource data to parse:\n${rawText}`
+      : '\nExtract all tabular or written records from the attached document/image.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    prompt,
+    systemInstruction,
+    responseMimeType: 'application/json',
+    responseSchema,
+    attachment,
+    thinkingLevel: 'LOW' as const,
+  };
+}
+
+function normalizeDateStr(val: unknown, fallback?: string): string {
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+  }
+  if (fallback && /^\d{4}-\d{2}-\d{2}$/.test(fallback)) return fallback;
+  return '';
+}
+
+function normalizeTimeStr(val: unknown): string {
+  if (typeof val !== 'string') return '';
+  const trimmed = val.trim();
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return '';
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return '';
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function normalizeIntStr(val: unknown): string {
+  if (val === null || val === undefined || val === '') return '';
+  const n = Number(val);
+  if (!Number.isFinite(n) || n < 0) return '';
+  return String(Math.round(n));
+}
+
+function normalizeFloatStr(val: unknown, decimals = 2): string {
+  if (val === null || val === undefined || val === '') return '';
+  const n = Number(val);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  const factor = Math.pow(10, decimals);
+  return String(Math.round(n * factor) / factor);
+}
+
+function normalizeTextStr(val: unknown, fallback = ''): string {
+  if (typeof val === 'string' && val.trim().length > 0) return val.trim();
+  return fallback.trim();
+}
+
+function parseTimeToMinutes(timeStr: string | null | undefined): number | null {
+  if (!timeStr) return null;
+  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+interface DuplicateMatch {
+  level: 'exact' | 'possible';
+  reason: string;
+}
+
+function formatRoutineSummary(rec: RoutineRecord): string {
+  const parts: string[] = [];
+  if (rec.date) parts.push(rec.date);
+  if (rec.time) parts.push(rec.time.slice(0, 5));
+  if (rec['EBM (mL)'] !== null) parts.push(`EBM ${rec['EBM (mL)']} mL`);
+  if (rec['Formula (mL)'] !== null) parts.push(`Formula ${rec['Formula (mL)']} mL`);
+  if (rec['feed duration (min)'] !== null) parts.push(`${rec['feed duration (min)']} min`);
+  if (rec.Diaper) parts.push(rec.Diaper);
+  return parts.join(' · ') || `Entry #${rec.id}`;
+}
+
+function findRoutineDuplicateMatch(
+  row: RoutineDraftRow,
+  existingRecords: RoutineRecord[]
+): DuplicateMatch | null {
+  const rowDate = normalizeDateStr(row.date);
+  if (!rowDate) return null;
+
+  const hasAnyMetric =
+    row.ebmMl.trim() !== '' ||
+    row.formulaMl.trim() !== '' ||
+    row.feedDurationMin.trim() !== '' ||
+    row.diaper.trim() !== '' ||
+    row.remark.trim() !== '';
+  if (!hasAnyMetric) return null;
+
+  const rowMins = parseTimeToMinutes(row.time);
+  const rowEbm = row.ebmMl.trim() !== '' ? parseInt(row.ebmMl, 10) : null;
+  const rowFormula = row.formulaMl.trim() !== '' ? parseInt(row.formulaMl, 10) : null;
+  const rowDur = row.feedDurationMin.trim() !== '' ? parseInt(row.feedDurationMin, 10) : null;
+  const rowDiaper = row.diaper.trim().toLowerCase();
+
+  let possibleMatch: DuplicateMatch | null = null;
+
+  for (const rec of existingRecords) {
+    const recDate = normalizeDateStr(rec.date || rec.created_at);
+    if (recDate !== rowDate) continue;
+
+    const recMins = parseTimeToMinutes(rec.time);
+    const recEbm = rec['EBM (mL)'];
+    const recFormula = rec['Formula (mL)'];
+    const recDur = rec['feed duration (min)'];
+    const recDiaper = (rec.Diaper || '').trim().toLowerCase();
+
+    const sameEbm = rowEbm === recEbm;
+    const sameFormula = rowFormula === recFormula;
+    const sameDur = rowDur === recDur;
+    const sameDiaper = rowDiaper === recDiaper;
+
+    if (rowMins !== null && recMins !== null) {
+      const diffMins = Math.abs(rowMins - recMins);
+      if (diffMins <= 5 && sameEbm && sameFormula && (sameDur || rowDur === null || recDur === null) && (sameDiaper || !rowDiaper || !recDiaper)) {
+        return {
+          level: 'exact',
+          reason: `Already in DB: ${formatRoutineSummary(rec)}`,
+        };
+      }
+      if (diffMins <= 15 && !possibleMatch) {
+        possibleMatch = {
+          level: 'possible',
+          reason: `Similar DB entry (${diffMins === 0 ? 'same time' : `within ${diffMins}m`}): ${formatRoutineSummary(rec)}`,
+        };
+      }
+    } else if (
+      (rowEbm !== null || rowFormula !== null || rowDiaper !== '') &&
+      sameEbm &&
+      sameFormula &&
+      sameDiaper &&
+      !possibleMatch
+    ) {
+      possibleMatch = {
+        level: 'possible',
+        reason: `Similar DB entry on ${rowDate}: ${formatRoutineSummary(rec)}`,
+      };
+    }
+  }
+
+  return possibleMatch;
+}
+
+function formatGrowthSummary(rec: GrowthRecord, recDate: string): string {
+  const parts: string[] = [recDate];
+  if (rec.daily_weight !== null) parts.push(`${rec.daily_weight} kg`);
+  if (rec.daily_length !== null) parts.push(`${rec.daily_length} cm`);
+  if (rec.temperature !== null) parts.push(`${rec.temperature}°C`);
+  return parts.join(' · ');
+}
+
+function findGrowthDuplicateMatch(
+  row: GrowthDraftRow,
+  existingRecords: GrowthRecord[]
+): DuplicateMatch | null {
+  const rowDate = normalizeDateStr(row.date);
+  if (!rowDate) return null;
+
+  const hasAnyMetric =
+    row.dailyWeight.trim() !== '' ||
+    row.dailyLength.trim() !== '' ||
+    row.temperature.trim() !== '' ||
+    row.remark.trim() !== '';
+  if (!hasAnyMetric) return null;
+
+  const rowWeight = row.dailyWeight.trim() !== '' ? parseFloat(row.dailyWeight) : null;
+  const rowLength = row.dailyLength.trim() !== '' ? parseFloat(row.dailyLength) : null;
+  const rowTemp = row.temperature.trim() !== '' ? parseFloat(row.temperature) : null;
+
+  let possibleMatch: DuplicateMatch | null = null;
+
+  for (const rec of existingRecords) {
+    const recDate = normalizeDateStr(getGrowthRecordDate(rec));
+    if (recDate !== rowDate) continue;
+
+    const compared: boolean[] = [];
+    if (rowWeight !== null && Number.isFinite(rowWeight)) {
+      compared.push(rec.daily_weight !== null && Math.abs(rec.daily_weight - rowWeight) <= 0.01);
+    }
+    if (rowLength !== null && Number.isFinite(rowLength)) {
+      compared.push(rec.daily_length !== null && Math.abs(rec.daily_length - rowLength) <= 0.1);
+    }
+    if (rowTemp !== null && Number.isFinite(rowTemp)) {
+      compared.push(rec.temperature !== null && Math.abs(rec.temperature - rowTemp) <= 0.1);
+    }
+
+    if (compared.length > 0 && compared.every(Boolean)) {
+      return {
+        level: 'exact',
+        reason: `Already in DB: ${formatGrowthSummary(rec, recDate)}`,
+      };
+    }
+
+    if (!possibleMatch) {
+      possibleMatch = {
+        level: 'possible',
+        reason: `DB already has growth entry on ${recDate}: ${formatGrowthSummary(rec, recDate)}`,
+      };
+    }
+  }
+
+  return possibleMatch;
+}
+
 export const MassImportModal: React.FC<MassImportModalProps> = ({
   isOpen,
   initialTable = 'auto',
   onClose,
 }) => {
-  const { activeProfile, addRoutineRecordsBulk, addGrowthRecordsBulk } = useApp();
+  const {
+    activeProfile,
+    routineRecords,
+    growthRecords,
+    addRoutineRecordsBulk,
+    addGrowthRecordsBulk,
+  } = useApp();
+
+  const profileRoutineRecords = useMemo(() => {
+    if (!activeProfile) return routineRecords;
+    return routineRecords.filter((r) => doesRecordMatchProfile(r, activeProfile));
+  }, [routineRecords, activeProfile]);
+
+  const profileGrowthRecords = useMemo(() => {
+    if (!activeProfile) return growthRecords;
+    return growthRecords.filter((g) => doesRecordMatchProfile(g, activeProfile));
+  }, [growthRecords, activeProfile]);
 
   const [targetTable, setTargetTable] = useState<MassImportTable>(initialTable);
   const [entryMode, setEntryMode] = useState<ImportSourceMode>('tabular');
@@ -318,7 +710,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       }
       const mimeType = IMAGE_MIMES.has(file.type) ? file.type : 'image/jpeg';
 
-      // Resize/compress large photos client-side so serverless /api/mass-import payloads stay fast & reliable
+      // Resize/compress large photos client-side so serverless /api/gemini payloads stay fast & reliable
       if (mimeType !== 'image/gif') {
         const img = new Image();
         img.onload = () => {
@@ -510,31 +902,37 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
 
     setIsAnalyzing(true);
     try {
-      const response = await fetch('/api/mass-import', {
+      const geminiRequestBody = buildMassImportGeminiPayload({
+        targetTable,
+        rawText: rawTextToSend,
+        defaultDate,
+        defaultLogger: defaultLogger.trim(),
+        attachment: attachmentToSend,
+      });
+
+      const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targetTable,
-          rawText: rawTextToSend,
-          defaultDate,
-          defaultLogger: defaultLogger.trim(),
-          attachment: attachmentToSend,
-        }),
+        body: JSON.stringify(geminiRequestBody),
       });
 
       const rawResponseText = await response.text();
-      let payload: {
+      let apiPayload: {
         error?: string;
-        summary?: string;
-        rows?: Record<string, unknown>[];
-        routineRows?: Record<string, unknown>[];
-        growthRows?: Record<string, unknown>[];
+        text?: string;
+        parsed?: {
+          summary?: unknown;
+          rows?: unknown;
+          routineRows?: unknown;
+          growthRows?: unknown;
+        };
       } = {};
+
       if (rawResponseText) {
         try {
-          payload = JSON.parse(rawResponseText) as typeof payload;
+          apiPayload = JSON.parse(rawResponseText) as typeof apiPayload;
         } catch {
-          payload = {};
+          apiPayload = {};
         }
       }
 
@@ -543,7 +941,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
           ? rawResponseText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180)
           : '';
         setErrorMessage(
-          payload.error ||
+          apiPayload.error ||
             (plainDetail
               ? `Gemini analysis failed (HTTP ${response.status}): ${plainDetail}`
               : `Gemini analysis failed (HTTP ${response.status}). Check /api/health to verify API connectivity.`)
@@ -551,19 +949,94 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         return;
       }
 
-      const incomingRoutineRows = Array.isArray(payload.routineRows)
-        ? payload.routineRows
-        : targetTable === 'routine' && Array.isArray(payload.rows)
-          ? payload.rows
+      let parsedData = apiPayload.parsed;
+      if (!parsedData && typeof apiPayload.text === 'string' && apiPayload.text.trim()) {
+        try {
+          parsedData = JSON.parse(apiPayload.text) as typeof parsedData;
+        } catch {
+          parsedData = undefined;
+        }
+      }
+
+      if (!parsedData || typeof parsedData !== 'object') {
+        setErrorMessage('Gemini returned an unexpected response format. Please retry.');
+        return;
+      }
+
+      const rawRoutineItems = Array.isArray(parsedData.routineRows)
+        ? parsedData.routineRows
+        : targetTable === 'routine' && Array.isArray(parsedData.rows)
+          ? parsedData.rows
           : [];
 
-      const incomingGrowthRows = Array.isArray(payload.growthRows)
-        ? payload.growthRows
-        : targetTable === 'growth' && Array.isArray(payload.rows)
-          ? payload.rows
+      const rawGrowthItems = Array.isArray(parsedData.growthRows)
+        ? parsedData.growthRows
+        : targetTable === 'growth' && Array.isArray(parsedData.rows)
+          ? parsedData.rows
           : [];
 
-      if (incomingRoutineRows.length === 0 && incomingGrowthRows.length === 0) {
+      const loggerFallback = defaultLogger.trim();
+
+      const recognizedRoutine: RoutineDraftRow[] = rawRoutineItems
+        .map((item, idx) => {
+          const obj = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+          const draft: RoutineDraftRow = {
+            _key: makeRowKey('rt-ai', idx),
+            selected: true,
+            name: normalizeTextStr(obj.name, loggerFallback),
+            date: normalizeDateStr(obj.date, defaultDate),
+            time: normalizeTimeStr(obj.time),
+            feedDurationMin: normalizeIntStr(
+              obj.feedDurationMin ?? obj['feed duration (min)'] ?? obj.feed_duration_min
+            ),
+            ebmMl: normalizeIntStr(obj.ebmMl ?? obj['EBM (mL)'] ?? obj.ebm_ml),
+            formulaMl: normalizeIntStr(obj.formulaMl ?? obj['Formula (mL)'] ?? obj.formula_ml),
+            diaper: normalizeTextStr(obj.diaper ?? obj.Diaper),
+            remark: normalizeTextStr(obj.remark),
+          };
+          const dup = findRoutineDuplicateMatch(draft, profileRoutineRecords);
+          if (dup?.level === 'exact') {
+            draft.selected = false;
+          }
+          return draft;
+        })
+        .filter(
+          (r) =>
+            r.ebmMl !== '' ||
+            r.formulaMl !== '' ||
+            r.feedDurationMin !== '' ||
+            r.diaper !== '' ||
+            r.remark !== ''
+        );
+
+      const recognizedGrowth: GrowthDraftRow[] = rawGrowthItems
+        .map((item, idx) => {
+          const obj = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+          const draft: GrowthDraftRow = {
+            _key: makeRowKey('gr-ai', idx),
+            selected: true,
+            name: normalizeTextStr(obj.name, loggerFallback),
+            date: normalizeDateStr(obj.date, defaultDate),
+            dailyWeight: normalizeFloatStr(obj.dailyWeight ?? obj.daily_weight, 3),
+            dailyLength: normalizeFloatStr(obj.dailyLength ?? obj.daily_length, 1),
+            temperature: normalizeFloatStr(obj.temperature, 1),
+            remark: normalizeTextStr(obj.remark),
+          };
+          const dup = findGrowthDuplicateMatch(draft, profileGrowthRecords);
+          if (dup?.level === 'exact') {
+            draft.selected = false;
+          }
+          return draft;
+        })
+        .filter(
+          (r) =>
+            r.dailyWeight !== '' ||
+            r.dailyLength !== '' ||
+            r.temperature !== '' ||
+            r.remark !== ''
+        );
+
+      if (recognizedRoutine.length === 0 && recognizedGrowth.length === 0) {
         setErrorMessage(
           targetTable === 'auto'
             ? `Gemini could not recognize any Routine or Growth rows from this ${source}. Try a clearer capture or file.`
@@ -572,27 +1045,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         return;
       }
 
-      if (incomingRoutineRows.length > 0) {
-        const recognizedRoutine: RoutineDraftRow[] = incomingRoutineRows.map((r, idx) => ({
-          _key: makeRowKey('rt-ai', idx),
-          selected: true,
-          name: typeof r.name === 'string' ? r.name : defaultLogger.trim(),
-          date: typeof r.date === 'string' ? r.date : defaultDate,
-          time: typeof r.time === 'string' ? r.time : '',
-          feedDurationMin:
-            r['feed duration (min)'] !== null && r['feed duration (min)'] !== undefined
-              ? String(r['feed duration (min)'])
-              : '',
-          ebmMl:
-            r['EBM (mL)'] !== null && r['EBM (mL)'] !== undefined ? String(r['EBM (mL)']) : '',
-          formulaMl:
-            r['Formula (mL)'] !== null && r['Formula (mL)'] !== undefined
-              ? String(r['Formula (mL)'])
-              : '',
-          diaper: typeof r.Diaper === 'string' ? r.Diaper : '',
-          remark: typeof r.remark === 'string' ? r.remark : '',
-        }));
-
+      if (recognizedRoutine.length > 0) {
         setRoutineDrafts((prev) => {
           const nonEmptyExisting = prev.filter(
             (row) =>
@@ -606,21 +1059,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         });
       }
 
-      if (incomingGrowthRows.length > 0) {
-        const recognizedGrowth: GrowthDraftRow[] = incomingGrowthRows.map((r, idx) => ({
-          _key: makeRowKey('gr-ai', idx),
-          selected: true,
-          name: typeof r.name === 'string' ? r.name : defaultLogger.trim(),
-          date: typeof r.date === 'string' ? r.date : defaultDate,
-          dailyWeight:
-            r.daily_weight !== null && r.daily_weight !== undefined ? String(r.daily_weight) : '',
-          dailyLength:
-            r.daily_length !== null && r.daily_length !== undefined ? String(r.daily_length) : '',
-          temperature:
-            r.temperature !== null && r.temperature !== undefined ? String(r.temperature) : '',
-          remark: typeof r.remark === 'string' ? r.remark : '',
-        }));
-
+      if (recognizedGrowth.length > 0) {
         setGrowthDrafts((prev) => {
           const nonEmptyExisting = prev.filter(
             (row) =>
@@ -633,22 +1072,78 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         });
       }
 
-      const fallbackSummary =
-        targetTable === 'auto'
-          ? `Auto-recognized ${incomingRoutineRows.length} routine row${incomingRoutineRows.length === 1 ? '' : 's'} and ${incomingGrowthRows.length} growth row${incomingGrowthRows.length === 1 ? '' : 's'} into Tabular Entry.`
-          : `Gemini recognized ${incomingRoutineRows.length + incomingGrowthRows.length} ${targetTable} row${incomingRoutineRows.length + incomingGrowthRows.length === 1 ? '' : 's'} and loaded them into Tabular Data Entry.`;
+      const flaggedCount =
+        recognizedRoutine.filter((r) => findRoutineDuplicateMatch(r, profileRoutineRecords) !== null)
+          .length +
+        recognizedGrowth.filter((r) => findGrowthDuplicateMatch(r, profileGrowthRecords) !== null)
+          .length;
 
-      setAiSummary(payload.summary || fallbackSummary);
+      const baseSummary =
+        typeof parsedData.summary === 'string' && parsedData.summary.trim()
+          ? parsedData.summary.trim()
+          : targetTable === 'auto'
+            ? `Auto-recognized ${recognizedRoutine.length} routine row${recognizedRoutine.length === 1 ? '' : 's'} and ${recognizedGrowth.length} growth row${recognizedGrowth.length === 1 ? '' : 's'}.`
+            : `Gemini recognized ${recognizedRoutine.length + recognizedGrowth.length} ${targetTable} row${recognizedRoutine.length + recognizedGrowth.length === 1 ? '' : 's'}.`;
+
+      setAiSummary(
+        flaggedCount > 0
+          ? `${baseSummary} (${flaggedCount} potential duplicate${flaggedCount === 1 ? '' : 's'} flagged against database.)`
+          : baseSummary
+      );
       // Automatically switch to Tabular Data Entry so user reviews/edits before writing to database
       setEntryMode('tabular');
     } catch (err) {
       setErrorMessage(
         err instanceof Error
-          ? `Network error contacting /api/mass-import: ${err.message}`
-          : 'Network error contacting /api/mass-import.'
+          ? `Network error contacting /api/gemini: ${err.message}`
+          : 'Network error contacting /api/gemini.'
       );
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  // Real-time duplicate detection against existing database records
+  const routineDupMap = useMemo(() => {
+    const map = new Map<string, DuplicateMatch>();
+    for (const row of routineDrafts) {
+      const match = findRoutineDuplicateMatch(row, profileRoutineRecords);
+      if (match) map.set(row._key, match);
+    }
+    return map;
+  }, [routineDrafts, profileRoutineRecords]);
+
+  const growthDupMap = useMemo(() => {
+    const map = new Map<string, DuplicateMatch>();
+    for (const row of growthDrafts) {
+      const match = findGrowthDuplicateMatch(row, profileGrowthRecords);
+      if (match) map.set(row._key, match);
+    }
+    return map;
+  }, [growthDrafts, profileGrowthRecords]);
+
+  const activeFlaggedCount =
+    (targetTable === 'routine' || targetTable === 'auto' ? routineDupMap.size : 0) +
+    (targetTable === 'growth' || targetTable === 'auto' ? growthDupMap.size : 0);
+
+  const activeFlaggedSelectedCount =
+    (targetTable === 'routine' || targetTable === 'auto'
+      ? routineDrafts.filter((r) => r.selected && routineDupMap.has(r._key)).length
+      : 0) +
+    (targetTable === 'growth' || targetTable === 'auto'
+      ? growthDrafts.filter((r) => r.selected && growthDupMap.has(r._key)).length
+      : 0);
+
+  const uncheckAllFlagged = () => {
+    if (targetTable === 'routine' || targetTable === 'auto') {
+      setRoutineDrafts((prev) =>
+        prev.map((r) => (routineDupMap.has(r._key) ? { ...r, selected: false } : r))
+      );
+    }
+    if (targetTable === 'growth' || targetTable === 'auto') {
+      setGrowthDrafts((prev) =>
+        prev.map((r) => (growthDupMap.has(r._key) ? { ...r, selected: false } : r))
+      );
     }
   };
 
@@ -1439,6 +1934,29 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 </div>
               </div>
 
+              {activeFlaggedCount > 0 && (
+                <div className="px-4 py-2.5 bg-amber-50/90 dark:bg-amber-950/40 border-b border-amber-200/80 dark:border-amber-900/60 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>
+                      <strong>
+                        {activeFlaggedCount} {activeFlaggedCount === 1 ? 'entry' : 'entries'}
+                      </strong>{' '}
+                      may already exist in your database. Exact matches are unchecked by default — review or check to import anyway.
+                    </span>
+                  </div>
+                  {activeFlaggedSelectedCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={uncheckAllFlagged}
+                      className="px-2.5 py-1 text-[11px] font-bold text-amber-900 dark:text-amber-200 bg-white dark:bg-stone-900 hover:bg-amber-100 dark:hover:bg-amber-900/50 border border-amber-300 dark:border-amber-800 rounded-lg cursor-pointer"
+                    >
+                      Uncheck All Flagged ({activeFlaggedSelectedCount})
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div className="p-3 sm:p-4 space-y-4 max-h-[50vh] overflow-y-auto">
                 {(targetTable === 'routine' || targetTable === 'auto') && (
                   <div className="space-y-3">
@@ -1458,33 +1976,55 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                       </div>
                     )}
                     {/* Exact RoutineView logging grid: grid-cols-2 lg:grid-cols-4 (Logged By, Date, Time, Feed Duration, EBM, Formula, Diaper col-span-2) + Remark */}
-                    {routineDrafts.map((row, idx) => (
+                    {routineDrafts.map((row, idx) => {
+                      const dupMatch = routineDupMap.get(row._key);
+                      return (
                     <div
                       key={row._key}
                       className={`rounded-2xl border p-3 sm:p-4 space-y-3 transition-opacity ${
-                        row.selected
-                          ? 'bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-800 shadow-2xs'
-                          : 'bg-stone-100/70 dark:bg-stone-900/40 border-stone-200/70 dark:border-stone-800/60 opacity-60'
+                        dupMatch
+                          ? row.selected
+                            ? 'bg-amber-50/35 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800 shadow-2xs'
+                            : 'bg-amber-50/20 dark:bg-amber-950/15 border-amber-200/80 dark:border-amber-900/60 opacity-75'
+                          : row.selected
+                            ? 'bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-800 shadow-2xs'
+                            : 'bg-stone-100/70 dark:bg-stone-900/40 border-stone-200/70 dark:border-stone-800/60 opacity-60'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2 pb-2 border-b border-stone-100 dark:border-stone-800">
-                        <label className="inline-flex items-center gap-2 text-xs font-bold text-stone-800 dark:text-stone-200 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={row.selected}
-                            onChange={(e) =>
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) =>
-                                  item._key === row._key
-                                    ? { ...item, selected: e.target.checked }
-                                    : item
+                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                          <label className="inline-flex items-center gap-2 text-xs font-bold text-stone-800 dark:text-stone-200 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={row.selected}
+                              onChange={(e) =>
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) =>
+                                    item._key === row._key
+                                      ? { ...item, selected: e.target.checked }
+                                      : item
+                                  )
                                 )
-                              )
-                            }
-                            className="accent-emerald-600 cursor-pointer"
-                          />
-                          <span>Routine Row #{idx + 1}</span>
-                        </label>
+                              }
+                              className="accent-emerald-600 cursor-pointer"
+                            />
+                            <span>Routine Row #{idx + 1}</span>
+                          </label>
+                          {dupMatch && (
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-md border ${
+                                dupMatch.level === 'exact'
+                                  ? 'bg-rose-100/90 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                                  : 'bg-amber-100/90 dark:bg-amber-950/70 text-amber-900 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                              }`}
+                            >
+                              <AlertTriangle className="w-3 h-3 shrink-0" />
+                              <span>
+                                {dupMatch.level === 'exact' ? 'Already in DB' : 'Possible Duplicate'}
+                              </span>
+                            </span>
+                          )}
+                        </div>
 
                         <button
                           type="button"
@@ -1502,6 +2042,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
+
+                      {dupMatch && (
+                        <div className="px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-[11px] text-amber-900 dark:text-amber-200">
+                          {dupMatch.reason}
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
                         <div className="min-w-0">
@@ -1704,7 +2250,8 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                         />
                       </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
@@ -1732,34 +2279,55 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                       row.temperature.trim() !== '' && Number.isFinite(parsedTemp)
                         ? classifyTemperature(parsedTemp)
                         : null;
+                    const dupMatch = growthDupMap.get(row._key);
 
                     return (
                       <div
                         key={row._key}
                         className={`rounded-2xl border p-3 sm:p-4 space-y-3 transition-opacity ${
-                          row.selected
-                            ? 'bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-800 shadow-2xs'
-                            : 'bg-stone-100/70 dark:bg-stone-900/40 border-stone-200/70 dark:border-stone-800/60 opacity-60'
+                          dupMatch
+                            ? row.selected
+                              ? 'bg-amber-50/35 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800 shadow-2xs'
+                              : 'bg-amber-50/20 dark:bg-amber-950/15 border-amber-200/80 dark:border-amber-900/60 opacity-75'
+                            : row.selected
+                              ? 'bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-800 shadow-2xs'
+                              : 'bg-stone-100/70 dark:bg-stone-900/40 border-stone-200/70 dark:border-stone-800/60 opacity-60'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2 pb-2 border-b border-stone-100 dark:border-stone-800">
-                          <label className="inline-flex items-center gap-2 text-xs font-bold text-stone-800 dark:text-stone-200 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={row.selected}
-                              onChange={(e) =>
-                                setGrowthDrafts((prev) =>
-                                  prev.map((item) =>
-                                    item._key === row._key
-                                      ? { ...item, selected: e.target.checked }
-                                      : item
+                          <div className="flex items-center gap-2 flex-wrap min-w-0">
+                            <label className="inline-flex items-center gap-2 text-xs font-bold text-stone-800 dark:text-stone-200 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={row.selected}
+                                onChange={(e) =>
+                                  setGrowthDrafts((prev) =>
+                                    prev.map((item) =>
+                                      item._key === row._key
+                                        ? { ...item, selected: e.target.checked }
+                                        : item
+                                    )
                                   )
-                                )
-                              }
-                              className="accent-amber-600 cursor-pointer"
-                            />
-                            <span>Growth Row #{idx + 1}</span>
-                          </label>
+                                }
+                                className="accent-amber-600 cursor-pointer"
+                              />
+                              <span>Growth Row #{idx + 1}</span>
+                            </label>
+                            {dupMatch && (
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-md border ${
+                                  dupMatch.level === 'exact'
+                                    ? 'bg-rose-100/90 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                                    : 'bg-amber-100/90 dark:bg-amber-950/70 text-amber-900 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                                }`}
+                              >
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>
+                                  {dupMatch.level === 'exact' ? 'Already in DB' : 'Possible Duplicate'}
+                                </span>
+                              </span>
+                            )}
+                          </div>
 
                           <button
                             type="button"
@@ -1777,6 +2345,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
+
+                        {dupMatch && (
+                          <div className="px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-[11px] text-amber-900 dark:text-amber-200">
+                            {dupMatch.reason}
+                          </div>
+                        )}
 
                         <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
                           <div className="min-w-0">
