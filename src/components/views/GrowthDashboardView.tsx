@@ -75,6 +75,7 @@ import {
 } from '../../data/recipeData';
 import { InteractiveGrowthChart } from '../charts/InteractiveGrowthChart';
 import { FetalBiometricsChart } from '../charts/FetalBiometricsChart';
+import { mergeProfileGrowthMeasurements } from '../../utils/careInterpreter';
 import confetti from 'canvas-confetti';
 
 interface GrowthDashboardViewProps {
@@ -260,8 +261,15 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
   const displayFetalStage = getFetalWeekStage(previewFetalWeekNum || currentFetalWeek);
   const displayBabyStage = getBabyWeekStage(previewWeekNum || currentBabyWeeks);
 
+  // Merge pediatric checkups (entries) with daily weight/length records (growth table) for this profile
+  const mergedBabyMeasurements = mergeProfileGrowthMeasurements(
+    activeProfile,
+    activeBabyMeasurements,
+    growthRecords
+  );
+
   // Latest measurements
-  const latestBabyM = activeBabyMeasurements[activeBabyMeasurements.length - 1];
+  const latestBabyM = mergedBabyMeasurements[mergedBabyMeasurements.length - 1];
   const latestFetalM = activeFetalMeasurements[activeFetalMeasurements.length - 1];
 
   // Latest baby percentiles
@@ -1428,7 +1436,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
           {isBaby ? (
             <InteractiveGrowthChart
               profile={activeProfile}
-              measurements={activeBabyMeasurements}
+              measurements={mergedBabyMeasurements}
               unitSystem={unitSystem}
               onOpenFormulaModal={onOpenFormulaModal}
             />
@@ -1714,7 +1722,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
               </thead>
               <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
                 {isBaby ? (
-                  activeBabyMeasurements.slice(-3).reverse().map((m) => (
+                  mergedBabyMeasurements.slice(-3).reverse().map((m) => (
                     <tr
                       key={m.id}
                       onClick={() => openPopup('baby-weight')}

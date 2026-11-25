@@ -1,7 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { calculatePercentile, UnitConverter } from '../../data/growthStandards';
-import { classifyTemperature, getRoutineRecordDate } from '../../utils/careInterpreter';
+import {
+  classifyTemperature,
+  doesRecordMatchProfile,
+  getRoutineRecordDate,
+} from '../../utils/careInterpreter';
 import {
   ClipboardList,
   Plus,
@@ -99,6 +103,23 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
   const attachedFetalScans =
     hasAttachedFetal && activeProfile ? getAttachedFetalMeasurements(activeProfile.id) : [];
 
+  // When active profile from "entries" changes, align filter to that profile if matching rows exist
+  useEffect(() => {
+    if (!activeProfile) {
+      setNameFilter('all');
+      return;
+    }
+    const hasMatches =
+      routineRecords.some((r) => doesRecordMatchProfile(r.name, activeProfile)) ||
+      growthRecords.some((g) => doesRecordMatchProfile(g.name, activeProfile));
+    setNameFilter(hasMatches ? activeProfile.name : 'all');
+  }, [
+    activeProfile?.id,
+    activeProfile?.name,
+    routineRecords.length > 0,
+    growthRecords.length > 0,
+  ]);
+
   const availableNames = useMemo(() => {
     const set = new Set<string>();
     if (activeProfile?.name) set.add(activeProfile.name);
@@ -113,15 +134,21 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
 
   const filteredRoutine = useMemo(() => {
     if (nameFilter === 'all') return routineRecords;
+    if (activeProfile && nameFilter === activeProfile.name) {
+      return routineRecords.filter((r) => doesRecordMatchProfile(r.name, activeProfile));
+    }
     const target = nameFilter.trim().toLowerCase();
     return routineRecords.filter((r) => (r.name ?? '').trim().toLowerCase() === target);
-  }, [routineRecords, nameFilter]);
+  }, [routineRecords, nameFilter, activeProfile]);
 
   const filteredGrowth = useMemo(() => {
     if (nameFilter === 'all') return growthRecords;
+    if (activeProfile && nameFilter === activeProfile.name) {
+      return growthRecords.filter((g) => doesRecordMatchProfile(g.name, activeProfile));
+    }
     const target = nameFilter.trim().toLowerCase();
     return growthRecords.filter((g) => (g.name ?? '').trim().toLowerCase() === target);
-  }, [growthRecords, nameFilter]);
+  }, [growthRecords, nameFilter, activeProfile]);
 
   const clinicalCount = activeProfile
     ? isBaby

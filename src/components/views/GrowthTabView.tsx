@@ -1,7 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { UnitConverter } from '../../data/growthStandards';
-import { classifyTemperature, interpretGrowthTable } from '../../utils/careInterpreter';
+import {
+  classifyTemperature,
+  doesRecordMatchProfile,
+  interpretGrowthTable,
+  mergeProfileGrowthMeasurements,
+} from '../../utils/careInterpreter';
 import { InteractiveGrowthChart } from '../charts/InteractiveGrowthChart';
 import { FetalBiometricsChart } from '../charts/FetalBiometricsChart';
 import type { BabyMeasurement, GrowthRecord } from '../../types';
@@ -111,6 +116,16 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     onClearInitialEdit?.();
   }, [initialEditRecord, activeProfile?.name, onClearInitialEdit]);
 
+  // When active profile from "entries" changes, align filter to that profile if matching growth rows exist
+  useEffect(() => {
+    if (!activeProfile) {
+      setNameFilter('all');
+      return;
+    }
+    const hasMatches = growthRecords.some((g) => doesRecordMatchProfile(g.name, activeProfile));
+    setNameFilter(hasMatches ? activeProfile.name : 'all');
+  }, [activeProfile?.id, activeProfile?.name, growthRecords.length > 0]);
+
   const availableNames = useMemo(() => {
     const set = new Set<string>();
     if (activeProfile?.name) set.add(activeProfile.name);
@@ -122,9 +137,12 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
 
   const filteredGrowth = useMemo(() => {
     if (nameFilter === 'all') return growthRecords;
+    if (activeProfile && nameFilter === activeProfile.name) {
+      return growthRecords.filter((g) => doesRecordMatchProfile(g.name, activeProfile));
+    }
     const target = nameFilter.trim().toLowerCase();
     return growthRecords.filter((g) => (g.name ?? '').trim().toLowerCase() === target);
-  }, [growthRecords, nameFilter]);
+  }, [growthRecords, nameFilter, activeProfile]);
 
   const growthInsights = useMemo(
     () => interpretGrowthTable(filteredGrowth, activeProfile),
@@ -132,55 +150,10 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
   );
 
   // Merge Supabase `growth` table weight/length readings for the active baby profile into the WHO chart
-  const mergedBabyMeasurements = useMemo<BabyMeasurement[]>(() => {
-    if (!activeProfile || activeProfile.type !== 'baby') return activeBabyMeasurements;
-
-    const birthMs = new Date(activeProfile.dateOfEvent).getTime();
-    if (Number.isNaN(birthMs)) return activeBabyMeasurements;
-
-    const activeNameLower = activeProfile.name.trim().toLowerCase();
-    const activeFirstNameLower = activeNameLower.split(' ')[0];
-
-    const matchingGrowth = growthRecords.filter((g) => {
-      if (g.daily_weight === null && g.daily_length === null) return false;
-      const gName = (g.name ?? '').trim().toLowerCase();
-      if (!gName) return true;
-      return gName === activeNameLower || gName === activeFirstNameLower;
-    });
-
-    const merged: BabyMeasurement[] = [...activeBabyMeasurements];
-
-    for (const g of matchingGrowth) {
-      const dateStr = g.created_at.slice(0, 10);
-      const alreadyExists = merged.some(
-        (m) =>
-          m.date === dateStr &&
-          (g.daily_weight === null || m.weightKg === g.daily_weight) &&
-          (g.daily_length === null || m.lengthCm === g.daily_length)
-      );
-      if (alreadyExists) continue;
-
-      const recMs = new Date(g.created_at).getTime();
-      const diffDays = Number.isNaN(recMs)
-        ? 0
-        : Math.max(0, Math.floor((recMs - birthMs) / (1000 * 60 * 60 * 24)));
-      const ageInMonths = Math.round((diffDays / 30.4375) * 10) / 10;
-      const ageInWeeks = Math.round((diffDays / 7) * 10) / 10;
-
-      merged.push({
-        id: `supabase-growth-${g.id}`,
-        profileId: activeProfile.id,
-        date: dateStr,
-        ageInMonths,
-        ageInWeeks,
-        weightKg: g.daily_weight ?? undefined,
-        lengthCm: g.daily_length ?? undefined,
-        notes: g.remark ?? undefined,
-      });
-    }
-
-    return merged.sort((a, b) => a.ageInMonths - b.ageInMonths);
-  }, [activeProfile, activeBabyMeasurements, growthRecords]);
+  const mergedBabyMeasurements = useMemo<BabyMeasurement[]>(
+    () => mergeProfileGrowthMeasurements(activeProfile, activeBabyMeasurements, growthRecords),
+    [activeProfile, activeBabyMeasurements, growthRecords]
+  );
 
   const liveTempPreview = useMemo(() => {
     const parsed = parseFloat(temperature);

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
+  doesRecordMatchProfile,
   getRoutineRecordDate,
   interpretGrowthTable,
   interpretRoutineTable,
@@ -108,6 +109,16 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     onClearInitialEdit?.();
   }, [initialEditRecord, activeProfile?.name, onClearInitialEdit]);
 
+  // When active profile from "entries" changes, align filter to that profile if matching routine rows exist
+  useEffect(() => {
+    if (!activeProfile) {
+      setNameFilter('all');
+      return;
+    }
+    const hasMatches = routineRecords.some((r) => doesRecordMatchProfile(r.name, activeProfile));
+    setNameFilter(hasMatches ? activeProfile.name : 'all');
+  }, [activeProfile?.id, activeProfile?.name, routineRecords.length > 0]);
+
   const availableNames = useMemo(() => {
     const set = new Set<string>();
     if (activeProfile?.name) set.add(activeProfile.name);
@@ -119,15 +130,21 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
 
   const filteredRoutine = useMemo(() => {
     if (nameFilter === 'all') return routineRecords;
+    if (activeProfile && nameFilter === activeProfile.name) {
+      return routineRecords.filter((r) => doesRecordMatchProfile(r.name, activeProfile));
+    }
     const target = nameFilter.trim().toLowerCase();
     return routineRecords.filter((r) => (r.name ?? '').trim().toLowerCase() === target);
-  }, [routineRecords, nameFilter]);
+  }, [routineRecords, nameFilter, activeProfile]);
 
   const filteredGrowth = useMemo(() => {
     if (nameFilter === 'all') return growthRecords;
+    if (activeProfile && nameFilter === activeProfile.name) {
+      return growthRecords.filter((g) => doesRecordMatchProfile(g.name, activeProfile));
+    }
     const target = nameFilter.trim().toLowerCase();
     return growthRecords.filter((g) => (g.name ?? '').trim().toLowerCase() === target);
-  }, [growthRecords, nameFilter]);
+  }, [growthRecords, nameFilter, activeProfile]);
 
   const growthInsights = useMemo(
     () => interpretGrowthTable(filteredGrowth, activeProfile),

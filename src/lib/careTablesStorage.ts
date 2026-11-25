@@ -70,7 +70,7 @@ export async function fetchGrowthRecords(): Promise<GrowthRecord[] | null> {
 
   const { data, error } = await supabase
     .from(GROWTH_TABLE)
-    .select('id, created_at, daily_weight, daily_length, temperature, remark, name')
+    .select('*')
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -95,14 +95,14 @@ export async function insertGrowthRecord(
   if (!supabase) {
     return {
       record: null,
-      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
+      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).',
     };
   }
 
   const firstAttempt = await supabase
     .from(GROWTH_TABLE)
     .insert(payload)
-    .select('id, created_at, daily_weight, daily_length, temperature, remark, name')
+    .select('*')
     .single();
 
   if (!firstAttempt.error && firstAttempt.data) {
@@ -114,7 +114,7 @@ export async function insertGrowthRecord(
     const retryAttempt = await supabase
       .from(GROWTH_TABLE)
       .insert({ id: Date.now(), ...payload })
-      .select('id, created_at, daily_weight, daily_length, temperature, remark, name')
+      .select('*')
       .single();
 
     if (!retryAttempt.error && retryAttempt.data) {
@@ -140,7 +140,7 @@ export async function updateGrowthRecord(
   if (!supabase) {
     return {
       record: null,
-      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
+      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).',
     };
   }
 
@@ -148,7 +148,7 @@ export async function updateGrowthRecord(
     .from(GROWTH_TABLE)
     .update(payload)
     .eq('id', id)
-    .select('id, created_at, daily_weight, daily_length, temperature, remark, name')
+    .select('*')
     .single();
 
   if (error) {
@@ -161,7 +161,7 @@ export async function updateGrowthRecord(
 
 export async function deleteGrowthRecord(id: number): Promise<{ error?: string }> {
   if (!supabase) {
-    return { error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.' };
+    return { error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).' };
   }
 
   const { error } = await supabase.from(GROWTH_TABLE).delete().eq('id', id);
@@ -216,9 +216,7 @@ export async function fetchRoutineRecords(): Promise<RoutineRecord[] | null> {
 
   const { data, error } = await supabase
     .from(ROUTINE_TABLE)
-    .select(
-      'id, created_at, date, time, "EBM (mL)", "Formula (mL)", "Diaper", name, remark, "feed duration (min)"'
-    )
+    .select('*')
     .order('date', { ascending: false, nullsFirst: false })
     .order('time', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false });
@@ -248,17 +246,14 @@ export async function insertRoutineRecord(
   if (!supabase) {
     return {
       record: null,
-      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
+      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).',
     };
   }
-
-  const selectCols =
-    'id, created_at, date, time, "EBM (mL)", "Formula (mL)", "Diaper", name, remark, "feed duration (min)"';
 
   const firstAttempt = await supabase
     .from(ROUTINE_TABLE)
     .insert(payload)
-    .select(selectCols)
+    .select('*')
     .single();
 
   if (!firstAttempt.error && firstAttempt.data) {
@@ -270,7 +265,7 @@ export async function insertRoutineRecord(
     const retryAttempt = await supabase
       .from(ROUTINE_TABLE)
       .insert({ id: Date.now(), ...payload })
-      .select(selectCols)
+      .select('*')
       .single();
 
     if (!retryAttempt.error && retryAttempt.data) {
@@ -301,7 +296,7 @@ export async function updateRoutineRecord(
   if (!supabase) {
     return {
       record: null,
-      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.',
+      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).',
     };
   }
 
@@ -309,9 +304,7 @@ export async function updateRoutineRecord(
     .from(ROUTINE_TABLE)
     .update(payload)
     .eq('id', id)
-    .select(
-      'id, created_at, date, time, "EBM (mL)", "Formula (mL)", "Diaper", name, remark, "feed duration (min)"'
-    )
+    .select('*')
     .single();
 
   if (error) {
@@ -324,7 +317,7 @@ export async function updateRoutineRecord(
 
 export async function deleteRoutineRecord(id: number): Promise<{ error?: string }> {
   if (!supabase) {
-    return { error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.' };
+    return { error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).' };
   }
 
   const { error } = await supabase.from(ROUTINE_TABLE).delete().eq('id', id);

@@ -37,6 +37,155 @@ export interface SettingPayload {
   value: ThemeMode | UnitSystem | FormulaSettings | string;
 }
 
+/**
+ * Raw row stored in the user's Supabase "entries" table:
+ *   id          int8 (primary key)
+ *   created_at  timestamptz default now()
+ *   profile_id  text default ''::text
+ *   payload     json
+ *   updated_at  timestamptz default now()
+ */
+interface RawDbEntryRow {
+  id: number | string;
+  created_at?: string;
+  profile_id?: string | null;
+  payload: unknown;
+  updated_at?: string;
+}
+
+interface PayloadEnvelope {
+  __entry_key: string;
+  __entry_type: EntryType;
+  data: unknown;
+}
+
+// Track numeric DB id -> logical entry key so realtime DELETE events can resolve the deleted entry
+const numericIdToLogicalKey = new Map<number, string>();
+
+/**
+ * Deterministic positive 52-bit safe integer hash for mapping logical string keys
+ * (e.g. "profile:profile-123") onto Postgres `int8` primary keys without precision loss in JS.
+ */
+export function logicalKeyToInt8(logicalKey: string): number {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < logicalKey.length; i++) {
+    const ch = logicalKey.charCodeAt(i);
+    h1 ^= ch;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= ch + i;
+    h2 = Math.imul(h2, 0x85ebca6b);
+  }
+  const high = (h1 >>> 0) & 0x000fffff; // 20 bits
+  const low = h2 >>> 0; // 32 bits
+  const combined = high * 4294967296 + low; // 52 bits (< Number.MAX_SAFE_INTEGER)
+  return combined === 0 ? 1 : combined;
+}
+
+function isPayloadEnvelope(value: unknown): value is PayloadEnvelope {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.__entry_key === 'string' &&
+    typeof candidate.__entry_type === 'string' &&
+    'data' in candidate
+  );
+}
+
+function toDbEntryRow(row: EntryRow, updatedAt: string): RawDbEntryRow {
+  const numericId = logicalKeyToInt8(row.id);
+  numericIdToLogicalKey.set(numericId, row.id);
+
+  const envelope: PayloadEnvelope = {
+    __entry_key: row.id,
+    __entry_type: row.entry_type,
+    data: row.payload,
+  };
+
+  return {
+    id: numericId,
+    profile_id: row.profile_id ?? '',
+    payload: envelope,
+    updated_at: updatedAt,
+  };
+}
+
+function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
+  const numericId = Number(raw.id);
+  let parsedPayload = raw.payload;
+
+  if (typeof parsedPayload === 'string') {
+    try {
+      parsedPayload = JSON.parse(parsedPayload);
+    } catch {
+      return null;
+    }
+  }
+
+  if (isPayloadEnvelope(parsedPayload)) {
+    if (!Number.isNaN(numericId)) {
+      numericIdToLogicalKey.set(numericId, parsedPayload.__entry_key);
+    }
+    return {
+      id: parsedPayload.__entry_key,
+      entry_type: parsedPayload.__entry_type,
+      profile_id: raw.profile_id || null,
+      payload: parsedPayload.data,
+      created_at: raw.created_at,
+      updated_at: raw.updated_at,
+    };
+  }
+
+  // Fallback support for manually inserted raw ChildProfile JSON rows in entries.payload
+  if (parsedPayload && typeof parsedPayload === 'object') {
+    const obj = parsedPayload as Record<string, unknown>;
+    if (
+      typeof obj.name === 'string' &&
+      (obj.type === 'baby' || obj.type === 'fetal') &&
+      typeof obj.dateOfEvent === 'string'
+    ) {
+      const profileId =
+        (typeof obj.id === 'string' && obj.id) ||
+        (raw.profile_id && raw.profile_id.trim()) ||
+        `profile-${raw.id}`;
+      const logicalKey = makeProfileEntryId(profileId);
+      if (!Number.isNaN(numericId)) {
+        numericIdToLogicalKey.set(numericId, logicalKey);
+      }
+      const gender =
+        obj.gender === 'boy' || obj.gender === 'girl' || obj.gender === 'undisclosed'
+          ? obj.gender
+          : 'undisclosed';
+      const avatarColor =
+        typeof obj.avatarColor === 'string' && obj.avatarColor
+          ? obj.avatarColor
+          : 'bg-emerald-600';
+      const avatarIcon =
+        typeof obj.avatarIcon === 'string' && obj.avatarIcon
+          ? obj.avatarIcon
+          : obj.type === 'fetal'
+            ? 'HeartPulse'
+            : 'Baby';
+      return {
+        id: logicalKey,
+        entry_type: 'profile',
+        profile_id: profileId,
+        payload: {
+          ...obj,
+          id: profileId,
+          gender,
+          avatarColor,
+          avatarIcon,
+        } satisfies Partial<ChildProfile>,
+        created_at: raw.created_at,
+        updated_at: raw.updated_at,
+      };
+    }
+  }
+
+  return null;
+}
+
 export function makeProfileEntryId(profileId: string): string {
   return `profile:${profileId}`;
 }
@@ -176,7 +325,7 @@ export async function fetchAllEntries(): Promise<EntryRow[] | null> {
 
   const { data, error } = await supabase
     .from(ENTRIES_TABLE)
-    .select('id, entry_type, profile_id, payload, created_at, updated_at')
+    .select('*')
     .order('created_at', { ascending: true });
 
   if (error) {
@@ -184,19 +333,21 @@ export async function fetchAllEntries(): Promise<EntryRow[] | null> {
     return null;
   }
 
-  return (data as EntryRow[]) ?? [];
+  const parsed: EntryRow[] = [];
+  for (const raw of (data as RawDbEntryRow[]) ?? []) {
+    const normalized = fromDbEntryRow(raw);
+    if (normalized) parsed.push(normalized);
+  }
+  return parsed;
 }
 
 export async function upsertEntry(row: EntryRow): Promise<void> {
   if (!supabase) return;
 
-  const { error } = await supabase.from(ENTRIES_TABLE).upsert(
-    {
-      ...row,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'id' }
-  );
+  const dbRow = toDbEntryRow(row, new Date().toISOString());
+  const { error } = await supabase
+    .from(ENTRIES_TABLE)
+    .upsert(dbRow, { onConflict: 'id' });
 
   if (error) {
     console.error(`Failed to upsert entry "${row.id}" in Supabase:`, error.message);
@@ -207,27 +358,27 @@ export async function upsertEntries(rows: EntryRow[]): Promise<void> {
   if (!supabase || rows.length === 0) return;
 
   const now = new Date().toISOString();
-  const stampedRows = rows.map((row) => ({
-    ...row,
-    updated_at: now,
-  }));
+  const dbRows = rows.map((row) => toDbEntryRow(row, now));
 
   const { error } = await supabase
     .from(ENTRIES_TABLE)
-    .upsert(stampedRows, { onConflict: 'id' });
+    .upsert(dbRows, { onConflict: 'id' });
 
   if (error) {
     console.error('Failed to batch upsert entries in Supabase:', error.message);
   }
 }
 
-export async function deleteEntryById(id: string): Promise<void> {
+export async function deleteEntryById(logicalId: string): Promise<void> {
   if (!supabase) return;
 
-  const { error } = await supabase.from(ENTRIES_TABLE).delete().eq('id', id);
+  const numericId = logicalKeyToInt8(logicalId);
+  numericIdToLogicalKey.delete(numericId);
+
+  const { error } = await supabase.from(ENTRIES_TABLE).delete().eq('id', numericId);
 
   if (error) {
-    console.error(`Failed to delete entry "${id}" from Supabase:`, error.message);
+    console.error(`Failed to delete entry "${logicalId}" from Supabase:`, error.message);
   }
 }
 
@@ -259,10 +410,10 @@ export async function replaceAllEntries(rows: EntryRow[]): Promise<void> {
     return;
   }
 
-  const nextIds = new Set(rows.map((r) => r.id));
-  const idsToDelete = ((existing as Array<{ id: string }>) ?? [])
-    .map((r) => r.id)
-    .filter((id) => !nextIds.has(id));
+  const nextIds = new Set(rows.map((r) => logicalKeyToInt8(r.id)));
+  const idsToDelete = ((existing as Array<{ id: number | string }>) ?? [])
+    .map((r) => Number(r.id))
+    .filter((id) => !Number.isNaN(id) && !nextIds.has(id));
 
   if (idsToDelete.length > 0) {
     const { error: deleteError } = await supabase
@@ -298,16 +449,30 @@ export function subscribeToEntries(handlers: EntriesRealtimeHandlers): () => voi
         schema: 'public',
         table: ENTRIES_TABLE,
       },
-      (payload: RealtimePostgresChangesPayload<EntryRow>) => {
+      (payload: RealtimePostgresChangesPayload<RawDbEntryRow>) => {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const nextRow = payload.new as EntryRow;
-          if (nextRow && nextRow.id && nextRow.entry_type) {
-            handlers.onUpsert(nextRow);
+          const nextRow = payload.new as RawDbEntryRow;
+          if (nextRow && 'id' in nextRow) {
+            const normalized = fromDbEntryRow(nextRow);
+            if (normalized) {
+              handlers.onUpsert(normalized);
+            }
           }
         } else if (payload.eventType === 'DELETE') {
-          const oldRow = payload.old as Partial<EntryRow> & { id?: string };
-          if (oldRow && oldRow.id) {
-            handlers.onDelete(oldRow);
+          const oldRaw = payload.old as Partial<RawDbEntryRow>;
+          let logicalKey: string | undefined;
+
+          if (oldRaw?.payload && isPayloadEnvelope(oldRaw.payload)) {
+            logicalKey = oldRaw.payload.__entry_key;
+          } else if (oldRaw?.id !== undefined) {
+            logicalKey = numericIdToLogicalKey.get(Number(oldRaw.id));
+          }
+
+          if (logicalKey) {
+            if (oldRaw?.id !== undefined) {
+              numericIdToLogicalKey.delete(Number(oldRaw.id));
+            }
+            handlers.onDelete({ id: logicalKey });
           }
         }
       }

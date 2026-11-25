@@ -1,5 +1,68 @@
 import { calculatePercentile } from '../data/growthStandards';
-import type { ChildProfile, GrowthRecord, RoutineRecord } from '../types';
+import type { BabyMeasurement, ChildProfile, GrowthRecord, RoutineRecord } from '../types';
+
+export function doesRecordMatchProfile(
+  recordName: string | null | undefined,
+  profile: ChildProfile | undefined
+): boolean {
+  if (!profile) return true;
+  const rName = (recordName ?? '').trim().toLowerCase();
+  if (!rName) return false;
+  const fullName = profile.name.trim().toLowerCase();
+  const firstName = fullName.split(/\s+/)[0];
+  return rName === fullName || (firstName.length > 0 && rName === firstName);
+}
+
+export function mergeProfileGrowthMeasurements(
+  profile: ChildProfile | undefined,
+  babyMeasurements: BabyMeasurement[],
+  growthRecords: GrowthRecord[]
+): BabyMeasurement[] {
+  if (!profile || profile.type !== 'baby') return babyMeasurements;
+
+  const birthMs = new Date(profile.dateOfEvent).getTime();
+  if (Number.isNaN(birthMs)) return babyMeasurements;
+
+  const matchingGrowth = growthRecords.filter((g) => {
+    if (g.daily_weight === null && g.daily_length === null) return false;
+    const gName = (g.name ?? '').trim();
+    if (!gName) return true;
+    return doesRecordMatchProfile(gName, profile);
+  });
+
+  const merged: BabyMeasurement[] = [...babyMeasurements];
+
+  for (const g of matchingGrowth) {
+    const dateStr = g.created_at.slice(0, 10);
+    const alreadyExists = merged.some(
+      (m) =>
+        m.date === dateStr &&
+        (g.daily_weight === null || m.weightKg === g.daily_weight) &&
+        (g.daily_length === null || m.lengthCm === g.daily_length)
+    );
+    if (alreadyExists) continue;
+
+    const recMs = new Date(g.created_at).getTime();
+    const diffDays = Number.isNaN(recMs)
+      ? 0
+      : Math.max(0, Math.floor((recMs - birthMs) / (1000 * 60 * 60 * 24)));
+    const ageInMonths = Math.round((diffDays / 30.4375) * 10) / 10;
+    const ageInWeeks = Math.round((diffDays / 7) * 10) / 10;
+
+    merged.push({
+      id: `supabase-growth-${g.id}`,
+      profileId: profile.id,
+      date: dateStr,
+      ageInMonths,
+      ageInWeeks,
+      weightKg: g.daily_weight ?? undefined,
+      lengthCm: g.daily_length ?? undefined,
+      notes: g.remark ?? undefined,
+    });
+  }
+
+  return merged.sort((a, b) => a.ageInMonths - b.ageInMonths);
+}
 
 export type TempSeverity = 'low' | 'normal' | 'elevated' | 'fever';
 
