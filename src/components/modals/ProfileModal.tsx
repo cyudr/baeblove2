@@ -49,10 +49,14 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isGraduateModalOpen, setIsGraduateModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Sync form state whenever modal opens or target editingProfile changes
   useEffect(() => {
     if (!isOpen) return;
+    setSaveError(null);
+    setIsSaving(false);
     if (editingProfile) {
       setType(editingProfile.type);
       setName(editingProfile.name);
@@ -103,9 +107,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     return Number.isNaN(parsed) ? undefined : parsed;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || isSaving) return;
+    setSaveError(null);
+    setIsSaving(true);
 
     const baseData: Partial<ChildProfile> = {
       name: name.trim(),
@@ -124,13 +130,20 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       notes: notes.trim() || undefined,
     };
 
-    if (editingProfile) {
-      updateProfile(editingProfile.id, baseData);
-    } else {
-      addProfile(baseData as Omit<ChildProfile, 'id'>);
-    }
+    try {
+      const res = editingProfile
+        ? await updateProfile(editingProfile.id, baseData)
+        : await addProfile(baseData as Omit<ChildProfile, 'id'>);
 
-    onClose();
+      if (res.error) {
+        setSaveError(res.error);
+        return;
+      }
+
+      onClose();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -413,19 +426,31 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </div>
             )}
 
+            {saveError && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/70 text-xs text-rose-700 dark:text-rose-300">
+                {saveError}
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-100 dark:border-stone-800">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-xs font-medium text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white rounded-xl transition-colors cursor-pointer"
+                disabled={isSaving}
+                className="px-4 py-2 text-xs font-medium text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white rounded-xl transition-colors cursor-pointer disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl shadow-xs transition-colors cursor-pointer"
+                disabled={isSaving}
+                className="px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
               >
-                {editingProfile ? 'Save Changes' : 'Create Profile'}
+                {isSaving
+                  ? 'Saving...'
+                  : editingProfile
+                    ? 'Save Changes'
+                    : 'Create Profile'}
               </button>
             </div>
           </form>

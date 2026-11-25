@@ -61,6 +61,32 @@ function normalizeRoutineRow(raw: Record<string, unknown>): RoutineRecord {
   };
 }
 
+function formatSupabaseError(
+  error: { message: string; details?: string | null; hint?: string | null; code?: string | null } | null | undefined,
+  tableName: string
+): string {
+  if (!error) {
+    return `Unable to save to "${tableName}".`;
+  }
+  if (error.code === '42501') {
+    return `Row Level Security (RLS) blocked access to "${tableName}". Add read/insert/update/delete policies in Supabase SQL Editor (see supabase/schema.sql).`;
+  }
+  const parts = [error.message];
+  if (error.details && !error.message.includes(error.details)) {
+    parts.push(error.details);
+  }
+  if (error.hint) {
+    parts.push(error.hint);
+  }
+  if (error.code) {
+    parts.push(`(${error.code})`);
+  }
+  return parts.join(' — ');
+}
+
+const MISSING_SUPABASE_ERROR =
+  'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUB_KEY).';
+
 // ============================================================================
 // GROWTH TABLE CRUD + REALTIME
 // ============================================================================
@@ -74,7 +100,7 @@ export async function fetchGrowthRecords(): Promise<GrowthRecord[] | null> {
     .order('created_at', { ascending: false });
 
   if (error) {
-    console.error('Failed to fetch "growth" records from Supabase:', error.message);
+    console.error('Failed to fetch "growth" records from Supabase:', formatSupabaseError(error, GROWTH_TABLE));
     return null;
   }
 
@@ -93,37 +119,52 @@ export async function insertGrowthRecord(
   };
 
   if (!supabase) {
-    return {
-      record: null,
-      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).',
-    };
+    return { record: null, error: MISSING_SUPABASE_ERROR };
   }
 
   const firstAttempt = await supabase
     .from(GROWTH_TABLE)
-    .insert(payload)
-    .select('*')
-    .single();
+    .insert([payload])
+    .select('*');
 
-  if (!firstAttempt.error && firstAttempt.data) {
-    return { record: normalizeGrowthRow(firstAttempt.data as Record<string, unknown>) };
+  const firstRow = Array.isArray(firstAttempt.data)
+    ? (firstAttempt.data[0] as Record<string, unknown> | undefined)
+    : undefined;
+
+  if (!firstAttempt.error && firstRow) {
+    return { record: normalizeGrowthRow(firstRow) };
   }
 
   // Fallback if the user's int8 primary key does not have an identity/sequence default
   if (firstAttempt.error?.code === '23502') {
     const retryAttempt = await supabase
       .from(GROWTH_TABLE)
-      .insert({ id: Date.now(), ...payload })
-      .select('*')
-      .single();
+      .insert([{ id: Date.now(), ...payload }])
+      .select('*');
 
-    if (!retryAttempt.error && retryAttempt.data) {
-      return { record: normalizeGrowthRow(retryAttempt.data as Record<string, unknown>) };
+    const retryRow = Array.isArray(retryAttempt.data)
+      ? (retryAttempt.data[0] as Record<string, unknown> | undefined)
+      : undefined;
+
+    if (!retryAttempt.error && retryRow) {
+      return { record: normalizeGrowthRow(retryRow) };
     }
-    return { record: null, error: retryAttempt.error?.message };
+    return {
+      record: null,
+      error: retryAttempt.error
+        ? formatSupabaseError(retryAttempt.error, GROWTH_TABLE)
+        : 'Saved to "growth", but no row was returned. Check SELECT RLS policy on "growth".',
+    };
   }
 
-  return { record: null, error: firstAttempt.error?.message };
+  if (!firstAttempt.error && !firstRow) {
+    return {
+      record: null,
+      error: 'Saved to "growth", but no row was returned. Check SELECT/INSERT RLS policies on "growth".',
+    };
+  }
+
+  return { record: null, error: formatSupabaseError(firstAttempt.error, GROWTH_TABLE) };
 }
 
 export async function updateGrowthRecord(
@@ -138,36 +179,35 @@ export async function updateGrowthRecord(
   if ('name' in updates) payload.name = toNullableText(updates.name);
 
   if (!supabase) {
-    return {
-      record: null,
-      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).',
-    };
+    return { record: null, error: MISSING_SUPABASE_ERROR };
   }
 
   const { data, error } = await supabase
     .from(GROWTH_TABLE)
     .update(payload)
     .eq('id', id)
-    .select('*')
-    .single();
+    .select('*');
 
   if (error) {
-    console.error(`Failed to update "growth" record ${id}:`, error.message);
-    return { record: null, error: error.message };
+    const msg = formatSupabaseError(error, GROWTH_TABLE);
+    console.error(`Failed to update "growth" record ${id}:`, msg);
+    return { record: null, error: msg };
   }
 
-  return { record: data ? normalizeGrowthRow(data as Record<string, unknown>) : null };
+  const savedRow = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
+  return { record: savedRow ? normalizeGrowthRow(savedRow) : null };
 }
 
 export async function deleteGrowthRecord(id: number): Promise<{ error?: string }> {
   if (!supabase) {
-    return { error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).' };
+    return { error: MISSING_SUPABASE_ERROR };
   }
 
   const { error } = await supabase.from(GROWTH_TABLE).delete().eq('id', id);
   if (error) {
-    console.error(`Failed to delete "growth" record ${id}:`, error.message);
-    return { error: error.message };
+    const msg = formatSupabaseError(error, GROWTH_TABLE);
+    console.error(`Failed to delete "growth" record ${id}:`, msg);
+    return { error: msg };
   }
   return {};
 }
@@ -222,7 +262,7 @@ export async function fetchRoutineRecords(): Promise<RoutineRecord[] | null> {
     .order('created_at', { ascending: false });
 
   if (error) {
-    console.error('Failed to fetch "routine" records from Supabase:', error.message);
+    console.error('Failed to fetch "routine" records from Supabase:', formatSupabaseError(error, ROUTINE_TABLE));
     return null;
   }
 
@@ -244,37 +284,52 @@ export async function insertRoutineRecord(
   };
 
   if (!supabase) {
-    return {
-      record: null,
-      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).',
-    };
+    return { record: null, error: MISSING_SUPABASE_ERROR };
   }
 
   const firstAttempt = await supabase
     .from(ROUTINE_TABLE)
-    .insert(payload)
-    .select('*')
-    .single();
+    .insert([payload])
+    .select('*');
 
-  if (!firstAttempt.error && firstAttempt.data) {
-    return { record: normalizeRoutineRow(firstAttempt.data as Record<string, unknown>) };
+  const firstRow = Array.isArray(firstAttempt.data)
+    ? (firstAttempt.data[0] as Record<string, unknown> | undefined)
+    : undefined;
+
+  if (!firstAttempt.error && firstRow) {
+    return { record: normalizeRoutineRow(firstRow) };
   }
 
   // Fallback if the user's int8 primary key does not have an identity/sequence default
   if (firstAttempt.error?.code === '23502') {
     const retryAttempt = await supabase
       .from(ROUTINE_TABLE)
-      .insert({ id: Date.now(), ...payload })
-      .select('*')
-      .single();
+      .insert([{ id: Date.now(), ...payload }])
+      .select('*');
 
-    if (!retryAttempt.error && retryAttempt.data) {
-      return { record: normalizeRoutineRow(retryAttempt.data as Record<string, unknown>) };
+    const retryRow = Array.isArray(retryAttempt.data)
+      ? (retryAttempt.data[0] as Record<string, unknown> | undefined)
+      : undefined;
+
+    if (!retryAttempt.error && retryRow) {
+      return { record: normalizeRoutineRow(retryRow) };
     }
-    return { record: null, error: retryAttempt.error?.message };
+    return {
+      record: null,
+      error: retryAttempt.error
+        ? formatSupabaseError(retryAttempt.error, ROUTINE_TABLE)
+        : 'Saved to "routine", but no row was returned. Check SELECT RLS policy on "routine".',
+    };
   }
 
-  return { record: null, error: firstAttempt.error?.message };
+  if (!firstAttempt.error && !firstRow) {
+    return {
+      record: null,
+      error: 'Saved to "routine", but no row was returned. Check SELECT/INSERT RLS policies on "routine".',
+    };
+  }
+
+  return { record: null, error: formatSupabaseError(firstAttempt.error, ROUTINE_TABLE) };
 }
 
 export async function updateRoutineRecord(
@@ -294,36 +349,35 @@ export async function updateRoutineRecord(
   }
 
   if (!supabase) {
-    return {
-      record: null,
-      error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).',
-    };
+    return { record: null, error: MISSING_SUPABASE_ERROR };
   }
 
   const { data, error } = await supabase
     .from(ROUTINE_TABLE)
     .update(payload)
     .eq('id', id)
-    .select('*')
-    .single();
+    .select('*');
 
   if (error) {
-    console.error(`Failed to update "routine" record ${id}:`, error.message);
-    return { record: null, error: error.message };
+    const msg = formatSupabaseError(error, ROUTINE_TABLE);
+    console.error(`Failed to update "routine" record ${id}:`, msg);
+    return { record: null, error: msg };
   }
 
-  return { record: data ? normalizeRoutineRow(data as Record<string, unknown>) : null };
+  const savedRow = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
+  return { record: savedRow ? normalizeRoutineRow(savedRow) : null };
 }
 
 export async function deleteRoutineRecord(id: number): Promise<{ error?: string }> {
   if (!supabase) {
-    return { error: 'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUB_KEY (or VITE_SUPABASE_ANON_KEY).' };
+    return { error: MISSING_SUPABASE_ERROR };
   }
 
   const { error } = await supabase.from(ROUTINE_TABLE).delete().eq('id', id);
   if (error) {
-    console.error(`Failed to delete "routine" record ${id}:`, error.message);
-    return { error: error.message };
+    const msg = formatSupabaseError(error, ROUTINE_TABLE);
+    console.error(`Failed to delete "routine" record ${id}:`, msg);
+    return { error: msg };
   }
   return {};
 }

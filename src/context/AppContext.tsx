@@ -64,8 +64,8 @@ interface AppContextType {
   activeProfileId: string;
   activeProfile: ChildProfile | undefined;
   setActiveProfileId: (id: string) => void;
-  addProfile: (profile: Omit<ChildProfile, 'id'>) => string;
-  updateProfile: (id: string, updates: Partial<ChildProfile>) => void;
+  addProfile: (profile: Omit<ChildProfile, 'id'>) => Promise<{ id?: string; error?: string }>;
+  updateProfile: (id: string, updates: Partial<ChildProfile>) => Promise<{ error?: string }>;
   deleteProfile: (id: string) => void;
   progressFetusToBaby: (params: {
     fetalProfileId: string;
@@ -96,14 +96,24 @@ interface AppContextType {
 
   babyMeasurements: BabyMeasurement[];
   activeBabyMeasurements: BabyMeasurement[];
-  addBabyMeasurement: (measurement: Omit<BabyMeasurement, 'id' | 'profileId'>) => void;
-  updateBabyMeasurement: (id: string, updates: Partial<BabyMeasurement>) => void;
+  addBabyMeasurement: (
+    measurement: Omit<BabyMeasurement, 'id' | 'profileId'>
+  ) => Promise<{ error?: string }>;
+  updateBabyMeasurement: (
+    id: string,
+    updates: Partial<BabyMeasurement>
+  ) => Promise<{ error?: string }>;
   deleteBabyMeasurement: (id: string) => void;
 
   fetalMeasurements: FetalMeasurement[];
   activeFetalMeasurements: FetalMeasurement[];
-  addFetalMeasurement: (measurement: Omit<FetalMeasurement, 'id' | 'profileId'>) => void;
-  updateFetalMeasurement: (id: string, updates: Partial<FetalMeasurement>) => void;
+  addFetalMeasurement: (
+    measurement: Omit<FetalMeasurement, 'id' | 'profileId'>
+  ) => Promise<{ error?: string }>;
+  updateFetalMeasurement: (
+    id: string,
+    updates: Partial<FetalMeasurement>
+  ) => Promise<{ error?: string }>;
   deleteFetalMeasurement: (id: string) => void;
 
   completedMilestones: CompletedMilestone[];
@@ -527,7 +537,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     void upsertEntry(toSettingRow('formula_settings', nextSettings));
   };
 
-  const addProfile = (profileData: Omit<ChildProfile, 'id'>): string => {
+  const addProfile = async (
+    profileData: Omit<ChildProfile, 'id'>
+  ): Promise<{ id?: string; error?: string }> => {
     const newId = `profile-${Date.now()}`;
     const newProfile: ChildProfile = { ...profileData, id: newId };
     const rowsToUpsert: EntryRow[] = [
@@ -535,16 +547,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toSettingRow('active_profile', newId),
     ];
 
-    setProfiles((prev) => upsertById(prev, newProfile));
-    setActiveProfileIdState(newId);
-
+    let birthMeasurement: BabyMeasurement | null = null;
     if (
       newProfile.type === 'baby' &&
       (newProfile.birthWeightKg !== undefined ||
         newProfile.birthLengthCm !== undefined ||
         newProfile.birthHeadCircumferenceCm !== undefined)
     ) {
-      const birthMeasurement: BabyMeasurement = {
+      birthMeasurement = {
         id: `bm-birth-${Date.now()}`,
         profileId: newId,
         date: newProfile.dateOfEvent,
@@ -556,21 +566,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         pediatricianVisit: true,
         notes: 'Birth measurement',
       };
-      setBabyMeasurements((prev) => upsertById(prev, birthMeasurement));
       rowsToUpsert.push(toBabyMeasurementRow(birthMeasurement));
     }
 
-    void upsertEntries(rowsToUpsert);
-    return newId;
+    const result = await upsertEntries(rowsToUpsert);
+    if (result.error) {
+      return { error: result.error };
+    }
+
+    setProfiles((prev) => upsertById(prev, newProfile));
+    setActiveProfileIdState(newId);
+    if (birthMeasurement) {
+      setBabyMeasurements((prev) => upsertById(prev, birthMeasurement!));
+    }
+
+    return { id: newId };
   };
 
-  const updateProfile = (id: string, updates: Partial<ChildProfile>) => {
+  const updateProfile = async (
+    id: string,
+    updates: Partial<ChildProfile>
+  ): Promise<{ error?: string }> => {
     const existing = profiles.find((p) => p.id === id);
-    if (!existing) return;
+    if (!existing) return { error: 'Profile not found.' };
     const updated: ChildProfile = { ...existing, ...updates };
-    setProfiles((prev) => prev.map((p) => (p.id === id ? updated : p)));
 
     const rowsToUpsert: EntryRow[] = [toProfileRow(updated)];
+    const updatedMeasurementsById = new Map<string, BabyMeasurement>();
 
     if (updated.type === 'baby') {
       const birthDateChanged =
@@ -583,7 +605,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (birthDateChanged || birthStatsChanged) {
         const profileMeasurements = babyMeasurements.filter((m) => m.profileId === id);
         const existingBirthRecord = profileMeasurements.find((m) => m.ageInMonths === 0);
-        const updatedMeasurementsById = new Map<string, BabyMeasurement>();
 
         if (existingBirthRecord) {
           const syncedBirth: BabyMeasurement = {
@@ -639,22 +660,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           }
         }
-
-        if (updatedMeasurementsById.size > 0) {
-          setBabyMeasurements((prev) => {
-            const next = prev.map((m) => updatedMeasurementsById.get(m.id) ?? m);
-            for (const [mId, record] of updatedMeasurementsById.entries()) {
-              if (!next.some((m) => m.id === mId)) {
-                next.push(record);
-              }
-            }
-            return next;
-          });
-        }
       }
     }
 
-    void upsertEntries(rowsToUpsert);
+    const result = await upsertEntries(rowsToUpsert);
+    if (result.error) {
+      return { error: result.error };
+    }
+
+    setProfiles((prev) => prev.map((p) => (p.id === id ? updated : p)));
+    if (updatedMeasurementsById.size > 0) {
+      setBabyMeasurements((prev) => {
+        const next = prev.map((m) => updatedMeasurementsById.get(m.id) ?? m);
+        for (const [mId, record] of updatedMeasurementsById.entries()) {
+          if (!next.some((m) => m.id === mId)) {
+            next.push(record);
+          }
+        }
+        return next;
+      });
+    }
+
+    return {};
   };
 
   const deleteProfile = (id: string) => {
@@ -823,22 +850,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return loveNotes.filter((n) => n.profileId === baby.attachedFetalProfileId);
   };
 
-  const addBabyMeasurement = (measurement: Omit<BabyMeasurement, 'id' | 'profileId'>) => {
+  const addBabyMeasurement = async (
+    measurement: Omit<BabyMeasurement, 'id' | 'profileId'>
+  ): Promise<{ error?: string }> => {
     const newM: BabyMeasurement = {
       ...measurement,
       id: `bm-${Date.now()}`,
       profileId: activeProfileId,
     };
+    const result = await upsertEntry(toBabyMeasurementRow(newM));
+    if (result.error) return result;
     setBabyMeasurements((prev) => upsertById(prev, newM));
-    void upsertEntry(toBabyMeasurementRow(newM));
+    return {};
   };
 
-  const updateBabyMeasurement = (id: string, updates: Partial<BabyMeasurement>) => {
+  const updateBabyMeasurement = async (
+    id: string,
+    updates: Partial<BabyMeasurement>
+  ): Promise<{ error?: string }> => {
     const existing = babyMeasurements.find((m) => m.id === id);
-    if (!existing) return;
+    if (!existing) return { error: 'Measurement not found.' };
     const updated: BabyMeasurement = { ...existing, ...updates };
+    const result = await upsertEntry(toBabyMeasurementRow(updated));
+    if (result.error) return result;
     setBabyMeasurements((prev) => prev.map((m) => (m.id === id ? updated : m)));
-    void upsertEntry(toBabyMeasurementRow(updated));
+    return {};
   };
 
   const deleteBabyMeasurement = (id: string) => {
@@ -846,22 +882,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     void deleteEntryById(makeBabyMeasurementEntryId(id));
   };
 
-  const addFetalMeasurement = (measurement: Omit<FetalMeasurement, 'id' | 'profileId'>) => {
+  const addFetalMeasurement = async (
+    measurement: Omit<FetalMeasurement, 'id' | 'profileId'>
+  ): Promise<{ error?: string }> => {
     const newM: FetalMeasurement = {
       ...measurement,
       id: `fm-${Date.now()}`,
       profileId: activeProfileId,
     };
+    const result = await upsertEntry(toFetalMeasurementRow(newM));
+    if (result.error) return result;
     setFetalMeasurements((prev) => upsertById(prev, newM));
-    void upsertEntry(toFetalMeasurementRow(newM));
+    return {};
   };
 
-  const updateFetalMeasurement = (id: string, updates: Partial<FetalMeasurement>) => {
+  const updateFetalMeasurement = async (
+    id: string,
+    updates: Partial<FetalMeasurement>
+  ): Promise<{ error?: string }> => {
     const existing = fetalMeasurements.find((m) => m.id === id);
-    if (!existing) return;
+    if (!existing) return { error: 'Measurement not found.' };
     const updated: FetalMeasurement = { ...existing, ...updates };
+    const result = await upsertEntry(toFetalMeasurementRow(updated));
+    if (result.error) return result;
     setFetalMeasurements((prev) => prev.map((m) => (m.id === id ? updated : m)));
-    void upsertEntry(toFetalMeasurementRow(updated));
+    return {};
   };
 
   const deleteFetalMeasurement = (id: string) => {

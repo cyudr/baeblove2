@@ -58,10 +58,14 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
   const [fundalHeightInput, setFundalHeightInput] = useState<string>(''); // cm
   const [maternalWeightInput, setMaternalWeightInput] = useState<string>(''); // kg or lbs
   const [scanLocation, setScanLocation] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Hydrate fields when opening modal for editing vs creating new record
   useEffect(() => {
     if (!isOpen || !activeProfile) return;
+    setSaveError(null);
+    setIsSaving(false);
 
     if (editingBabyMeasurement) {
       setDate(editingBabyMeasurement.date);
@@ -221,96 +225,113 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setSaveError(null);
+    setIsSaving(true);
 
-    if (activeProfile.type === 'baby') {
-      let weightKg: number | undefined;
-      if (weightInput) {
-        if (unitSystem === 'metric') {
-          weightKg = parseFloat(weightInput);
-        } else {
-          const lbs = parseFloat(weightInput) || 0;
-          const oz = parseFloat(weightOzInput) || 0;
-          weightKg = UnitConverter.lbsToKg(lbs + oz / 16);
+    try {
+      if (activeProfile.type === 'baby') {
+        let weightKg: number | undefined;
+        if (weightInput) {
+          if (unitSystem === 'metric') {
+            weightKg = parseFloat(weightInput);
+          } else {
+            const lbs = parseFloat(weightInput) || 0;
+            const oz = parseFloat(weightOzInput) || 0;
+            weightKg = UnitConverter.lbsToKg(lbs + oz / 16);
+          }
+        }
+
+        let lengthCm: number | undefined;
+        if (lengthInput) {
+          lengthCm = unitSystem === 'metric' ? parseFloat(lengthInput) : UnitConverter.inchesToCm(parseFloat(lengthInput));
+        }
+
+        let headCircumferenceCm: number | undefined;
+        if (hcInput) {
+          headCircumferenceCm = unitSystem === 'metric' ? parseFloat(hcInput) : UnitConverter.inchesToCm(parseFloat(hcInput));
+        }
+
+        const measurementPayload = {
+          date,
+          ageInMonths: ageMonths,
+          ageInWeeks: ageWeeks,
+          weightKg,
+          lengthCm,
+          headCircumferenceCm,
+          pediatricianVisit,
+          notes: notes.trim() || undefined,
+        };
+
+        const entryRes = editingBabyMeasurement
+          ? await updateBabyMeasurement(editingBabyMeasurement.id, measurementPayload)
+          : await addBabyMeasurement(measurementPayload);
+
+        if (entryRes.error) {
+          setSaveError(entryRes.error);
+          return;
+        }
+
+        const parsedTemp = temperatureInput.trim() ? parseFloat(temperatureInput) : null;
+        if (!editingBabyMeasurement && (weightKg !== undefined || lengthCm !== undefined || parsedTemp !== null)) {
+          const growthRes = await addGrowthRecord({
+            daily_weight: weightKg ?? null,
+            daily_length: lengthCm ?? null,
+            temperature: parsedTemp,
+            remark: notes.trim() || null,
+            name: activeProfile.name,
+          });
+          if (growthRes.error) {
+            setSaveError(growthRes.error);
+            return;
+          }
+        }
+      } else {
+        let efwGrams: number | undefined;
+        if (efwInput) {
+          efwGrams = unitSystem === 'metric' ? parseFloat(efwInput) : UnitConverter.ozToGrams(parseFloat(efwInput));
+        }
+
+        let maternalWeightKg: number | undefined;
+        if (maternalWeightInput) {
+          maternalWeightKg =
+            unitSystem === 'metric'
+              ? parseFloat(maternalWeightInput)
+              : UnitConverter.lbsToKg(parseFloat(maternalWeightInput));
+        }
+
+        const fetalPayload = {
+          date,
+          gestationalWeeks,
+          gestationalDays,
+          efwGrams,
+          crlMm: crlInput ? parseFloat(crlInput) : undefined,
+          bpdMm: bpdInput ? parseFloat(bpdInput) : undefined,
+          hcMm: hcUltrasoundInput ? parseFloat(hcUltrasoundInput) : undefined,
+          acMm: acInput ? parseFloat(acInput) : undefined,
+          flMm: flInput ? parseFloat(flInput) : undefined,
+          fundalHeightCm: fundalHeightInput ? parseFloat(fundalHeightInput) : undefined,
+          maternalWeightKg,
+          notes: notes.trim() || undefined,
+          scanLocation: scanLocation.trim() || undefined,
+        };
+
+        const fetalRes = editingFetalMeasurement
+          ? await updateFetalMeasurement(editingFetalMeasurement.id, fetalPayload)
+          : await addFetalMeasurement(fetalPayload);
+
+        if (fetalRes.error) {
+          setSaveError(fetalRes.error);
+          return;
         }
       }
 
-      let lengthCm: number | undefined;
-      if (lengthInput) {
-        lengthCm = unitSystem === 'metric' ? parseFloat(lengthInput) : UnitConverter.inchesToCm(parseFloat(lengthInput));
-      }
-
-      let headCircumferenceCm: number | undefined;
-      if (hcInput) {
-        headCircumferenceCm = unitSystem === 'metric' ? parseFloat(hcInput) : UnitConverter.inchesToCm(parseFloat(hcInput));
-      }
-
-      const measurementPayload = {
-        date,
-        ageInMonths: ageMonths,
-        ageInWeeks: ageWeeks,
-        weightKg,
-        lengthCm,
-        headCircumferenceCm,
-        pediatricianVisit,
-        notes: notes.trim() || undefined,
-      };
-
-      if (editingBabyMeasurement) {
-        updateBabyMeasurement(editingBabyMeasurement.id, measurementPayload);
-      } else {
-        addBabyMeasurement(measurementPayload);
-      }
-
-      const parsedTemp = temperatureInput.trim() ? parseFloat(temperatureInput) : null;
-      if (!editingBabyMeasurement && (weightKg !== undefined || lengthCm !== undefined || parsedTemp !== null)) {
-        void addGrowthRecord({
-          daily_weight: weightKg ?? null,
-          daily_length: lengthCm ?? null,
-          temperature: parsedTemp,
-          remark: notes.trim() || null,
-          name: activeProfile.name,
-        });
-      }
-    } else {
-      let efwGrams: number | undefined;
-      if (efwInput) {
-        efwGrams = unitSystem === 'metric' ? parseFloat(efwInput) : UnitConverter.ozToGrams(parseFloat(efwInput));
-      }
-
-      let maternalWeightKg: number | undefined;
-      if (maternalWeightInput) {
-        maternalWeightKg =
-          unitSystem === 'metric'
-            ? parseFloat(maternalWeightInput)
-            : UnitConverter.lbsToKg(parseFloat(maternalWeightInput));
-      }
-
-      const fetalPayload = {
-        date,
-        gestationalWeeks,
-        gestationalDays,
-        efwGrams,
-        crlMm: crlInput ? parseFloat(crlInput) : undefined,
-        bpdMm: bpdInput ? parseFloat(bpdInput) : undefined,
-        hcMm: hcUltrasoundInput ? parseFloat(hcUltrasoundInput) : undefined,
-        acMm: acInput ? parseFloat(acInput) : undefined,
-        flMm: flInput ? parseFloat(flInput) : undefined,
-        fundalHeightCm: fundalHeightInput ? parseFloat(fundalHeightInput) : undefined,
-        maternalWeightKg,
-        notes: notes.trim() || undefined,
-        scanLocation: scanLocation.trim() || undefined,
-      };
-
-      if (editingFetalMeasurement) {
-        updateFetalMeasurement(editingFetalMeasurement.id, fetalPayload);
-      } else {
-        addFetalMeasurement(fetalPayload);
-      }
+      onClose();
+    } finally {
+      setIsSaving(false);
     }
-
-    onClose();
   };
 
   const isEditing = Boolean(editingBabyMeasurement || editingFetalMeasurement);
@@ -686,20 +707,28 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
             ></textarea>
           </div>
 
+          {saveError && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/70 text-xs text-rose-700 dark:text-rose-300">
+              {saveError}
+            </div>
+          )}
+
           {/* Action buttons */}
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-100 dark:border-stone-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white rounded-xl transition-colors"
+              disabled={isSaving}
+              className="px-4 py-2 text-xs font-medium text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white rounded-xl transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl shadow-xs transition-colors"
+              disabled={isSaving}
+              className="px-4 py-2 text-xs font-semibold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl shadow-xs transition-colors disabled:opacity-50"
             >
-              Save Record
+              {isSaving ? 'Saving...' : 'Save Record'}
             </button>
           </div>
         </form>

@@ -59,8 +59,41 @@ interface PayloadEnvelope {
   data: unknown;
 }
 
-// Track numeric DB id -> logical entry key so realtime DELETE events can resolve the deleted entry
+// Track numeric DB id <-> logical entry key so updates and realtime DELETE events resolve accurately
 const numericIdToLogicalKey = new Map<number, string>();
+const logicalKeyToNumericId = new Map<string, number>();
+
+function registerIdMapping(numericId: number, logicalKey: string) {
+  if (!Number.isNaN(numericId)) {
+    numericIdToLogicalKey.set(numericId, logicalKey);
+    logicalKeyToNumericId.set(logicalKey, numericId);
+  }
+}
+
+function formatEntriesSupabaseError(
+  error: { message: string; details?: string | null; hint?: string | null; code?: string | null } | null | undefined
+): string {
+  if (!error) {
+    return 'Unable to save to the "entries" table.';
+  }
+  if (error.code === '42501') {
+    return 'Row Level Security (RLS) blocked writes to the "entries" table. Add read/insert/update/delete policies in Supabase SQL Editor (see supabase/schema.sql).';
+  }
+  const parts = [error.message];
+  if (error.details && !error.message.includes(error.details)) {
+    parts.push(error.details);
+  }
+  if (error.hint) {
+    parts.push(error.hint);
+  }
+  if (error.code) {
+    parts.push(`(${error.code})`);
+  }
+  return parts.join(' — ');
+}
+
+const MISSING_SUPABASE_ERROR =
+  'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUB_KEY).';
 
 /**
  * Deterministic positive 52-bit safe integer hash for mapping logical string keys
@@ -92,20 +125,22 @@ function isPayloadEnvelope(value: unknown): value is PayloadEnvelope {
   );
 }
 
-function toDbEntryRow(row: EntryRow, updatedAt: string): RawDbEntryRow {
-  const numericId = logicalKeyToInt8(row.id);
-  numericIdToLogicalKey.set(numericId, row.id);
-
-  const envelope: PayloadEnvelope = {
+function buildEnvelope(row: EntryRow): PayloadEnvelope {
+  return {
     __entry_key: row.id,
     __entry_type: row.entry_type,
     data: row.payload,
   };
+}
+
+function toDbEntryRow(row: EntryRow, updatedAt: string): RawDbEntryRow {
+  const numericId = logicalKeyToNumericId.get(row.id) ?? logicalKeyToInt8(row.id);
+  registerIdMapping(numericId, row.id);
 
   return {
     id: numericId,
     profile_id: row.profile_id ?? '',
-    payload: envelope,
+    payload: buildEnvelope(row),
     updated_at: updatedAt,
   };
 }
@@ -123,9 +158,7 @@ function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
   }
 
   if (isPayloadEnvelope(parsedPayload)) {
-    if (!Number.isNaN(numericId)) {
-      numericIdToLogicalKey.set(numericId, parsedPayload.__entry_key);
-    }
+    registerIdMapping(numericId, parsedPayload.__entry_key);
     return {
       id: parsedPayload.__entry_key,
       entry_type: parsedPayload.__entry_type,
@@ -149,9 +182,7 @@ function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
         (raw.profile_id && raw.profile_id.trim()) ||
         `profile-${raw.id}`;
       const logicalKey = makeProfileEntryId(profileId);
-      if (!Number.isNaN(numericId)) {
-        numericIdToLogicalKey.set(numericId, logicalKey);
-      }
+      registerIdMapping(numericId, logicalKey);
       const gender =
         obj.gender === 'boy' || obj.gender === 'girl' || obj.gender === 'undisclosed'
           ? obj.gender
@@ -341,49 +372,134 @@ export async function fetchAllEntries(): Promise<EntryRow[] | null> {
   return parsed;
 }
 
-export async function upsertEntry(row: EntryRow): Promise<void> {
-  if (!supabase) return;
-
-  const dbRow = toDbEntryRow(row, new Date().toISOString());
-  const { error } = await supabase
-    .from(ENTRIES_TABLE)
-    .upsert(dbRow, { onConflict: 'id' });
-
-  if (error) {
-    console.error(`Failed to upsert entry "${row.id}" in Supabase:`, error.message);
-  }
+export async function upsertEntry(row: EntryRow): Promise<{ error?: string }> {
+  return upsertEntries([row]);
 }
 
-export async function upsertEntries(rows: EntryRow[]): Promise<void> {
-  if (!supabase || rows.length === 0) return;
+async function upsertEntriesWithGeneratedIdentity(
+  rows: EntryRow[],
+  updatedAt: string
+): Promise<{ error?: string }> {
+  if (!supabase) return { error: MISSING_SUPABASE_ERROR };
+
+  const { data: existingRows, error: fetchError } = await supabase
+    .from(ENTRIES_TABLE)
+    .select('*');
+
+  if (fetchError) {
+    return { error: formatEntriesSupabaseError(fetchError) };
+  }
+
+  const existingByLogicalKey = new Map<string, number>();
+  for (const raw of (existingRows as RawDbEntryRow[]) ?? []) {
+    const normalized = fromDbEntryRow(raw);
+    const numId = Number(raw.id);
+    if (normalized && !Number.isNaN(numId)) {
+      existingByLogicalKey.set(normalized.id, numId);
+    }
+  }
+
+  const toInsert: Array<{ profile_id: string; payload: PayloadEnvelope; updated_at: string }> = [];
+
+  for (const row of rows) {
+    const existingId = existingByLogicalKey.get(row.id) ?? logicalKeyToNumericId.get(row.id);
+    const body = {
+      profile_id: row.profile_id ?? '',
+      payload: buildEnvelope(row),
+      updated_at: updatedAt,
+    };
+
+    if (existingId !== undefined && existingByLogicalKey.has(row.id)) {
+      const { error: updateError } = await supabase
+        .from(ENTRIES_TABLE)
+        .update(body)
+        .eq('id', existingId)
+        .select('*');
+      if (updateError) {
+        return { error: formatEntriesSupabaseError(updateError) };
+      }
+    } else {
+      toInsert.push(body);
+    }
+  }
+
+  if (toInsert.length > 0) {
+    const { data: inserted, error: insertError } = await supabase
+      .from(ENTRIES_TABLE)
+      .insert(toInsert)
+      .select('*');
+
+    if (insertError) {
+      return { error: formatEntriesSupabaseError(insertError) };
+    }
+
+    for (const raw of (inserted as RawDbEntryRow[]) ?? []) {
+      fromDbEntryRow(raw);
+    }
+  }
+
+  return {};
+}
+
+export async function upsertEntries(rows: EntryRow[]): Promise<{ error?: string }> {
+  if (rows.length === 0) return {};
+  if (!supabase) {
+    return { error: MISSING_SUPABASE_ERROR };
+  }
 
   const now = new Date().toISOString();
   const dbRows = rows.map((row) => toDbEntryRow(row, now));
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from(ENTRIES_TABLE)
-    .upsert(dbRows, { onConflict: 'id' });
+    .upsert(dbRows, { onConflict: 'id' })
+    .select('*');
 
-  if (error) {
-    console.error('Failed to batch upsert entries in Supabase:', error.message);
+  if (!error) {
+    if (Array.isArray(data) && data.length > 0) {
+      for (const raw of data as RawDbEntryRow[]) {
+        fromDbEntryRow(raw);
+      }
+      return {};
+    }
+    const msg =
+      'Write to "entries" returned no rows. Check INSERT/UPDATE/SELECT Row Level Security (RLS) policies on the "entries" table.';
+    console.error(msg);
+    return { error: msg };
   }
+
+  // Automatic fallback if entries.id is GENERATED ALWAYS AS IDENTITY (Postgres 428C9)
+  if (
+    error.code === '428C9' ||
+    /non-DEFAULT value|identity/i.test(error.message)
+  ) {
+    return upsertEntriesWithGeneratedIdentity(rows, now);
+  }
+
+  const msg = formatEntriesSupabaseError(error);
+  console.error('Failed to upsert entries in Supabase:', msg);
+  return { error: msg };
 }
 
-export async function deleteEntryById(logicalId: string): Promise<void> {
-  if (!supabase) return;
+export async function deleteEntryById(logicalId: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: MISSING_SUPABASE_ERROR };
 
-  const numericId = logicalKeyToInt8(logicalId);
+  const numericId = logicalKeyToNumericId.get(logicalId) ?? logicalKeyToInt8(logicalId);
   numericIdToLogicalKey.delete(numericId);
+  logicalKeyToNumericId.delete(logicalId);
 
   const { error } = await supabase.from(ENTRIES_TABLE).delete().eq('id', numericId);
 
   if (error) {
-    console.error(`Failed to delete entry "${logicalId}" from Supabase:`, error.message);
+    const msg = formatEntriesSupabaseError(error);
+    console.error(`Failed to delete entry "${logicalId}" from Supabase:`, msg);
+    return { error: msg };
   }
+  return {};
 }
 
-export async function deleteEntriesByProfileId(profileId: string): Promise<void> {
-  if (!supabase) return;
+export async function deleteEntriesByProfileId(profileId: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: MISSING_SUPABASE_ERROR };
 
   const { error } = await supabase
     .from(ENTRIES_TABLE)
@@ -391,26 +507,27 @@ export async function deleteEntriesByProfileId(profileId: string): Promise<void>
     .eq('profile_id', profileId);
 
   if (error) {
-    console.error(
-      `Failed to delete entries for profile "${profileId}" from Supabase:`,
-      error.message
-    );
+    const msg = formatEntriesSupabaseError(error);
+    console.error(`Failed to delete entries for profile "${profileId}" from Supabase:`, msg);
+    return { error: msg };
   }
+  return {};
 }
 
-export async function replaceAllEntries(rows: EntryRow[]): Promise<void> {
-  if (!supabase) return;
+export async function replaceAllEntries(rows: EntryRow[]): Promise<{ error?: string }> {
+  if (!supabase) return { error: MISSING_SUPABASE_ERROR };
 
   const { data: existing, error: fetchError } = await supabase
     .from(ENTRIES_TABLE)
     .select('id');
 
   if (fetchError) {
-    console.error('Failed to list existing entries before replace:', fetchError.message);
-    return;
+    const msg = formatEntriesSupabaseError(fetchError);
+    console.error('Failed to list existing entries before replace:', msg);
+    return { error: msg };
   }
 
-  const nextIds = new Set(rows.map((r) => logicalKeyToInt8(r.id)));
+  const nextIds = new Set(rows.map((r) => logicalKeyToNumericId.get(r.id) ?? logicalKeyToInt8(r.id)));
   const idsToDelete = ((existing as Array<{ id: number | string }>) ?? [])
     .map((r) => Number(r.id))
     .filter((id) => !Number.isNaN(id) && !nextIds.has(id));
@@ -422,11 +539,13 @@ export async function replaceAllEntries(rows: EntryRow[]): Promise<void> {
       .in('id', idsToDelete);
 
     if (deleteError) {
-      console.error('Failed to remove stale entries in Supabase:', deleteError.message);
+      const msg = formatEntriesSupabaseError(deleteError);
+      console.error('Failed to remove stale entries in Supabase:', msg);
+      return { error: msg };
     }
   }
 
-  await upsertEntries(rows);
+  return upsertEntries(rows);
 }
 
 export interface EntriesRealtimeHandlers {
