@@ -27,6 +27,8 @@ export interface EntryRow {
   id: string;
   entry_type: EntryType;
   profile_id: string | null;
+  profile_name?: string | null;
+  logged_by?: string | null;
   payload: unknown;
   created_at?: string;
   updated_at?: string;
@@ -39,16 +41,20 @@ export interface SettingPayload {
 
 /**
  * Raw row stored in the user's Supabase "entries" table:
- *   id          int8 (primary key)
- *   created_at  timestamptz default now()
- *   profile_id  text default ''::text
- *   payload     json
- *   updated_at  timestamptz default now()
+ *   id             int8 (primary key)
+ *   created_at     timestamptz default now()
+ *   profile_id     text default ''::text
+ *   "profile name" text (baby / profile name)
+ *   name           text (person logging the entry)
+ *   payload        json
+ *   updated_at     timestamptz default now()
  */
 interface RawDbEntryRow {
   id: number | string;
   created_at?: string;
   profile_id?: string | null;
+  'profile name'?: string | null;
+  name?: string | null;
   payload: unknown;
   updated_at?: string;
 }
@@ -133,6 +139,12 @@ function buildEnvelope(row: EntryRow): PayloadEnvelope {
   };
 }
 
+function normalizeOptionalText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function toDbEntryRow(row: EntryRow, updatedAt: string): RawDbEntryRow {
   const numericId = logicalKeyToNumericId.get(row.id) ?? logicalKeyToInt8(row.id);
   registerIdMapping(numericId, row.id);
@@ -140,13 +152,58 @@ function toDbEntryRow(row: EntryRow, updatedAt: string): RawDbEntryRow {
   return {
     id: numericId,
     profile_id: row.profile_id ?? '',
+    'profile name': normalizeOptionalText(row.profile_name),
+    name: normalizeOptionalText(row.logged_by),
     payload: buildEnvelope(row),
     updated_at: updatedAt,
   };
 }
 
+function hydratePayloadWithColumns(
+  entryType: EntryType,
+  data: unknown,
+  profileName: string | null,
+  loggedBy: string | null
+): unknown {
+  if (!data || typeof data !== 'object') return data;
+  const obj = { ...(data as Record<string, unknown>) };
+
+  if (entryType === 'profile') {
+    if ((!obj.name || typeof obj.name !== 'string' || !obj.name.trim()) && profileName) {
+      obj.name = profileName;
+    }
+    if ((!obj.loggedBy || typeof obj.loggedBy !== 'string' || !obj.loggedBy.trim()) && loggedBy) {
+      obj.loggedBy = loggedBy;
+    }
+    return obj;
+  }
+
+  if (entryType === 'love_note') {
+    if ((!obj.author || typeof obj.author !== 'string' || !obj.author.trim()) && loggedBy) {
+      obj.author = loggedBy;
+    }
+    return obj;
+  }
+
+  if (
+    entryType === 'baby_measurement' ||
+    entryType === 'fetal_measurement' ||
+    entryType === 'completed_milestone' ||
+    entryType === 'kick_session'
+  ) {
+    if ((!obj.loggedBy || typeof obj.loggedBy !== 'string' || !obj.loggedBy.trim()) && loggedBy) {
+      obj.loggedBy = loggedBy;
+    }
+    return obj;
+  }
+
+  return data;
+}
+
 function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
   const numericId = Number(raw.id);
+  const dbProfileName = normalizeOptionalText(raw['profile name']);
+  const dbLoggedBy = normalizeOptionalText(raw.name);
   let parsedPayload = raw.payload;
 
   if (typeof parsedPayload === 'string') {
@@ -159,11 +216,19 @@ function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
 
   if (isPayloadEnvelope(parsedPayload)) {
     registerIdMapping(numericId, parsedPayload.__entry_key);
+    const hydrated = hydratePayloadWithColumns(
+      parsedPayload.__entry_type,
+      parsedPayload.data,
+      dbProfileName,
+      dbLoggedBy
+    );
     return {
       id: parsedPayload.__entry_key,
       entry_type: parsedPayload.__entry_type,
       profile_id: raw.profile_id || null,
-      payload: parsedPayload.data,
+      profile_name: dbProfileName,
+      logged_by: dbLoggedBy,
+      payload: hydrated,
       created_at: raw.created_at,
       updated_at: raw.updated_at,
     };
@@ -172,8 +237,10 @@ function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
   // Fallback support for manually inserted raw ChildProfile JSON rows in entries.payload
   if (parsedPayload && typeof parsedPayload === 'object') {
     const obj = parsedPayload as Record<string, unknown>;
+    const resolvedName =
+      (typeof obj.name === 'string' && obj.name.trim()) || dbProfileName || '';
     if (
-      typeof obj.name === 'string' &&
+      resolvedName &&
       (obj.type === 'baby' || obj.type === 'fetal') &&
       typeof obj.dateOfEvent === 'string'
     ) {
@@ -201,9 +268,16 @@ function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
         id: logicalKey,
         entry_type: 'profile',
         profile_id: profileId,
+        profile_name: resolvedName,
+        logged_by: dbLoggedBy,
         payload: {
           ...obj,
           id: profileId,
+          name: resolvedName,
+          loggedBy:
+            (typeof obj.loggedBy === 'string' && obj.loggedBy.trim()) ||
+            dbLoggedBy ||
+            undefined,
           gender,
           avatarColor,
           avatarIcon,
@@ -219,6 +293,15 @@ function fromDbEntryRow(raw: RawDbEntryRow): EntryRow | null {
 
 export function makeProfileEntryId(profileId: string): string {
   return `profile:${profileId}`;
+}
+
+/**
+ * Resolves a profile's int8 primary key (`entries.id`) so tables with an `int8`
+ * `profile_id` column (such as `public.notes`) stay linked to the active profile.
+ */
+export function getProfileNumericId(profileId: string): number {
+  const logicalKey = makeProfileEntryId(profileId);
+  return logicalKeyToNumericId.get(logicalKey) ?? logicalKeyToInt8(logicalKey);
 }
 
 export function makeBabyMeasurementEntryId(id: string): string {
@@ -250,63 +333,94 @@ export function toProfileRow(profile: ChildProfile): EntryRow {
     id: makeProfileEntryId(profile.id),
     entry_type: 'profile',
     profile_id: profile.id,
+    profile_name: normalizeOptionalText(profile.name),
+    logged_by: normalizeOptionalText(profile.loggedBy),
     payload: profile,
   };
 }
 
-export function toBabyMeasurementRow(measurement: BabyMeasurement): EntryRow {
+export function toBabyMeasurementRow(
+  measurement: BabyMeasurement,
+  profileName?: string | null
+): EntryRow {
   return {
     id: makeBabyMeasurementEntryId(measurement.id),
     entry_type: 'baby_measurement',
     profile_id: measurement.profileId,
+    profile_name: normalizeOptionalText(profileName),
+    logged_by: normalizeOptionalText(measurement.loggedBy),
     payload: measurement,
   };
 }
 
-export function toFetalMeasurementRow(measurement: FetalMeasurement): EntryRow {
+export function toFetalMeasurementRow(
+  measurement: FetalMeasurement,
+  profileName?: string | null
+): EntryRow {
   return {
     id: makeFetalMeasurementEntryId(measurement.id),
     entry_type: 'fetal_measurement',
     profile_id: measurement.profileId,
+    profile_name: normalizeOptionalText(profileName),
+    logged_by: normalizeOptionalText(measurement.loggedBy),
     payload: measurement,
   };
 }
 
-export function toMilestoneRow(milestone: CompletedMilestone): EntryRow {
+export function toMilestoneRow(
+  milestone: CompletedMilestone,
+  profileName?: string | null
+): EntryRow {
   return {
     id: makeMilestoneEntryId(milestone.profileId, milestone.milestoneId),
     entry_type: 'completed_milestone',
     profile_id: milestone.profileId,
+    profile_name: normalizeOptionalText(profileName),
+    logged_by: normalizeOptionalText(milestone.loggedBy),
     payload: milestone,
   };
 }
 
-export function toKickSessionRow(session: KickSession): EntryRow {
+export function toKickSessionRow(
+  session: KickSession,
+  profileName?: string | null
+): EntryRow {
   return {
     id: makeKickSessionEntryId(session.id),
     entry_type: 'kick_session',
     profile_id: session.profileId,
+    profile_name: normalizeOptionalText(profileName),
+    logged_by: normalizeOptionalText(session.loggedBy),
     payload: session,
   };
 }
 
-export function toLoveNoteRow(note: LoveNote): EntryRow {
+export function toLoveNoteRow(
+  note: LoveNote,
+  profileName?: string | null
+): EntryRow {
   return {
     id: makeLoveNoteEntryId(note.id),
     entry_type: 'love_note',
     profile_id: note.profileId,
+    profile_name: normalizeOptionalText(profileName),
+    logged_by: normalizeOptionalText(note.author),
     payload: note,
   };
 }
 
 export function toSettingRow(
   key: SettingKey,
-  value: ThemeMode | UnitSystem | FormulaSettings | string
+  value: ThemeMode | UnitSystem | FormulaSettings | string,
+  profileName?: string | null,
+  loggedBy?: string | null
 ): EntryRow {
   return {
     id: makeSettingEntryId(key),
     entry_type: 'setting',
     profile_id: null,
+    profile_name: normalizeOptionalText(profileName),
+    logged_by: normalizeOptionalText(loggedBy),
     payload: { key, value } satisfies SettingPayload,
   };
 }
@@ -399,12 +513,20 @@ async function upsertEntriesWithGeneratedIdentity(
     }
   }
 
-  const toInsert: Array<{ profile_id: string; payload: PayloadEnvelope; updated_at: string }> = [];
+  const toInsert: Array<{
+    profile_id: string;
+    'profile name': string | null;
+    name: string | null;
+    payload: PayloadEnvelope;
+    updated_at: string;
+  }> = [];
 
   for (const row of rows) {
     const existingId = existingByLogicalKey.get(row.id) ?? logicalKeyToNumericId.get(row.id);
     const body = {
       profile_id: row.profile_id ?? '',
+      'profile name': normalizeOptionalText(row.profile_name),
+      name: normalizeOptionalText(row.logged_by),
       payload: buildEnvelope(row),
       updated_at: updatedAt,
     };
@@ -493,6 +615,28 @@ export async function deleteEntryById(logicalId: string): Promise<{ error?: stri
   if (error) {
     const msg = formatEntriesSupabaseError(error);
     console.error(`Failed to delete entry "${logicalId}" from Supabase:`, msg);
+    return { error: msg };
+  }
+  return {};
+}
+
+export async function updateEntriesProfileName(
+  profileId: string,
+  profileName: string
+): Promise<{ error?: string }> {
+  if (!supabase) return { error: MISSING_SUPABASE_ERROR };
+
+  const { error } = await supabase
+    .from(ENTRIES_TABLE)
+    .update({
+      'profile name': normalizeOptionalText(profileName),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('profile_id', profileId);
+
+  if (error) {
+    const msg = formatEntriesSupabaseError(error);
+    console.error(`Failed to sync "profile name" for profile "${profileId}":`, msg);
     return { error: msg };
   }
   return {};

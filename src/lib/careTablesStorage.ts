@@ -1,10 +1,12 @@
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import { supabase, GROWTH_TABLE, ROUTINE_TABLE } from './supabase';
+import { supabase, GROWTH_TABLE, ROUTINE_TABLE, NOTES_TABLE } from './supabase';
 import type {
   GrowthRecord,
   NewGrowthRecordInput,
   RoutineRecord,
   NewRoutineRecordInput,
+  NoteRecord,
+  NewNoteRecordInput,
 } from '../types';
 
 function toNullableFloat(value: number | null | undefined): number | null {
@@ -32,6 +34,7 @@ function normalizeGrowthRow(raw: Record<string, unknown>): GrowthRecord {
     id: Number(raw.id),
     created_at: String(raw.created_at ?? new Date().toISOString()),
     profile_id: toNullableText(raw.profile_id !== null && raw.profile_id !== undefined ? String(raw.profile_id) : null),
+    date: raw.date !== null && raw.date !== undefined ? String(raw.date) : null,
     daily_weight: raw.daily_weight !== null && raw.daily_weight !== undefined ? Number(raw.daily_weight) : null,
     daily_length: raw.daily_length !== null && raw.daily_length !== undefined ? Number(raw.daily_length) : null,
     temperature: raw.temperature !== null && raw.temperature !== undefined ? Number(raw.temperature) : null,
@@ -60,6 +63,23 @@ function normalizeRoutineRow(raw: Record<string, unknown>): RoutineRecord {
       raw['feed duration (min)'] !== null && raw['feed duration (min)'] !== undefined
         ? Number(raw['feed duration (min)'])
         : null,
+  };
+}
+
+function normalizeNoteRow(raw: Record<string, unknown>): NoteRecord {
+  const rawProfileId = raw.profile_id;
+  const parsedProfileId =
+    rawProfileId !== null && rawProfileId !== undefined && String(rawProfileId).trim() !== ''
+      ? Number(rawProfileId)
+      : null;
+
+  return {
+    id: Number(raw.id),
+    created_at: String(raw.created_at ?? new Date().toISOString()),
+    name: raw.name !== null && raw.name !== undefined ? String(raw.name) : null,
+    notes: raw.notes !== null && raw.notes !== undefined ? String(raw.notes) : null,
+    profile_id:
+      parsedProfileId !== null && !Number.isNaN(parsedProfileId) ? parsedProfileId : null,
   };
 }
 
@@ -99,6 +119,7 @@ export async function fetchGrowthRecords(): Promise<GrowthRecord[] | null> {
   const { data, error } = await supabase
     .from(GROWTH_TABLE)
     .select('*')
+    .order('date', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -114,6 +135,7 @@ export async function insertGrowthRecord(
 ): Promise<{ record: GrowthRecord | null; error?: string }> {
   const payload = {
     profile_id: toNullableText(input.profile_id),
+    date: toNullableText(input.date),
     daily_weight: toNullableFloat(input.daily_weight),
     daily_length: toNullableFloat(input.daily_length),
     temperature: toNullableFloat(input.temperature),
@@ -176,6 +198,7 @@ export async function updateGrowthRecord(
 ): Promise<{ record: GrowthRecord | null; error?: string }> {
   const payload: Record<string, unknown> = {};
   if ('profile_id' in updates) payload.profile_id = toNullableText(updates.profile_id);
+  if ('date' in updates) payload.date = toNullableText(updates.date);
   if ('daily_weight' in updates) payload.daily_weight = toNullableFloat(updates.daily_weight);
   if ('daily_length' in updates) payload.daily_length = toNullableFloat(updates.daily_length);
   if ('temperature' in updates) payload.temperature = toNullableFloat(updates.temperature);
@@ -408,6 +431,162 @@ export function subscribeToRoutine(handlers: {
         if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
           if (payload.new && 'id' in payload.new) {
             handlers.onUpsert(normalizeRoutineRow(payload.new));
+          }
+        } else if (payload.eventType === 'DELETE') {
+          if (payload.old && 'id' in payload.old) {
+            handlers.onDelete(Number(payload.old.id));
+          }
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    void client.removeChannel(channel);
+  };
+}
+
+// ============================================================================
+// NOTES TABLE CRUD + REALTIME
+// ============================================================================
+
+export async function fetchNoteRecords(): Promise<NoteRecord[] | null> {
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from(NOTES_TABLE)
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to fetch "notes" records from Supabase:', formatSupabaseError(error, NOTES_TABLE));
+    return null;
+  }
+
+  return ((data as Record<string, unknown>[]) ?? []).map(normalizeNoteRow);
+}
+
+export async function insertNoteRecord(
+  input: NewNoteRecordInput
+): Promise<{ record: NoteRecord | null; error?: string }> {
+  const payload = {
+    name: toNullableText(input.name),
+    notes: toNullableText(input.notes),
+    profile_id: toNullableInt(input.profile_id),
+  };
+
+  if (!supabase) {
+    return { record: null, error: MISSING_SUPABASE_ERROR };
+  }
+
+  const firstAttempt = await supabase
+    .from(NOTES_TABLE)
+    .insert([payload])
+    .select('*');
+
+  const firstRow = Array.isArray(firstAttempt.data)
+    ? (firstAttempt.data[0] as Record<string, unknown> | undefined)
+    : undefined;
+
+  if (!firstAttempt.error && firstRow) {
+    return { record: normalizeNoteRow(firstRow) };
+  }
+
+  // Fallback if the user's int8 primary key does not have an identity/sequence default
+  if (firstAttempt.error?.code === '23502') {
+    const retryAttempt = await supabase
+      .from(NOTES_TABLE)
+      .insert([{ id: Date.now(), ...payload }])
+      .select('*');
+
+    const retryRow = Array.isArray(retryAttempt.data)
+      ? (retryAttempt.data[0] as Record<string, unknown> | undefined)
+      : undefined;
+
+    if (!retryAttempt.error && retryRow) {
+      return { record: normalizeNoteRow(retryRow) };
+    }
+    return {
+      record: null,
+      error: retryAttempt.error
+        ? formatSupabaseError(retryAttempt.error, NOTES_TABLE)
+        : 'Saved to "notes", but no row was returned. Check SELECT RLS policy on "notes".',
+    };
+  }
+
+  if (!firstAttempt.error && !firstRow) {
+    return {
+      record: null,
+      error: 'Saved to "notes", but no row was returned. Check SELECT/INSERT RLS policies on "notes".',
+    };
+  }
+
+  return { record: null, error: formatSupabaseError(firstAttempt.error, NOTES_TABLE) };
+}
+
+export async function updateNoteRecord(
+  id: number,
+  updates: NewNoteRecordInput
+): Promise<{ record: NoteRecord | null; error?: string }> {
+  const payload: Record<string, unknown> = {};
+  if ('name' in updates) payload.name = toNullableText(updates.name);
+  if ('notes' in updates) payload.notes = toNullableText(updates.notes);
+  if ('profile_id' in updates) payload.profile_id = toNullableInt(updates.profile_id);
+
+  if (!supabase) {
+    return { record: null, error: MISSING_SUPABASE_ERROR };
+  }
+
+  const { data, error } = await supabase
+    .from(NOTES_TABLE)
+    .update(payload)
+    .eq('id', id)
+    .select('*');
+
+  if (error) {
+    const msg = formatSupabaseError(error, NOTES_TABLE);
+    console.error(`Failed to update "notes" record ${id}:`, msg);
+    return { record: null, error: msg };
+  }
+
+  const savedRow = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
+  return { record: savedRow ? normalizeNoteRow(savedRow) : null };
+}
+
+export async function deleteNoteRecord(id: number): Promise<{ error?: string }> {
+  if (!supabase) {
+    return { error: MISSING_SUPABASE_ERROR };
+  }
+
+  const { error } = await supabase.from(NOTES_TABLE).delete().eq('id', id);
+  if (error) {
+    const msg = formatSupabaseError(error, NOTES_TABLE);
+    console.error(`Failed to delete "notes" record ${id}:`, msg);
+    return { error: msg };
+  }
+  return {};
+}
+
+export function subscribeToNotes(handlers: {
+  onUpsert: (record: NoteRecord) => void;
+  onDelete: (id: number) => void;
+}): () => void {
+  if (!supabase) return () => {};
+
+  const client = supabase;
+  const channel = client
+    .channel('notes-realtime')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: NOTES_TABLE,
+      },
+      (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          if (payload.new && 'id' in payload.new) {
+            handlers.onUpsert(normalizeNoteRow(payload.new));
           }
         } else if (payload.eventType === 'DELETE') {
           if (payload.old && 'id' in payload.old) {

@@ -30,6 +30,7 @@ export interface ChildProfile {
   birthLengthCm?: number;
   birthHeadCircumferenceCm?: number;
   notes?: string;
+  loggedBy?: string; // Person who created/logged this profile entry (`entries.name`)
   avatarColor: string;
   avatarIcon: string;
   // Attached fetal profile linkage
@@ -51,6 +52,7 @@ export interface BabyMeasurement {
   headCircumferenceCm?: number;
   pediatricianVisit?: boolean;
   notes?: string;
+  loggedBy?: string;
 }
 
 export type FetalFormulaId = 'hadlock4' | 'hadlock3' | 'shepard' | 'intergrowth21' | 'custom';
@@ -92,6 +94,7 @@ export interface FetalMeasurement {
   maternalWeightKg?: number;
   notes?: string;
   scanLocation?: string;
+  loggedBy?: string;
 }
 
 export type MilestoneCategory = 'social' | 'language' | 'cognitive' | 'movement';
@@ -116,6 +119,7 @@ export interface CompletedMilestone {
   isCustom?: boolean;
   customTitle?: string;
   customCategory?: MilestoneCategory;
+  loggedBy?: string;
 }
 
 export interface KickSession {
@@ -127,6 +131,7 @@ export interface KickSession {
   kicksCount: number;
   targetReached: boolean;
   notes?: string;
+  loggedBy?: string;
 }
 
 export interface GrowthPercentiles {
@@ -155,6 +160,7 @@ export interface GrowthRecord {
   id: number;
   created_at: string;
   profile_id: string | null;
+  date: string | null;
   daily_weight: number | null;
   daily_length: number | null;
   temperature: number | null;
@@ -164,6 +170,7 @@ export interface GrowthRecord {
 
 export interface NewGrowthRecordInput {
   profile_id?: string | null;
+  date?: string | null;
   daily_weight?: number | null;
   daily_length?: number | null;
   temperature?: number | null;
@@ -199,5 +206,24 @@ export interface NewRoutineRecordInput {
   name?: string | null;
   remark?: string | null;
   'feed duration (min)'?: number | null;
+}
+
+/**
+ * Matches Supabase Postgres table: public."notes"
+ * `profile_id` is int8 linking to the active profile's `entries.id`;
+ * `name` is the person logging the note; `notes` is the note body.
+ */
+export interface NoteRecord {
+  id: number;
+  created_at: string;
+  name: string | null;
+  notes: string | null;
+  profile_id: number | null;
+}
+
+export interface NewNoteRecordInput {
+  name?: string | null;
+  notes?: string | null;
+  profile_id?: number | null;
 }
 

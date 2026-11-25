@@ -104,7 +104,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
           : ''
       );
       setTemperatureInput('');
-      setLoggedByInput('');
+      setLoggedByInput(editingBabyMeasurement.loggedBy || '');
       setPediatricianVisit(Boolean(editingBabyMeasurement.pediatricianVisit));
       setNotes(editingBabyMeasurement.notes || '');
       return;
@@ -139,6 +139,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
           : ''
       );
       setScanLocation(editingFetalMeasurement.scanLocation || '');
+      setLoggedByInput(editingFetalMeasurement.loggedBy || '');
       setNotes(editingFetalMeasurement.notes || '');
       return;
     }
@@ -266,6 +267,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
           headCircumferenceCm,
           pediatricianVisit,
           notes: notes.trim() || undefined,
+          loggedBy: loggedByInput.trim() || undefined,
         };
 
         const entryRes = editingBabyMeasurement
@@ -281,6 +283,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
         if (!editingBabyMeasurement && (weightKg !== undefined || lengthCm !== undefined || parsedTemp !== null)) {
           const growthRes = await addGrowthRecord({
             profile_id: activeProfile.id,
+            date,
             daily_weight: weightKg ?? null,
             daily_length: lengthCm ?? null,
             temperature: parsedTemp,
@@ -320,6 +323,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
           maternalWeightKg,
           notes: notes.trim() || undefined,
           scanLocation: scanLocation.trim() || undefined,
+          loggedBy: loggedByInput.trim() || undefined,
         };
 
         const fetalRes = editingFetalMeasurement
@@ -696,17 +700,31 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                  Scan Clinic / Facility
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. St. Jude Ultrasound Center"
-                  value={scanLocation}
-                  onChange={(e) => setScanLocation(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                    Scan Clinic / Facility
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. St. Jude Ultrasound Center"
+                    value={scanLocation}
+                    onChange={(e) => setScanLocation(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                    Logged By (optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Mom, Dad, Caregiver"
+                    value={loggedByInput}
+                    onChange={(e) => setLoggedByInput(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                  />
+                </div>
               </div>
             </div>
           )}

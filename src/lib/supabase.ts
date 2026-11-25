@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 export const ENTRIES_TABLE = 'entries' as const;
 export const GROWTH_TABLE = 'growth' as const;
 export const ROUTINE_TABLE = 'routine' as const;
+export const NOTES_TABLE = 'notes' as const;
 
 function stripWrappingQuotes(value: string | undefined): string {
   if (!value) return '';

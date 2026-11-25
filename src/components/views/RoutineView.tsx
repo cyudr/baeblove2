@@ -6,6 +6,7 @@ import {
   interpretGrowthTable,
   interpretRoutineTable,
 } from '../../utils/careInterpreter';
+import { EditAuthModal } from '../modals/EditAuthModal';
 import type { RoutineRecord } from '../../types';
 import {
   Droplets,
@@ -19,6 +20,8 @@ import {
   Sparkles,
   Baby,
   Filter,
+  RotateCcw,
+  Lock,
 } from 'lucide-react';
 
 const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
@@ -72,10 +75,12 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   const [diaper, setDiaper] = useState<string>('');
   const [routineRemark, setRoutineRemark] = useState<string>('');
   const [routineError, setRoutineError] = useState<string | null>(null);
+  const [retrieveNotice, setRetrieveNotice] = useState<string | null>(null);
   const [isSavingRoutine, setIsSavingRoutine] = useState(false);
 
-  // Two-step inline delete confirmation
+  // Two-step inline delete confirmation & bae_Key edit auth
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [pendingAuthRecord, setPendingAuthRecord] = useState<RoutineRecord | null>(null);
 
   useEffect(() => {
     setLoggerFilter('all');
@@ -104,6 +109,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setDiaper(initialEditRecord.Diaper ?? '');
     setRoutineRemark(initialEditRecord.remark ?? '');
     setRoutineError(null);
+    setRetrieveNotice(null);
     onClearInitialEdit?.();
   }, [initialEditRecord, onClearInitialEdit]);
 
@@ -112,6 +118,8 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     if (!activeProfile) return routineRecords;
     return routineRecords.filter((r) => doesRecordMatchProfile(r, activeProfile));
   }, [routineRecords, activeProfile]);
+
+  const latestRoutineRecord = profileRoutineRecords[0] ?? null;
 
   const profileGrowthRecords = useMemo(() => {
     if (!activeProfile) return growthRecords;
@@ -159,6 +167,59 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     setDiaper('');
     setRoutineRemark('');
     setRoutineError(null);
+    setRetrieveNotice(null);
+  };
+
+  const handleRetrieveLastRoutine = () => {
+    if (!latestRoutineRecord) return;
+    setEditingRoutineId(null);
+    setRoutineDate(getCurrentDateStr());
+    setRoutineTime(getCurrentTimeStr());
+    setLoggedBy(latestRoutineRecord.name ?? '');
+    setEbmMl(
+      latestRoutineRecord['EBM (mL)'] !== null ? String(latestRoutineRecord['EBM (mL)']) : ''
+    );
+    setFormulaMl(
+      latestRoutineRecord['Formula (mL)'] !== null
+        ? String(latestRoutineRecord['Formula (mL)'])
+        : ''
+    );
+    setFeedDurationMin(
+      latestRoutineRecord['feed duration (min)'] !== null
+        ? String(latestRoutineRecord['feed duration (min)'])
+        : ''
+    );
+    setDiaper(latestRoutineRecord.Diaper ?? '');
+    setRoutineRemark(latestRoutineRecord.remark ?? '');
+    setRoutineError(null);
+    const whenLabel = [
+      getRoutineRecordDate(latestRoutineRecord),
+      latestRoutineRecord.time ? latestRoutineRecord.time.slice(0, 5) : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    setRetrieveNotice(`Loaded values from last entry (${whenLabel}) as a new log.`);
+  };
+
+  const applyEditRoutine = (row: RoutineRecord) => {
+    setEditingRoutineId(row.id);
+    setLoggedBy(row.name ?? '');
+    setRoutineDate(row.date ? row.date.slice(0, 10) : getCurrentDateStr());
+    setRoutineTime(row.time ? row.time.slice(0, 5) : getCurrentTimeStr());
+    setEbmMl(row['EBM (mL)'] !== null ? String(row['EBM (mL)']) : '');
+    setFormulaMl(row['Formula (mL)'] !== null ? String(row['Formula (mL)']) : '');
+    setFeedDurationMin(
+      row['feed duration (min)'] !== null ? String(row['feed duration (min)']) : ''
+    );
+    setDiaper(row.Diaper ?? '');
+    setRoutineRemark(row.remark ?? '');
+    setRoutineError(null);
+    setRetrieveNotice(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const requestEditRoutine = (row: RoutineRecord) => {
+    setPendingAuthRecord(row);
   };
 
   const handleSaveRoutine = async (e: React.FormEvent) => {
@@ -209,22 +270,6 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     } finally {
       setIsSavingRoutine(false);
     }
-  };
-
-  const handleEditRoutine = (row: RoutineRecord) => {
-    setEditingRoutineId(row.id);
-    setLoggedBy(row.name ?? '');
-    setRoutineDate(row.date ? row.date.slice(0, 10) : getCurrentDateStr());
-    setRoutineTime(row.time ? row.time.slice(0, 5) : getCurrentTimeStr());
-    setEbmMl(row['EBM (mL)'] !== null ? String(row['EBM (mL)']) : '');
-    setFormulaMl(row['Formula (mL)'] !== null ? String(row['Formula (mL)']) : '');
-    setFeedDurationMin(
-      row['feed duration (min)'] !== null ? String(row['feed duration (min)']) : ''
-    );
-    setDiaper(row.Diaper ?? '');
-    setRoutineRemark(row.remark ?? '');
-    setRoutineError(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const maxSeriesMl = Math.max(
@@ -286,7 +331,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         onSubmit={handleSaveRoutine}
         className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs space-y-4"
       >
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
               <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -302,17 +347,54 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               </span>
             )}
           </div>
-          {editingRoutineId !== null && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {latestRoutineRecord && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleRetrieveLastRoutine}
+                  className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Copy values from the latest routine entry into a new log"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Retrieve Last</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => requestEditRoutine(latestRoutineRecord)}
+                  className="px-2.5 py-1.5 text-[11px] font-semibold text-emerald-900 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Authenticate with bae_Key to edit the latest routine entry"
+                >
+                  <Lock className="w-3 h-3" />
+                  <span>Edit Last</span>
+                </button>
+              </>
+            )}
+            {editingRoutineId !== null && (
+              <button
+                type="button"
+                onClick={() => resetRoutineForm(false)}
+                className="px-2 py-1.5 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Cancel edit</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {retrieveNotice && (
+          <div className="px-3 py-2 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-900/60 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2">
+            <span>{retrieveNotice}</span>
             <button
               type="button"
-              onClick={() => resetRoutineForm(false)}
-              className="text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
+              onClick={() => setRetrieveNotice(null)}
+              className="text-emerald-700 dark:text-emerald-300 hover:opacity-80 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
-              <span>Cancel edit</span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
@@ -743,9 +825,9 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                         <div className="inline-flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => handleEditRoutine(row)}
+                            onClick={() => requestEditRoutine(row)}
                             className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-white rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                            title="Edit routine entry"
+                            title="Authenticate with bae_Key to edit routine entry"
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
@@ -780,6 +862,25 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* bae_Key Authentication Modal for Editing Routine Entries */}
+      <EditAuthModal
+        isOpen={Boolean(pendingAuthRecord)}
+        title="Authenticate to Edit Routine Entry"
+        description={
+          pendingAuthRecord
+            ? `Enter your bae_Key passkey to edit routine record #${pendingAuthRecord.id} (${getRoutineRecordDate(pendingAuthRecord)}${pendingAuthRecord.time ? ` ${pendingAuthRecord.time.slice(0, 5)}` : ''}).`
+            : undefined
+        }
+        onClose={() => setPendingAuthRecord(null)}
+        onAuthenticated={() => {
+          if (pendingAuthRecord) {
+            const target = pendingAuthRecord;
+            setPendingAuthRecord(null);
+            applyEditRoutine(target);
+          }
+        }}
+      />
     </div>
   );
 };

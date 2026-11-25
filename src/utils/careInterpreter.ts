@@ -1,5 +1,6 @@
 import { calculatePercentile } from '../data/growthStandards';
-import type { BabyMeasurement, ChildProfile, GrowthRecord, RoutineRecord } from '../types';
+import { getProfileNumericId } from '../lib/entriesStorage';
+import type { BabyMeasurement, ChildProfile, GrowthRecord, NoteRecord, RoutineRecord } from '../types';
 
 export function doesRecordMatchProfile(
   record: { profile_id?: string | null; name?: string | null } | null | undefined,
@@ -21,6 +22,23 @@ export function doesRecordMatchProfile(
   return legacyName === fullName || (firstName.length > 0 && legacyName === firstName);
 }
 
+export function doesNoteMatchProfile(
+  note: Pick<NoteRecord, 'profile_id'> | null | undefined,
+  profile: ChildProfile | undefined
+): boolean {
+  if (!profile) return true;
+  if (!note) return false;
+  if (note.profile_id === null || note.profile_id === undefined) return true;
+  return Number(note.profile_id) === getProfileNumericId(profile.id);
+}
+
+export function getGrowthRecordDate(record: GrowthRecord): string {
+  if (record.date && /^\d{4}-\d{2}-\d{2}/.test(record.date)) {
+    return record.date.slice(0, 10);
+  }
+  return record.created_at.slice(0, 10);
+}
+
 export function mergeProfileGrowthMeasurements(
   profile: ChildProfile | undefined,
   babyMeasurements: BabyMeasurement[],
@@ -39,7 +57,7 @@ export function mergeProfileGrowthMeasurements(
   const merged: BabyMeasurement[] = [...babyMeasurements];
 
   for (const g of matchingGrowth) {
-    const dateStr = g.created_at.slice(0, 10);
+    const dateStr = getGrowthRecordDate(g);
     const alreadyExists = merged.some(
       (m) =>
         m.date === dateStr &&
@@ -48,7 +66,7 @@ export function mergeProfileGrowthMeasurements(
     );
     if (alreadyExists) continue;
 
-    const recMs = new Date(g.created_at).getTime();
+    const recMs = new Date(`${dateStr}T12:00:00`).getTime();
     const diffDays = Number.isNaN(recMs)
       ? 0
       : Math.max(0, Math.floor((recMs - birthMs) / (1000 * 60 * 60 * 24)));
@@ -146,10 +164,12 @@ export function interpretGrowthTable(
   records: GrowthRecord[],
   profile?: ChildProfile
 ): GrowthInterpretation {
-  // Sort chronological ascending for trend calculations
-  const sorted = [...records].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
+  // Sort chronological ascending by recorded date (falling back to created_at)
+  const sorted = [...records].sort((a, b) => {
+    const aKey = `${getGrowthRecordDate(a)}T${a.created_at.slice(11, 19)}`;
+    const bKey = `${getGrowthRecordDate(b)}T${b.created_at.slice(11, 19)}`;
+    return aKey.localeCompare(bKey);
+  });
 
   const weightRows = sorted.filter((r) => r.daily_weight !== null && r.daily_weight > 0);
   const lengthRows = sorted.filter((r) => r.daily_length !== null && r.daily_length > 0);
@@ -164,16 +184,16 @@ export function interpretGrowthTable(
 
   if (latestWeightRow && prevWeightRow && latestWeightRow.daily_weight !== null && prevWeightRow.daily_weight !== null) {
     weightDeltaGrams = Math.round((latestWeightRow.daily_weight - prevWeightRow.daily_weight) * 1000);
-    const daysBetween =
-      (new Date(latestWeightRow.created_at).getTime() - new Date(prevWeightRow.created_at).getTime()) /
-      (1000 * 60 * 60 * 24);
+    const latestMs = new Date(`${getGrowthRecordDate(latestWeightRow)}T12:00:00`).getTime();
+    const prevMs = new Date(`${getGrowthRecordDate(prevWeightRow)}T12:00:00`).getTime();
+    const daysBetween = (latestMs - prevMs) / (1000 * 60 * 60 * 24);
     if (daysBetween >= 0.5) {
       weightVelocityGramsPerDay = Math.round(weightDeltaGrams / daysBetween);
     }
   }
 
   const ageMonthsForWeight = latestWeightRow
-    ? getProfileAgeMonths(profile, latestWeightRow.created_at)
+    ? getProfileAgeMonths(profile, `${getGrowthRecordDate(latestWeightRow)}T12:00:00`)
     : null;
   const weightPercentile =
     latestWeightKg !== null && ageMonthsForWeight !== null && profile?.type === 'baby'
@@ -189,7 +209,7 @@ export function interpretGrowthTable(
       : null;
 
   const ageMonthsForLength = latestLengthRow
-    ? getProfileAgeMonths(profile, latestLengthRow.created_at)
+    ? getProfileAgeMonths(profile, `${getGrowthRecordDate(latestLengthRow)}T12:00:00`)
     : null;
   const lengthPercentile =
     latestLengthCm !== null && ageMonthsForLength !== null && profile?.type === 'baby'

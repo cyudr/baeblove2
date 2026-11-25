@@ -4,6 +4,7 @@ import { calculatePercentile, UnitConverter } from '../../data/growthStandards';
 import {
   classifyTemperature,
   doesRecordMatchProfile,
+  getGrowthRecordDate,
   getRoutineRecordDate,
 } from '../../utils/careInterpreter';
 import {
@@ -22,6 +23,8 @@ import {
   Filter,
 } from 'lucide-react';
 import { AttachedPrenatalHistoryModal } from '../modals/AttachedPrenatalHistoryModal';
+import { EditAuthModal } from '../modals/EditAuthModal';
+import { EditCareRecordModal } from '../modals/EditCareRecordModal';
 import type {
   BabyMeasurement,
   FetalMeasurement,
@@ -30,6 +33,12 @@ import type {
 } from '../../types';
 
 type HistorySubTab = 'all' | 'routine' | 'growth' | 'clinical' | 'fetal-history';
+
+type PendingEditAction =
+  | { kind: 'routine'; record: RoutineRecord }
+  | { kind: 'growth'; record: GrowthRecord }
+  | { kind: 'baby'; record: BabyMeasurement }
+  | { kind: 'fetal'; record: FetalMeasurement };
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -97,6 +106,9 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
   const [loggerFilter, setLoggerFilter] = useState<string>('all');
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
+  const [pendingEditAction, setPendingEditAction] = useState<PendingEditAction | null>(null);
+  const [editingRoutineInHistory, setEditingRoutineInHistory] = useState<RoutineRecord | null>(null);
+  const [editingGrowthInHistory, setEditingGrowthInHistory] = useState<GrowthRecord | null>(null);
 
   const isBaby = activeProfile?.type === 'baby';
   const hasAttachedFetal = Boolean(isBaby && activeProfile?.attachedFetalProfileId);
@@ -126,8 +138,14 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
     for (const g of profileGrowthRecords) {
       if (g.name?.trim()) set.add(g.name.trim());
     }
+    for (const m of activeBabyMeasurements) {
+      if (m.loggedBy?.trim()) set.add(m.loggedBy.trim());
+    }
+    for (const m of activeFetalMeasurements) {
+      if (m.loggedBy?.trim()) set.add(m.loggedBy.trim());
+    }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [profileRoutineRecords, profileGrowthRecords]);
+  }, [profileRoutineRecords, profileGrowthRecords, activeBabyMeasurements, activeFetalMeasurements]);
 
   const filteredRoutine = useMemo(() => {
     if (loggerFilter === 'all') return profileRoutineRecords;
@@ -140,6 +158,18 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
     const target = loggerFilter.trim().toLowerCase();
     return profileGrowthRecords.filter((g) => (g.name ?? '').trim().toLowerCase() === target);
   }, [profileGrowthRecords, loggerFilter]);
+
+  const filteredBabyMeasurements = useMemo(() => {
+    if (loggerFilter === 'all') return activeBabyMeasurements;
+    const target = loggerFilter.trim().toLowerCase();
+    return activeBabyMeasurements.filter((m) => (m.loggedBy ?? '').trim().toLowerCase() === target);
+  }, [activeBabyMeasurements, loggerFilter]);
+
+  const filteredFetalMeasurements = useMemo(() => {
+    if (loggerFilter === 'all') return activeFetalMeasurements;
+    const target = loggerFilter.trim().toLowerCase();
+    return activeFetalMeasurements.filter((m) => (m.loggedBy ?? '').trim().toLowerCase() === target);
+  }, [activeFetalMeasurements, loggerFilter]);
 
   const clinicalCount = activeProfile
     ? isBaby
@@ -234,16 +264,14 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1">
-                        {onEditRoutineRecord && (
-                          <button
-                            type="button"
-                            onClick={() => onEditRoutineRecord(row)}
-                            className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-white rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                            title="Edit routine entry"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => setPendingEditAction({ kind: 'routine', record: row })}
+                          className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-white rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+                          title="Authenticate with bae_Key to edit routine entry"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
                         {pendingDeleteKey === deleteKey ? (
                           <button
                             type="button"
@@ -307,7 +335,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
-                <th className="py-3 px-4">Recorded At</th>
+                <th className="py-3 px-4">Date</th>
                 <th className="py-3 px-4">Logged By</th>
                 <th className="py-3 px-4">Daily Weight</th>
                 <th className="py-3 px-4">Daily Length</th>
@@ -327,7 +355,10 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors"
                   >
                     <td className="py-3 px-4 whitespace-nowrap font-bold text-stone-900 dark:text-white">
-                      {formatDateTime(row.created_at)}
+                      <div>{getGrowthRecordDate(row)}</div>
+                      <div className="text-[10px] font-normal text-stone-400 dark:text-stone-500">
+                        {formatDateTime(row.created_at)}
+                      </div>
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">{row.name || '—'}</td>
                     <td className="py-3 px-4 font-mono font-bold whitespace-nowrap">
@@ -361,16 +392,14 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1">
-                        {onEditGrowthRecord && (
-                          <button
-                            type="button"
-                            onClick={() => onEditGrowthRecord(row)}
-                            className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-white rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                            title="Edit growth entry"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => setPendingEditAction({ kind: 'growth', record: row })}
+                          className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-white rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+                          title="Authenticate with bae_Key to edit growth entry"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
                         {pendingDeleteKey === deleteKey ? (
                           <button
                             type="button"
@@ -439,7 +468,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
         </div>
 
         {isBaby ? (
-          activeBabyMeasurements.length === 0 ? (
+          filteredBabyMeasurements.length === 0 ? (
             <div className="p-10 text-center text-xs text-stone-500 dark:text-stone-400">
               No pediatric checkups recorded yet for {activeProfile.name}.
             </div>
@@ -449,6 +478,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                 <thead>
                   <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                     <th className="py-3 px-4">Date</th>
+                    <th className="py-3 px-4">Logged By</th>
                     <th className="py-3 px-4">Age</th>
                     <th className="py-3 px-4">Weight</th>
                     <th className="py-3 px-4">Weight %ile</th>
@@ -459,7 +489,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
-                  {activeBabyMeasurements.map((m) => {
+                  {filteredBabyMeasurements.map((m) => {
                     const weightPct = m.weightKg
                       ? calculatePercentile(m.weightKg, m.ageInMonths, 'weight', activeProfile.gender)
                       : null;
@@ -478,6 +508,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                             </span>
                           )}
                         </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">{m.loggedBy || '—'}</td>
                         <td className="py-3.5 px-4 whitespace-nowrap font-mono">{m.ageInMonths} mo</td>
                         <td className="py-3.5 px-4 font-mono font-bold whitespace-nowrap">
                           {m.weightKg ? UnitConverter.formatWeight(m.weightKg, unitSystem) : '—'}
@@ -507,9 +538,9 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                             {onEditBabyMeasurement && (
                               <button
                                 type="button"
-                                onClick={() => onEditBabyMeasurement(m)}
+                                onClick={() => setPendingEditAction({ kind: 'baby', record: m })}
                                 className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-white rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                                title="Edit measurement"
+                                title="Authenticate with bae_Key to edit measurement"
                               >
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
@@ -544,7 +575,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
               </table>
             </div>
           )
-        ) : activeFetalMeasurements.length === 0 ? (
+        ) : filteredFetalMeasurements.length === 0 ? (
           <div className="p-10 text-center text-xs text-stone-500 dark:text-stone-400">
             No ultrasound scans logged yet for {activeProfile.name}.
           </div>
@@ -554,6 +585,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
               <thead>
                 <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                   <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Logged By</th>
                   <th className="py-3 px-4">Gestational Age</th>
                   <th className="py-3 px-4">EFW (Weight)</th>
                   <th className="py-3 px-4">BPD</th>
@@ -567,7 +599,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
-                {activeFetalMeasurements.map((m) => {
+                {filteredFetalMeasurements.map((m) => {
                   const deleteKey = `fetal-m-${m.id}`;
                   return (
                     <tr
@@ -577,6 +609,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                       <td className="py-3.5 px-4 font-bold text-stone-900 dark:text-white whitespace-nowrap">
                         {m.date}
                       </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">{m.loggedBy || '—'}</td>
                       <td className="py-3.5 px-4 whitespace-nowrap font-mono font-bold text-amber-900 dark:text-amber-400">
                         {m.gestationalWeeks}w {m.gestationalDays}d
                       </td>
@@ -613,9 +646,9 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                           {onEditFetalMeasurement && (
                             <button
                               type="button"
-                              onClick={() => onEditFetalMeasurement(m)}
+                              onClick={() => setPendingEditAction({ kind: 'fetal', record: m })}
                               className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-white rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                              title="Edit ultrasound record"
+                              title="Authenticate with bae_Key to edit ultrasound record"
                             >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
@@ -902,6 +935,50 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
           babyProfile={activeProfile}
         />
       )}
+
+      {/* bae_Key Authentication Modal before editing any History entry */}
+      <EditAuthModal
+        isOpen={Boolean(pendingEditAction)}
+        title="Authenticate to Edit History"
+        description={
+          pendingEditAction?.kind === 'routine'
+            ? `Enter your bae_Key passkey to edit routine record #${pendingEditAction.record.id}.`
+            : pendingEditAction?.kind === 'growth'
+              ? `Enter your bae_Key passkey to edit growth record #${pendingEditAction.record.id}.`
+              : pendingEditAction?.kind === 'baby'
+                ? `Enter your bae_Key passkey to edit pediatric checkup (${pendingEditAction.record.date}).`
+                : pendingEditAction?.kind === 'fetal'
+                  ? `Enter your bae_Key passkey to edit ultrasound scan (${pendingEditAction.record.date}).`
+                  : undefined
+        }
+        onClose={() => setPendingEditAction(null)}
+        onAuthenticated={() => {
+          if (!pendingEditAction) return;
+          const action = pendingEditAction;
+          setPendingEditAction(null);
+          if (action.kind === 'routine') {
+            setEditingGrowthInHistory(null);
+            setEditingRoutineInHistory(action.record);
+          } else if (action.kind === 'growth') {
+            setEditingRoutineInHistory(null);
+            setEditingGrowthInHistory(action.record);
+          } else if (action.kind === 'baby') {
+            onEditBabyMeasurement?.(action.record);
+          } else if (action.kind === 'fetal') {
+            onEditFetalMeasurement?.(action.record);
+          }
+        }}
+      />
+
+      {/* Direct In-History Record Editor for Growth & Routine rows */}
+      <EditCareRecordModal
+        growthRecord={editingGrowthInHistory}
+        routineRecord={editingRoutineInHistory}
+        onClose={() => {
+          setEditingGrowthInHistory(null);
+          setEditingRoutineInHistory(null);
+        }}
+      />
     </div>
   );
 };

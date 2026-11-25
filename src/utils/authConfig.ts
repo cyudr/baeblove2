@@ -29,6 +29,10 @@ export function isPasswordProtectionEnabled(): boolean {
   return normalized === '1' || normalized === 'true';
 }
 
+function stripWrappingQuotes(value: string): string {
+  return value.trim().replace(/^['"]+|['"]+$/g, '').trim();
+}
+
 /**
  * Collects all configured valid passwords from environment variables starting with "bae_Key".
  */
@@ -38,8 +42,9 @@ export function getConfiguredPasswords(): string[] {
   // Check __BAE_KEYS__ injected by vite.config.ts
   if (typeof __BAE_KEYS__ === 'object' && __BAE_KEYS__ !== null) {
     for (const [key, val] of Object.entries(__BAE_KEYS__)) {
-      if (key.startsWith('bae_Key') && typeof val === 'string' && val.trim().length > 0) {
-        passwords.push(val.trim());
+      if (key.startsWith('bae_Key') && typeof val === 'string') {
+        const cleaned = stripWrappingQuotes(val);
+        if (cleaned.length > 0) passwords.push(cleaned);
       }
     }
   }
@@ -47,12 +52,9 @@ export function getConfiguredPasswords(): string[] {
   // Also inspect import.meta.env for any bae_Key* or VITE_bae_Key*
   if (typeof import.meta !== 'undefined' && import.meta.env) {
     for (const [key, val] of Object.entries(import.meta.env)) {
-      if (
-        (key.startsWith('bae_Key') || key.startsWith('VITE_bae_Key')) &&
-        typeof val === 'string' &&
-        val.trim().length > 0
-      ) {
-        passwords.push(val.trim());
+      if ((key.startsWith('bae_Key') || key.startsWith('VITE_bae_Key')) && typeof val === 'string') {
+        const cleaned = stripWrappingQuotes(val);
+        if (cleaned.length > 0) passwords.push(cleaned);
       }
     }
   }
@@ -108,6 +110,31 @@ export function authenticateUser(): void {
  */
 export function logoutUser(): void {
   deleteCookie(AUTH_COOKIE_NAME);
+}
+
+/**
+ * Validates the user's passkey against configured "bae_Key" environment variables
+ * before allowing edits to existing growth, routine, or history records.
+ */
+export function verifyEditPassword(attempt: string): { isValid: boolean; error?: string } {
+  const clean = attempt.trim();
+  if (!clean) {
+    return { isValid: false, error: 'Please enter the bae_Key passkey to unlock editing.' };
+  }
+
+  const validPasswords = getConfiguredPasswords();
+  if (validPasswords.length === 0) {
+    return {
+      isValid: false,
+      error: 'No "bae_Key" environment variable is configured. Set bae_Key in your deployment environment to authorize edits.',
+    };
+  }
+
+  if (validPasswords.includes(clean)) {
+    return { isValid: true };
+  }
+
+  return { isValid: false, error: 'Incorrect bae_Key passkey. Please try again.' };
 }
 
 /**

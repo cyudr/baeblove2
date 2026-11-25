@@ -19,6 +19,7 @@ export const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<MilestoneCategory>('movement');
   const [dateAchieved, setDateAchieved] = useState(new Date().toISOString().split('T')[0]);
+  const [loggedBy, setLoggedBy] = useState('');
   const [notes, setNotes] = useState('');
 
   if (!isOpen) return null;
@@ -32,6 +33,7 @@ export const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
       category,
       dateAchieved,
       notes: notes.trim() || undefined,
+      loggedBy: loggedBy.trim() || undefined,
     });
 
     confetti({
@@ -96,17 +98,31 @@ export const AddMilestoneModal: React.FC<AddMilestoneModalProps> = ({
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-              Date Achieved
-            </label>
-            <input
-              type="date"
-              required
-              value={dateAchieved}
-              onChange={(e) => setDateAchieved(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                Date Achieved
+              </label>
+              <input
+                type="date"
+                required
+                value={dateAchieved}
+                onChange={(e) => setDateAchieved(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                Logged By
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Mom, Dad"
+                value={loggedBy}
+                onChange={(e) => setLoggedBy(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+              />
+            </div>
           </div>
 
           <div>

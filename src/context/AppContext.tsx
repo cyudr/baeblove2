@@ -14,6 +14,8 @@ import {
   NewGrowthRecordInput,
   RoutineRecord,
   NewRoutineRecordInput,
+  NoteRecord,
+  NewNoteRecordInput,
 } from '../types';
 import { DEFAULT_FORMULA_SETTINGS } from '../data/formulaSources';
 import {
@@ -27,6 +29,11 @@ import {
   updateRoutineRecord,
   deleteRoutineRecord,
   subscribeToRoutine,
+  fetchNoteRecords,
+  insertNoteRecord,
+  updateNoteRecord,
+  deleteNoteRecord,
+  subscribeToNotes,
 } from '../lib/careTablesStorage';
 import {
   type EntryRow,
@@ -36,9 +43,11 @@ import {
   upsertEntries,
   deleteEntryById,
   deleteEntriesByProfileId,
+  updateEntriesProfileName,
   replaceAllEntries,
   subscribeToEntries,
   parseEntryId,
+  getProfileNumericId,
   toProfileRow,
   toBabyMeasurementRow,
   toFetalMeasurementRow,
@@ -76,6 +85,7 @@ interface AppContextType {
     birthLengthCm?: number;
     birthHeadCircumferenceCm?: number;
     notes?: string;
+    loggedBy?: string;
     attachFetalHistory: boolean;
   }) => string;
   getAttachedFetalProfile: (babyProfileId: string) => ChildProfile | undefined;
@@ -118,12 +128,13 @@ interface AppContextType {
 
   completedMilestones: CompletedMilestone[];
   activeCompletedMilestones: CompletedMilestone[];
-  toggleMilestone: (milestoneId: string, notes?: string, photoUrl?: string) => void;
+  toggleMilestone: (milestoneId: string, notes?: string, photoUrl?: string, loggedBy?: string) => void;
   addCustomMilestone: (milestone: {
     title: string;
     category: CompletedMilestone['customCategory'];
     dateAchieved: string;
     notes?: string;
+    loggedBy?: string;
   }) => void;
   removeCompletedMilestone: (milestoneId: string) => void;
 
@@ -139,6 +150,7 @@ interface AppContextType {
 
   growthRecords: GrowthRecord[];
   routineRecords: RoutineRecord[];
+  noteRecords: NoteRecord[];
   isCareTablesLoading: boolean;
   refreshCareTables: () => Promise<void>;
   addGrowthRecord: (input: NewGrowthRecordInput) => Promise<{ record: GrowthRecord | null; error?: string }>;
@@ -153,6 +165,12 @@ interface AppContextType {
     updates: NewRoutineRecordInput
   ) => Promise<{ record: RoutineRecord | null; error?: string }>;
   removeRoutineRecord: (id: number) => Promise<{ error?: string }>;
+  addNoteRecord: (input: NewNoteRecordInput) => Promise<{ record: NoteRecord | null; error?: string }>;
+  editNoteRecord: (
+    id: number,
+    updates: NewNoteRecordInput
+  ) => Promise<{ record: NoteRecord | null; error?: string }>;
+  removeNoteRecord: (id: number) => Promise<{ error?: string }>;
 
   isEntriesLoading: boolean;
   exportDataJSON: () => string;
@@ -203,17 +221,23 @@ function buildEntryRows(data: {
   theme: ThemeMode;
   activeProfileId: string;
 }): EntryRow[] {
+  const profileNameById = new Map<string, string>();
+  for (const p of data.profiles) {
+    profileNameById.set(p.id, p.name);
+  }
+  const activeProfileName = profileNameById.get(data.activeProfileId) ?? null;
+
   return [
     ...data.profiles.map(toProfileRow),
-    ...data.babyMeasurements.map(toBabyMeasurementRow),
-    ...data.fetalMeasurements.map(toFetalMeasurementRow),
-    ...data.completedMilestones.map(toMilestoneRow),
-    ...data.kickSessions.map(toKickSessionRow),
-    ...data.loveNotes.map(toLoveNoteRow),
+    ...data.babyMeasurements.map((m) => toBabyMeasurementRow(m, profileNameById.get(m.profileId))),
+    ...data.fetalMeasurements.map((m) => toFetalMeasurementRow(m, profileNameById.get(m.profileId))),
+    ...data.completedMilestones.map((m) => toMilestoneRow(m, profileNameById.get(m.profileId))),
+    ...data.kickSessions.map((s) => toKickSessionRow(s, profileNameById.get(s.profileId))),
+    ...data.loveNotes.map((n) => toLoveNoteRow(n, profileNameById.get(n.profileId))),
     toSettingRow('units', data.unitSystem),
     toSettingRow('formula_settings', data.formulaSettings),
     toSettingRow('theme', data.theme),
-    toSettingRow('active_profile', data.activeProfileId),
+    toSettingRow('active_profile', data.activeProfileId, activeProfileName),
   ];
 }
 
@@ -236,6 +260,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [loveNotes, setLoveNotes] = useState<LoveNote[]>([]);
   const [growthRecords, setGrowthRecords] = useState<GrowthRecord[]>([]);
   const [routineRecords, setRoutineRecords] = useState<RoutineRecord[]>([]);
+  const [noteRecords, setNoteRecords] = useState<NoteRecord[]>([]);
   const [isEntriesLoading, setIsEntriesLoading] = useState<boolean>(true);
   const [isCareTablesLoading, setIsCareTablesLoading] = useState<boolean>(false);
 
@@ -434,13 +459,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const loadCareTables = async () => {
       setIsCareTablesLoading(true);
       try {
-        const [loadedGrowth, loadedRoutine] = await Promise.all([
+        const [loadedGrowth, loadedRoutine, loadedNotes] = await Promise.all([
           fetchGrowthRecords(),
           fetchRoutineRecords(),
+          fetchNoteRecords(),
         ]);
         if (!isMounted) return;
         if (loadedGrowth !== null) setGrowthRecords(loadedGrowth);
         if (loadedRoutine !== null) setRoutineRecords(loadedRoutine);
+        if (loadedNotes !== null) setNoteRecords(loadedNotes);
       } finally {
         if (isMounted) setIsCareTablesLoading(false);
       }
@@ -461,9 +488,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const next = exists
             ? prev.map((r) => (r.id === record.id ? record : r))
             : [record, ...prev];
-          return next.sort(
-            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          );
+          return next.sort((a, b) => {
+            const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.created_at.slice(11, 19)}`;
+            const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.created_at.slice(11, 19)}`;
+            return bKey.localeCompare(aKey);
+          });
         });
       },
       onDelete: (id) => {
@@ -490,17 +519,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       },
     });
 
+    const unsubscribeNotes = subscribeToNotes({
+      onUpsert: (record) => {
+        setNoteRecords((prev) => {
+          const exists = prev.some((n) => n.id === record.id);
+          const next = exists
+            ? prev.map((n) => (n.id === record.id ? record : n))
+            : [record, ...prev];
+          return next.sort((a, b) => b.created_at.localeCompare(a.created_at));
+        });
+      },
+      onDelete: (id) => {
+        setNoteRecords((prev) => prev.filter((n) => n.id !== id));
+      },
+    });
+
     return () => {
       isMounted = false;
       unsubscribeEntries();
       unsubscribeGrowth();
       unsubscribeRoutine();
+      unsubscribeNotes();
     };
   }, [applyRemoteUpsert, applyRemoteDelete]);
 
+  const getProfileNameById = (id: string | null | undefined): string | null => {
+    if (!id) return null;
+    return profiles.find((p) => p.id === id)?.name ?? null;
+  };
+
   const setActiveProfileId = (id: string) => {
     setActiveProfileIdState(id);
-    void upsertEntry(toSettingRow('active_profile', id));
+    void upsertEntry(toSettingRow('active_profile', id, getProfileNameById(id)));
   };
 
   const setTheme = (newTheme: ThemeMode) => {
@@ -544,7 +594,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newProfile: ChildProfile = { ...profileData, id: newId };
     const rowsToUpsert: EntryRow[] = [
       toProfileRow(newProfile),
-      toSettingRow('active_profile', newId),
+      toSettingRow('active_profile', newId, newProfile.name, newProfile.loggedBy),
     ];
 
     let birthMeasurement: BabyMeasurement | null = null;
@@ -565,8 +615,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headCircumferenceCm: newProfile.birthHeadCircumferenceCm,
         pediatricianVisit: true,
         notes: 'Birth measurement',
+        loggedBy: newProfile.loggedBy,
       };
-      rowsToUpsert.push(toBabyMeasurementRow(birthMeasurement));
+      rowsToUpsert.push(toBabyMeasurementRow(birthMeasurement, newProfile.name));
     }
 
     const result = await upsertEntries(rowsToUpsert);
@@ -620,7 +671,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 : existingBirthRecord.headCircumferenceCm,
           };
           updatedMeasurementsById.set(syncedBirth.id, syncedBirth);
-          rowsToUpsert.push(toBabyMeasurementRow(syncedBirth));
+          rowsToUpsert.push(toBabyMeasurementRow(syncedBirth, updated.name));
         } else if (
           updated.birthWeightKg !== undefined ||
           updated.birthLengthCm !== undefined ||
@@ -637,9 +688,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             headCircumferenceCm: updated.birthHeadCircumferenceCm,
             pediatricianVisit: true,
             notes: 'Birth measurement',
+            loggedBy: updated.loggedBy,
           };
           updatedMeasurementsById.set(newBirthRecord.id, newBirthRecord);
-          rowsToUpsert.push(toBabyMeasurementRow(newBirthRecord));
+          rowsToUpsert.push(toBabyMeasurementRow(newBirthRecord, updated.name));
         }
 
         if (birthDateChanged) {
@@ -656,7 +708,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 ageInWeeks: Math.round((diffDays / 7) * 10) / 10,
               };
               updatedMeasurementsById.set(recalculated.id, recalculated);
-              rowsToUpsert.push(toBabyMeasurementRow(recalculated));
+              rowsToUpsert.push(toBabyMeasurementRow(recalculated, updated.name));
             }
           }
         }
@@ -666,6 +718,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const result = await upsertEntries(rowsToUpsert);
     if (result.error) {
       return { error: result.error };
+    }
+
+    // If the profile name changed, keep the "profile name" column consistent across all its entries
+    if (updates.name !== undefined && updates.name.trim() !== existing.name.trim()) {
+      void updateEntriesProfileName(id, updated.name);
+      if (activeProfileId === id) {
+        void upsertEntry(toSettingRow('active_profile', id, updated.name, updated.loggedBy));
+      }
     }
 
     setProfiles((prev) => prev.map((p) => (p.id === id ? updated : p)));
@@ -702,7 +762,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     void deleteEntriesByProfileId(id).then(() => {
       if (activeProfileId === id) {
-        return upsertEntry(toSettingRow('active_profile', nextActiveId));
+        const nextActiveName = remaining[0]?.name ?? null;
+        return upsertEntry(toSettingRow('active_profile', nextActiveId, nextActiveName));
       }
       return undefined;
     });
@@ -717,10 +778,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     birthLengthCm?: number;
     birthHeadCircumferenceCm?: number;
     notes?: string;
+    loggedBy?: string;
     attachFetalHistory: boolean;
   }): string => {
     const fetus = profiles.find((p) => p.id === params.fetalProfileId);
     const newBabyId = `baby-${Date.now()}`;
+    const loggerName = params.loggedBy?.trim() || fetus?.loggedBy || undefined;
 
     // Compute prenatal snapshot from fetal measurements & kicks
     const fMeasurements = fetalMeasurements.filter((m) => m.profileId === params.fetalProfileId);
@@ -755,6 +818,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       birthLengthCm: params.birthLengthCm,
       birthHeadCircumferenceCm: params.birthHeadCircumferenceCm,
       notes: params.notes?.trim() || undefined,
+      loggedBy: loggerName,
       avatarColor: params.gender === 'girl' ? 'bg-rose-600' : 'bg-emerald-600',
       avatarIcon: 'Baby',
       attachedFetalProfileId: params.attachFetalHistory ? params.fetalProfileId : undefined,
@@ -763,7 +827,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const rowsToUpsert: EntryRow[] = [
       toProfileRow(newBaby),
-      toSettingRow('active_profile', newBabyId),
+      toSettingRow('active_profile', newBabyId, newBaby.name, loggerName),
     ];
 
     const updatedFetus: ChildProfile | null =
@@ -799,9 +863,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headCircumferenceCm: params.birthHeadCircumferenceCm,
         pediatricianVisit: true,
         notes: 'Birth checkup recorded upon delivery',
+        loggedBy: loggerName,
       };
       setBabyMeasurements((prev) => upsertById(prev, birthMeasurement));
-      rowsToUpsert.push(toBabyMeasurementRow(birthMeasurement));
+      rowsToUpsert.push(toBabyMeasurementRow(birthMeasurement, newBaby.name));
     }
 
     // Add welcome love note
@@ -810,12 +875,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       profileId: newBabyId,
       date: params.birthDate,
       stageLabel: 'Birth Day 🎉',
-      author: 'Family',
+      author: loggerName || 'Family',
       emoji: '🌟',
       content: `Welcome to the world, precious ${params.babyName.trim()}! You arrived safely on ${params.birthDate}, filling all our hearts with boundless love and joy.`,
     };
     setLoveNotes((prev) => upsertById(prev, welcomeNote, true));
-    rowsToUpsert.push(toLoveNoteRow(welcomeNote));
+    rowsToUpsert.push(toLoveNoteRow(welcomeNote, newBaby.name));
 
     // Set active profile to the newborn baby
     setActiveProfileIdState(newBabyId);
@@ -858,7 +923,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `bm-${Date.now()}`,
       profileId: activeProfileId,
     };
-    const result = await upsertEntry(toBabyMeasurementRow(newM));
+    const result = await upsertEntry(
+      toBabyMeasurementRow(newM, getProfileNameById(newM.profileId) ?? activeProfile?.name)
+    );
     if (result.error) return result;
     setBabyMeasurements((prev) => upsertById(prev, newM));
     return {};
@@ -871,7 +938,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const existing = babyMeasurements.find((m) => m.id === id);
     if (!existing) return { error: 'Measurement not found.' };
     const updated: BabyMeasurement = { ...existing, ...updates };
-    const result = await upsertEntry(toBabyMeasurementRow(updated));
+    const result = await upsertEntry(
+      toBabyMeasurementRow(updated, getProfileNameById(updated.profileId) ?? activeProfile?.name)
+    );
     if (result.error) return result;
     setBabyMeasurements((prev) => prev.map((m) => (m.id === id ? updated : m)));
     return {};
@@ -890,7 +959,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `fm-${Date.now()}`,
       profileId: activeProfileId,
     };
-    const result = await upsertEntry(toFetalMeasurementRow(newM));
+    const result = await upsertEntry(
+      toFetalMeasurementRow(newM, getProfileNameById(newM.profileId) ?? activeProfile?.name)
+    );
     if (result.error) return result;
     setFetalMeasurements((prev) => upsertById(prev, newM));
     return {};
@@ -903,7 +974,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const existing = fetalMeasurements.find((m) => m.id === id);
     if (!existing) return { error: 'Measurement not found.' };
     const updated: FetalMeasurement = { ...existing, ...updates };
-    const result = await upsertEntry(toFetalMeasurementRow(updated));
+    const result = await upsertEntry(
+      toFetalMeasurementRow(updated, getProfileNameById(updated.profileId) ?? activeProfile?.name)
+    );
     if (result.error) return result;
     setFetalMeasurements((prev) => prev.map((m) => (m.id === id ? updated : m)));
     return {};
@@ -914,7 +987,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     void deleteEntryById(makeFetalMeasurementEntryId(id));
   };
 
-  const toggleMilestone = (milestoneId: string, notes?: string, photoUrl?: string) => {
+  const toggleMilestone = (
+    milestoneId: string,
+    notes?: string,
+    photoUrl?: string,
+    loggedBy?: string
+  ) => {
     const exists = completedMilestones.find(
       (m) => m.profileId === activeProfileId && m.milestoneId === milestoneId
     );
@@ -931,9 +1009,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         dateAchieved: todayStr,
         notes,
         photoUrl,
+        loggedBy: loggedBy?.trim() || undefined,
       };
       setCompletedMilestones((prev) => upsertMilestone(prev, newMilestone));
-      void upsertEntry(toMilestoneRow(newMilestone));
+      void upsertEntry(
+        toMilestoneRow(newMilestone, getProfileNameById(activeProfileId) ?? activeProfile?.name)
+      );
     }
   };
 
@@ -942,6 +1023,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     category: CompletedMilestone['customCategory'];
     dateAchieved: string;
     notes?: string;
+    loggedBy?: string;
   }) => {
     const customId = `custom-${Date.now()}`;
     const newMilestone: CompletedMilestone = {
@@ -952,9 +1034,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       customTitle: milestone.title,
       customCategory: milestone.category,
       notes: milestone.notes,
+      loggedBy: milestone.loggedBy?.trim() || undefined,
     };
     setCompletedMilestones((prev) => upsertMilestone(prev, newMilestone));
-    void upsertEntry(toMilestoneRow(newMilestone));
+    void upsertEntry(
+      toMilestoneRow(newMilestone, getProfileNameById(activeProfileId) ?? activeProfile?.name)
+    );
   };
 
   const removeCompletedMilestone = (milestoneId: string) => {
@@ -971,7 +1056,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       profileId: activeProfileId,
     };
     setKickSessions((prev) => upsertById(prev, newSession, true));
-    void upsertEntry(toKickSessionRow(newSession));
+    void upsertEntry(
+      toKickSessionRow(newSession, getProfileNameById(activeProfileId) ?? activeProfile?.name)
+    );
   };
 
   const deleteKickSession = (id: string) => {
@@ -986,7 +1073,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       profileId: activeProfileId,
     };
     setLoveNotes((prev) => upsertById(prev, newNote, true));
-    void upsertEntry(toLoveNoteRow(newNote));
+    void upsertEntry(
+      toLoveNoteRow(newNote, getProfileNameById(activeProfileId) ?? activeProfile?.name)
+    );
   };
 
   const deleteLoveNote = (id: string) => {
@@ -999,12 +1088,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshCareTables = useCallback(async () => {
     setIsCareTablesLoading(true);
     try {
-      const [loadedGrowth, loadedRoutine] = await Promise.all([
+      const [loadedGrowth, loadedRoutine, loadedNotes] = await Promise.all([
         fetchGrowthRecords(),
         fetchRoutineRecords(),
+        fetchNoteRecords(),
       ]);
       if (loadedGrowth !== null) setGrowthRecords(loadedGrowth);
       if (loadedRoutine !== null) setRoutineRecords(loadedRoutine);
+      if (loadedNotes !== null) setNoteRecords(loadedNotes);
     } finally {
       setIsCareTablesLoading(false);
     }
@@ -1023,9 +1114,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setGrowthRecords((prev) => {
         const exists = prev.some((r) => r.id === created.id);
         const next = exists ? prev.map((r) => (r.id === created.id ? created : r)) : [created, ...prev];
-        return next.sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+        return next.sort((a, b) => {
+          const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.created_at.slice(11, 19)}`;
+          const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.created_at.slice(11, 19)}`;
+          return bKey.localeCompare(aKey);
+        });
       });
     }
     return result;
@@ -1036,23 +1129,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updates: NewGrowthRecordInput
   ): Promise<{ record: GrowthRecord | null; error?: string }> => {
     const result = await updateGrowthRecord(id, updates);
+    const sortGrowth = (list: GrowthRecord[]) =>
+      [...list].sort((a, b) => {
+        const aKey = `${a.date ?? a.created_at.slice(0, 10)}T${a.created_at.slice(11, 19)}`;
+        const bKey = `${b.date ?? b.created_at.slice(0, 10)}T${b.created_at.slice(11, 19)}`;
+        return bKey.localeCompare(aKey);
+      });
+
     if (result.record) {
       const updated = result.record;
-      setGrowthRecords((prev) => prev.map((r) => (r.id === id ? updated : r)));
+      setGrowthRecords((prev) => sortGrowth(prev.map((r) => (r.id === id ? updated : r))));
     } else if (!result.error) {
       setGrowthRecords((prev) =>
-        prev.map((r) =>
-          r.id === id
-            ? {
-                ...r,
-                profile_id: 'profile_id' in updates ? (updates.profile_id ?? null) : r.profile_id,
-                daily_weight: 'daily_weight' in updates ? (updates.daily_weight ?? null) : r.daily_weight,
-                daily_length: 'daily_length' in updates ? (updates.daily_length ?? null) : r.daily_length,
-                temperature: 'temperature' in updates ? (updates.temperature ?? null) : r.temperature,
-                remark: 'remark' in updates ? (updates.remark ?? null) : r.remark,
-                name: 'name' in updates ? (updates.name ?? null) : r.name,
-              }
-            : r
+        sortGrowth(
+          prev.map((r) =>
+            r.id === id
+              ? {
+                  ...r,
+                  profile_id: 'profile_id' in updates ? (updates.profile_id ?? null) : r.profile_id,
+                  date: 'date' in updates ? (updates.date ?? null) : r.date,
+                  daily_weight: 'daily_weight' in updates ? (updates.daily_weight ?? null) : r.daily_weight,
+                  daily_length: 'daily_length' in updates ? (updates.daily_length ?? null) : r.daily_length,
+                  temperature: 'temperature' in updates ? (updates.temperature ?? null) : r.temperature,
+                  remark: 'remark' in updates ? (updates.remark ?? null) : r.remark,
+                  name: 'name' in updates ? (updates.name ?? null) : r.name,
+                }
+              : r
+          )
         )
       );
     }
@@ -1127,6 +1230,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return deleteRoutineRecord(id);
   };
 
+  const addNoteRecord = async (
+    input: NewNoteRecordInput
+  ): Promise<{ record: NoteRecord | null; error?: string }> => {
+    const resolvedInput: NewNoteRecordInput = {
+      ...input,
+      profile_id:
+        input.profile_id !== undefined
+          ? input.profile_id
+          : activeProfile
+            ? getProfileNumericId(activeProfile.id)
+            : null,
+    };
+    const result = await insertNoteRecord(resolvedInput);
+    if (result.record) {
+      const created = result.record;
+      setNoteRecords((prev) => {
+        const exists = prev.some((n) => n.id === created.id);
+        const next = exists ? prev.map((n) => (n.id === created.id ? created : n)) : [created, ...prev];
+        return next.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      });
+    }
+    return result;
+  };
+
+  const editNoteRecord = async (
+    id: number,
+    updates: NewNoteRecordInput
+  ): Promise<{ record: NoteRecord | null; error?: string }> => {
+    const result = await updateNoteRecord(id, updates);
+    if (result.record) {
+      const updated = result.record;
+      setNoteRecords((prev) => prev.map((n) => (n.id === id ? updated : n)));
+    } else if (!result.error) {
+      setNoteRecords((prev) =>
+        prev.map((n) =>
+          n.id === id
+            ? {
+                ...n,
+                name: 'name' in updates ? (updates.name ?? null) : n.name,
+                notes: 'notes' in updates ? (updates.notes ?? null) : n.notes,
+                profile_id: 'profile_id' in updates ? (updates.profile_id ?? null) : n.profile_id,
+              }
+            : n
+        )
+      );
+    }
+    return result;
+  };
+
+  const removeNoteRecord = async (id: number): Promise<{ error?: string }> => {
+    setNoteRecords((prev) => prev.filter((n) => n.id !== id));
+    return deleteNoteRecord(id);
+  };
+
   const exportDataJSON = (): string => {
     const fullData = {
       version: '1.0.0',
@@ -1139,6 +1296,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       loveNotes,
       growthRecords,
       routineRecords,
+      noteRecords,
       unitSystem,
     };
     return JSON.stringify(fullData, null, 2);
@@ -1238,6 +1396,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteLoveNote,
         growthRecords,
         routineRecords,
+        noteRecords,
         isCareTablesLoading,
         refreshCareTables,
         addGrowthRecord,
@@ -1246,6 +1405,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addRoutineRecord,
         editRoutineRecord,
         removeRoutineRecord,
+        addNoteRecord,
+        editNoteRecord,
+        removeNoteRecord,
         isEntriesLoading,
         exportDataJSON,
         importDataJSON,

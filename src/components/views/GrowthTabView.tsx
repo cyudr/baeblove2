@@ -4,11 +4,13 @@ import { UnitConverter } from '../../data/growthStandards';
 import {
   classifyTemperature,
   doesRecordMatchProfile,
+  getGrowthRecordDate,
   interpretGrowthTable,
   mergeProfileGrowthMeasurements,
 } from '../../utils/careInterpreter';
 import { InteractiveGrowthChart } from '../charts/InteractiveGrowthChart';
 import { FetalBiometricsChart } from '../charts/FetalBiometricsChart';
+import { EditAuthModal } from '../modals/EditAuthModal';
 import type { BabyMeasurement, GrowthRecord } from '../../types';
 import {
   Scale,
@@ -23,7 +25,17 @@ import {
   Sparkles,
   Filter,
   BookOpen,
+  RotateCcw,
+  Lock,
 } from 'lucide-react';
+
+function getCurrentDateStr(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -82,15 +94,18 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
 
   // Growth form state (`name` column = person logging the info; `profile_id` = active profile from entries)
   const [editingGrowthId, setEditingGrowthId] = useState<number | null>(null);
+  const [growthDate, setGrowthDate] = useState<string>(getCurrentDateStr);
   const [loggedBy, setLoggedBy] = useState<string>('');
   const [dailyWeight, setDailyWeight] = useState<string>('');
   const [dailyLength, setDailyLength] = useState<string>('');
   const [temperature, setTemperature] = useState<string>('');
   const [growthRemark, setGrowthRemark] = useState<string>('');
   const [growthError, setGrowthError] = useState<string | null>(null);
+  const [retrieveNotice, setRetrieveNotice] = useState<string | null>(null);
   const [isSavingGrowth, setIsSavingGrowth] = useState(false);
 
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [pendingAuthRecord, setPendingAuthRecord] = useState<GrowthRecord | null>(null);
 
   useEffect(() => {
     setLoggerFilter('all');
@@ -99,6 +114,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
   useEffect(() => {
     if (!initialEditRecord) return;
     setEditingGrowthId(initialEditRecord.id);
+    setGrowthDate(getGrowthRecordDate(initialEditRecord));
     setLoggedBy(initialEditRecord.name ?? '');
     setDailyWeight(
       initialEditRecord.daily_weight !== null ? String(initialEditRecord.daily_weight) : ''
@@ -111,6 +127,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     );
     setGrowthRemark(initialEditRecord.remark ?? '');
     setGrowthError(null);
+    setRetrieveNotice(null);
     onClearInitialEdit?.();
   }, [initialEditRecord, onClearInitialEdit]);
 
@@ -119,6 +136,8 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     if (!activeProfile) return growthRecords;
     return growthRecords.filter((g) => doesRecordMatchProfile(g, activeProfile));
   }, [growthRecords, activeProfile]);
+
+  const latestGrowthRecord = profileGrowthRecords[0] ?? null;
 
   const availableLoggers = useMemo(() => {
     const set = new Set<string>();
@@ -153,12 +172,52 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
 
   const resetGrowthForm = (preserveLogger = false) => {
     setEditingGrowthId(null);
+    setGrowthDate(getCurrentDateStr());
     if (!preserveLogger) setLoggedBy('');
     setDailyWeight('');
     setDailyLength('');
     setTemperature('');
     setGrowthRemark('');
     setGrowthError(null);
+    setRetrieveNotice(null);
+  };
+
+  const handleRetrieveLastGrowth = () => {
+    if (!latestGrowthRecord) return;
+    setEditingGrowthId(null);
+    setGrowthDate(getCurrentDateStr());
+    setLoggedBy(latestGrowthRecord.name ?? '');
+    setDailyWeight(
+      latestGrowthRecord.daily_weight !== null ? String(latestGrowthRecord.daily_weight) : ''
+    );
+    setDailyLength(
+      latestGrowthRecord.daily_length !== null ? String(latestGrowthRecord.daily_length) : ''
+    );
+    setTemperature(
+      latestGrowthRecord.temperature !== null ? String(latestGrowthRecord.temperature) : ''
+    );
+    setGrowthRemark(latestGrowthRecord.remark ?? '');
+    setGrowthError(null);
+    setRetrieveNotice(
+      `Loaded values from last entry (${getGrowthRecordDate(latestGrowthRecord)}) as a new log.`
+    );
+  };
+
+  const applyEditGrowth = (row: GrowthRecord) => {
+    setEditingGrowthId(row.id);
+    setGrowthDate(getGrowthRecordDate(row));
+    setLoggedBy(row.name ?? '');
+    setDailyWeight(row.daily_weight !== null ? String(row.daily_weight) : '');
+    setDailyLength(row.daily_length !== null ? String(row.daily_length) : '');
+    setTemperature(row.temperature !== null ? String(row.temperature) : '');
+    setGrowthRemark(row.remark ?? '');
+    setGrowthError(null);
+    setRetrieveNotice(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const requestEditGrowth = (row: GrowthRecord) => {
+    setPendingAuthRecord(row);
   };
 
   const handleSaveGrowth = async (e: React.FormEvent) => {
@@ -183,6 +242,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     try {
       const payload = {
         profile_id: activeProfile?.id ?? null,
+        date: growthDate || null,
         daily_weight: parsedWeight,
         daily_length: parsedLength,
         temperature: parsedTemp,
@@ -203,17 +263,6 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     } finally {
       setIsSavingGrowth(false);
     }
-  };
-
-  const handleEditGrowth = (row: GrowthRecord) => {
-    setEditingGrowthId(row.id);
-    setLoggedBy(row.name ?? '');
-    setDailyWeight(row.daily_weight !== null ? String(row.daily_weight) : '');
-    setDailyLength(row.daily_length !== null ? String(row.daily_length) : '');
-    setTemperature(row.temperature !== null ? String(row.temperature) : '');
-    setGrowthRemark(row.remark ?? '');
-    setGrowthError(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
@@ -299,7 +348,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
         onSubmit={handleSaveGrowth}
         className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs space-y-4"
       >
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
               <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
@@ -315,19 +364,68 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               </span>
             )}
           </div>
-          {editingGrowthId !== null && (
-            <button
-              type="button"
-              onClick={() => resetGrowthForm(false)}
-              className="text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Cancel edit</span>
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {latestGrowthRecord && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleRetrieveLastGrowth}
+                  className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Copy values from the latest growth entry into a new log"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Retrieve Last</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => requestEditGrowth(latestGrowthRecord)}
+                  className="px-2.5 py-1.5 text-[11px] font-semibold text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900 border border-amber-200 dark:border-amber-800 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Authenticate with bae_Key to edit the latest growth entry"
+                >
+                  <Lock className="w-3 h-3" />
+                  <span>Edit Last</span>
+                </button>
+              </>
+            )}
+            {editingGrowthId !== null && (
+              <button
+                type="button"
+                onClick={() => resetGrowthForm(false)}
+                className="px-2 py-1.5 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Cancel edit</span>
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {retrieveNotice && (
+          <div className="px-3 py-2 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-2">
+            <span>{retrieveNotice}</span>
+            <button
+              type="button"
+              onClick={() => setRetrieveNotice(null)}
+              className="text-amber-700 dark:text-amber-300 hover:opacity-80 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+              Date
+            </label>
+            <input
+              type="date"
+              value={growthDate}
+              onChange={(e) => setGrowthDate(e.target.value)}
+              className="w-full px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-amber-500"
+            />
+          </div>
+
           <div>
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Logged By
@@ -623,7 +721,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
-                  <th className="py-3 px-4">Recorded At</th>
+                  <th className="py-3 px-4">Date</th>
                   <th className="py-3 px-4">Logged By</th>
                   <th className="py-3 px-4">Daily Weight</th>
                   <th className="py-3 px-4">Daily Length</th>
@@ -642,7 +740,10 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                       className="hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors"
                     >
                       <td className="py-3 px-4 whitespace-nowrap font-bold text-stone-900 dark:text-white">
-                        {formatDateTime(row.created_at)}
+                        <div>{getGrowthRecordDate(row)}</div>
+                        <div className="text-[10px] font-normal text-stone-400 dark:text-stone-500">
+                          {formatDateTime(row.created_at)}
+                        </div>
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">{row.name || '—'}</td>
                       <td className="py-3 px-4 font-mono font-bold whitespace-nowrap">
@@ -678,9 +779,9 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                         <div className="inline-flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => handleEditGrowth(row)}
+                            onClick={() => requestEditGrowth(row)}
                             className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-white rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                            title="Edit growth entry"
+                            title="Authenticate with bae_Key to edit growth entry"
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
@@ -715,6 +816,25 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* bae_Key Authentication Modal for Editing Growth Entries */}
+      <EditAuthModal
+        isOpen={Boolean(pendingAuthRecord)}
+        title="Authenticate to Edit Growth Entry"
+        description={
+          pendingAuthRecord
+            ? `Enter your bae_Key passkey to edit growth record #${pendingAuthRecord.id} (${getGrowthRecordDate(pendingAuthRecord)}).`
+            : undefined
+        }
+        onClose={() => setPendingAuthRecord(null)}
+        onAuthenticated={() => {
+          if (pendingAuthRecord) {
+            const target = pendingAuthRecord;
+            setPendingAuthRecord(null);
+            applyEditGrowth(target);
+          }
+        }}
+      />
     </div>
   );
 };

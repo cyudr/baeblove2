@@ -45,6 +45,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     editingProfile?.maternalHeightCm !== undefined ? editingProfile.maternalHeightCm.toString() : ''
   );
   const [notes, setNotes] = useState(editingProfile?.notes || '');
+  const [loggedBy, setLoggedBy] = useState(editingProfile?.loggedBy || '');
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isGraduateModalOpen, setIsGraduateModalOpen] = useState(false);
@@ -84,6 +85,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           : ''
       );
       setNotes(editingProfile.notes || '');
+      setLoggedBy(editingProfile.loggedBy || '');
     } else {
       setType('baby');
       setName('');
@@ -95,6 +97,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       setPrePregnancyWeightKg('');
       setMaternalHeightCm('');
       setNotes('');
+      setLoggedBy('');
     }
   }, [isOpen, editingProfile]);
 
@@ -128,6 +131,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         type === 'baby' ? (gender === 'girl' ? 'bg-rose-600' : 'bg-emerald-600') : 'bg-amber-600',
       avatarIcon: type === 'baby' ? 'Baby' : 'HeartPulse',
       notes: notes.trim() || undefined,
+      loggedBy: loggedBy.trim() || undefined,
     };
 
     try {
@@ -261,19 +265,34 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </div>
             )}
 
-            {/* Name */}
-            <div>
-              <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                {type === 'baby' ? "Baby's Name" : "Baby's Nickname or Label"}
-              </label>
-              <input
-                type="text"
-                required
-                placeholder={type === 'baby' ? 'e.g. Liam, Maya' : 'e.g. Little Peanut, Baby #2'}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-              />
+            {/* Profile / Baby Name & Logged By */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                  {type === 'baby' ? "Profile / Baby's Name" : 'Profile / Baby Nickname'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder={type === 'baby' ? 'e.g. Liam, Maya' : 'e.g. Little Peanut'}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                  Logged By
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Mom, Dad, Caregiver"
+                  value={loggedBy}
+                  onChange={(e) => setLoggedBy(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                />
+              </div>
             </div>
 
             {/* Gender */}

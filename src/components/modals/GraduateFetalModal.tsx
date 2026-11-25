@@ -26,6 +26,7 @@ export const GraduateFetalModal: React.FC<GraduateFetalModalProps> = ({
   const [birthLength, setBirthLength] = useState('');
   const [birthHeadCircumference, setBirthHeadCircumference] = useState('');
   const [notes, setNotes] = useState('');
+  const [loggedBy, setLoggedBy] = useState(fetalProfile.loggedBy || '');
   const [attachFetalHistory, setAttachFetalHistory] = useState(true);
 
   if (!isOpen) return null;
@@ -72,6 +73,7 @@ export const GraduateFetalModal: React.FC<GraduateFetalModalProps> = ({
       birthLengthCm: lengthCm,
       birthHeadCircumferenceCm: headCm,
       notes: notes.trim() || undefined,
+      loggedBy: loggedBy.trim() || undefined,
       attachFetalHistory,
     });
 
@@ -124,19 +126,33 @@ export const GraduateFetalModal: React.FC<GraduateFetalModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-          {/* Baby Name */}
-          <div>
-            <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-              Baby's Name
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Liam Alexander"
-              value={babyName}
-              onChange={(e) => setBabyName(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-400"
-            />
+          {/* Baby Name & Logged By */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                Profile / Baby's Name
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Liam Alexander"
+                value={babyName}
+                onChange={(e) => setBabyName(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                Logged By
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Mom, Dad, Caregiver"
+                value={loggedBy}
+                onChange={(e) => setLoggedBy(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-400"
+              />
+            </div>
           </div>
 
           {/* Gender */}
