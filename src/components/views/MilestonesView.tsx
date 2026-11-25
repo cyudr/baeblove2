@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   AGE_BRACKETS,
@@ -6,7 +6,8 @@ import {
   CATEGORY_METADATA,
   getAgeBracketRecommendations,
 } from '../../data/milestonesData';
-import { MilestoneCategory, MilestoneItem } from '../../types';
+import { ChildProfile, MilestoneCategory, MilestoneItem } from '../../types';
+import { computeExactAgeFromBirth, getLocalTodayDateStr } from '../../utils/ageCalculator';
 import {
   Check,
   CheckCircle2,
@@ -37,9 +38,23 @@ export const MilestonesView: React.FC<MilestonesViewProps> = ({
     activeCompletedMilestones,
     toggleMilestone,
     removeCompletedMilestone,
+    unitSystem,
   } = useApp();
 
-  const [selectedAgeMonths, setSelectedAgeMonths] = useState<number>(6);
+  const [selectedAgeMonths, setSelectedAgeMonths] = useState<number>(() => {
+    if (activeProfile?.type === 'baby') {
+      const exact = computeExactAgeFromBirth(activeProfile.dateOfEvent, getLocalTodayDateStr());
+      const babyMonths = exact ? exact.calendarYears * 12 + exact.calendarMonths : 2;
+      return AGE_BRACKETS.reduce(
+        (closest, bracket) =>
+          Math.abs(bracket.months - babyMonths) < Math.abs(closest.months - babyMonths)
+            ? bracket
+            : closest,
+        AGE_BRACKETS[0]
+      ).months;
+    }
+    return 6;
+  });
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'achieved' | 'pending'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -47,12 +62,35 @@ export const MilestonesView: React.FC<MilestonesViewProps> = ({
   const [modalItem, setModalItem] = useState<MilestoneItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  useEffect(() => {
+    if (activeProfile?.type !== 'baby') return;
+    const exact = computeExactAgeFromBirth(activeProfile.dateOfEvent, getLocalTodayDateStr());
+    const babyMonths = exact ? exact.calendarYears * 12 + exact.calendarMonths : 2;
+    const nearest = AGE_BRACKETS.reduce(
+      (closest, bracket) =>
+        Math.abs(bracket.months - babyMonths) < Math.abs(closest.months - babyMonths)
+          ? bracket
+          : closest,
+      AGE_BRACKETS[0]
+    ).months;
+    setSelectedAgeMonths(nearest);
+  }, [activeProfile?.id, activeProfile?.type, activeProfile?.dateOfEvent]);
+
   const openMilestoneModal = (item: MilestoneItem) => {
     setModalItem(item);
     setIsModalOpen(true);
   };
 
-  if (!activeProfile) return null;
+  const fallbackProfile: ChildProfile = {
+    id: 'browse-baby',
+    name: 'Baby',
+    type: 'baby',
+    gender: 'undisclosed',
+    dateOfEvent: getLocalTodayDateStr(),
+    avatarColor: '#10b981',
+    avatarIcon: '👶',
+  };
+  const modalProfile = activeProfile ?? fallbackProfile;
 
   const currentBracket = AGE_BRACKETS.find((b) => b.months === selectedAgeMonths) || AGE_BRACKETS[2];
   const bracketRecs = getAgeBracketRecommendations(selectedAgeMonths);
@@ -90,6 +128,7 @@ export const MilestonesView: React.FC<MilestonesViewProps> = ({
   ).length;
 
   const handleToggle = (id: string, currentlyCompleted: boolean) => {
+    if (!activeProfile) return;
     if (!currentlyCompleted) {
       confetti({
         particleCount: 45,
@@ -512,8 +551,8 @@ export const MilestonesView: React.FC<MilestonesViewProps> = ({
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         type="milestone-detail"
-        profile={activeProfile}
-        unitSystem="metric"
+        profile={modalProfile}
+        unitSystem={unitSystem}
         data={{
           milestoneItem: modalItem || undefined,
         }}

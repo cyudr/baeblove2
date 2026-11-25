@@ -1356,6 +1356,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   'feed_duration_min' in updates
                     ? (updates.feed_duration_min ?? null)
                     : r.feed_duration_min,
+                feeding_method:
+                  'feeding_method' in updates
+                    ? (updates.feeding_method ?? null)
+                    : r.feeding_method,
               }
             : r
         )

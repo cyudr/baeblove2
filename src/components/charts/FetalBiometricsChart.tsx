@@ -39,7 +39,8 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
   unitSystem,
   onOpenFormulaModal,
 }) => {
-  const { formulaSettings } = useApp();
+  const { formulaSettings, theme } = useApp();
+  const isDark = theme === 'dark';
   const [selectedMetric, setSelectedMetric] = useState<FetalMetricKey>('efw');
   const [zoomMode, setZoomMode] = useState<FetalZoomMode>('auto');
   const [hoveredPoint, setHoveredPoint] = useState<{
@@ -605,8 +606,8 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
         >
           <defs>
             <linearGradient id="fetalBandGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#fef3c7" stopOpacity="0.8" />
-              <stop offset="100%" stopColor="#fef3c7" stopOpacity="0.3" />
+              <stop offset="0%" stopColor={isDark ? '#78350f' : '#fef3c7'} stopOpacity={isDark ? '0.45' : '0.8'} />
+              <stop offset="100%" stopColor={isDark ? '#78350f' : '#fef3c7'} stopOpacity={isDark ? '0.18' : '0.3'} />
             </linearGradient>
             <clipPath id="fetalPlotAreaClip">
               <rect
@@ -628,7 +629,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                   y1={y}
                   x2={width - padding.right}
                   y2={y}
-                  stroke="#f0f0ef"
+                  stroke={isDark ? '#292524' : '#f0f0ef'}
                   strokeDasharray="3 3"
                   strokeWidth="1"
                 />
@@ -637,14 +638,14 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                   y1={y}
                   x2={padding.left}
                   y2={y}
-                  stroke="#a8a29e"
+                  stroke={isDark ? '#57534e' : '#a8a29e'}
                   strokeWidth="1"
                 />
                 <text
                   x={padding.left - 8}
                   y={y + 3.5}
                   textAnchor="end"
-                  className="text-[10px] fill-stone-500 font-mono"
+                  className="text-[10px] fill-stone-500 dark:fill-stone-400 font-mono"
                 >
                   {tickVal.toFixed(yScale.decimals)} {currentCfg.unit}
                 </text>
@@ -662,7 +663,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                   y1={padding.top}
                   x2={x}
                   y2={height - padding.bottom}
-                  stroke="#f5f5f4"
+                  stroke={isDark ? '#292524' : '#f5f5f4'}
                   strokeWidth="1"
                 />
                 <line
@@ -670,14 +671,14 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                   y1={height - padding.bottom}
                   x2={x}
                   y2={height - padding.bottom + 4}
-                  stroke="#a8a29e"
+                  stroke={isDark ? '#57534e' : '#a8a29e'}
                   strokeWidth="1"
                 />
                 <text
                   x={x}
                   y={height - padding.bottom + 18}
                   textAnchor="middle"
-                  className="text-[10px] fill-stone-500 font-mono"
+                  className="text-[10px] fill-stone-500 dark:fill-stone-400 font-mono"
                 >
                   {formatCompactNumber(wk, weekTickSpec.decimals)}w
                 </text>
@@ -691,7 +692,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             y1={padding.top}
             x2={padding.left}
             y2={height - padding.bottom}
-            stroke="#d6d3d1"
+            stroke={isDark ? '#44403c' : '#d6d3d1'}
             strokeWidth="1"
           />
           <line
@@ -699,7 +700,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             y1={height - padding.bottom}
             x2={width - padding.right}
             y2={height - padding.bottom}
-            stroke="#d6d3d1"
+            stroke={isDark ? '#44403c' : '#d6d3d1'}
             strokeWidth="1"
           />
 
@@ -710,20 +711,20 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             <path
               d={makeRefPath(currentCfg.keyP95)}
               fill="none"
-              stroke="#f59e0b"
+              stroke={isDark ? '#d97706' : '#f59e0b'}
               strokeWidth="1"
               strokeDasharray="2 3"
             />
             <path
               d={makeRefPath(currentCfg.keyP50)}
               fill="none"
-              stroke="#d97706"
+              stroke={isDark ? '#f59e0b' : '#d97706'}
               strokeWidth="2"
             />
             <path
               d={makeRefPath(currentCfg.keyP5)}
               fill="none"
-              stroke="#f59e0b"
+              stroke={isDark ? '#d97706' : '#f59e0b'}
               strokeWidth="1"
               strokeDasharray="2 3"
             />
@@ -734,21 +735,21 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
               <text
                 x={width - padding.right + 4}
                 y={scaleY(refCurve[refCurve.length - 1][currentCfg.keyP95]) + 3}
-                className="text-[9px] fill-amber-700 font-sans font-medium"
+                className="text-[9px] fill-amber-700 dark:fill-amber-400 font-sans font-medium"
               >
                 95th
               </text>
               <text
                 x={width - padding.right + 4}
                 y={scaleY(refCurve[refCurve.length - 1][currentCfg.keyP50]) + 3}
-                className="text-[9px] fill-amber-900 font-sans font-semibold"
+                className="text-[9px] fill-amber-900 dark:fill-amber-300 font-sans font-semibold"
               >
                 50th
               </text>
               <text
                 x={width - padding.right + 4}
                 y={scaleY(refCurve[refCurve.length - 1][currentCfg.keyP5]) + 3}
-                className="text-[9px] fill-amber-700 font-sans font-medium"
+                className="text-[9px] fill-amber-700 dark:fill-amber-400 font-sans font-medium"
               >
                 5th
               </text>
@@ -760,7 +761,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             <path
               d={userPath}
               fill="none"
-              stroke="#b45309"
+              stroke={isDark ? '#fbbf24' : '#b45309'}
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -775,7 +776,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 y1={hoveredPoint.y}
                 x2={hoveredPoint.x}
                 y2={hoveredPoint.y}
-                stroke="#b45309"
+                stroke={isDark ? '#fbbf24' : '#b45309'}
                 strokeWidth="1"
                 strokeDasharray="3 3"
                 opacity="0.7"
@@ -785,7 +786,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 y1={hoveredPoint.y}
                 x2={hoveredPoint.x}
                 y2={height - padding.bottom}
-                stroke="#b45309"
+                stroke={isDark ? '#fbbf24' : '#b45309'}
                 strokeWidth="1"
                 strokeDasharray="3 3"
                 opacity="0.7"
@@ -834,15 +835,15 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                   cx={m.x}
                   cy={m.y}
                   r={isHovered ? 9 : 6}
-                  fill="#b45309"
-                  opacity={isHovered ? 0.25 : 0.15}
+                  fill={isDark ? '#fbbf24' : '#b45309'}
+                  opacity={isHovered ? 0.28 : 0.18}
                 />
                 <circle
                   cx={m.x}
                   cy={m.y}
                   r={isHovered ? 5.5 : 4}
-                  fill="#b45309"
-                  stroke="#ffffff"
+                  fill={isDark ? '#fbbf24' : '#b45309'}
+                  stroke={isDark ? '#1c1917' : '#ffffff'}
                   strokeWidth="2"
                 />
               </g>
@@ -857,7 +858,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 y1={padding.top}
                 x2={scrubberState.svgX}
                 y2={height - padding.bottom}
-                stroke="#d97706"
+                stroke={isDark ? '#fbbf24' : '#d97706'}
                 strokeWidth="1.5"
                 strokeDasharray="4 3"
               />
@@ -865,8 +866,8 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 cx={scrubberState.svgX}
                 cy={scaleY(scrubberState.ref50)}
                 r="4.5"
-                fill="#b45309"
-                stroke="#ffffff"
+                fill={isDark ? '#fbbf24' : '#b45309'}
+                stroke={isDark ? '#1c1917' : '#ffffff'}
                 strokeWidth="1.5"
               />
               <circle
@@ -874,7 +875,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 cy={scaleY(scrubberState.ref95)}
                 r="3"
                 fill="#f59e0b"
-                stroke="#ffffff"
+                stroke={isDark ? '#1c1917' : '#ffffff'}
                 strokeWidth="1"
               />
               <circle
@@ -882,7 +883,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 cy={scaleY(scrubberState.ref5)}
                 r="3"
                 fill="#f59e0b"
-                stroke="#ffffff"
+                stroke={isDark ? '#1c1917' : '#ffffff'}
                 strokeWidth="1"
               />
 
@@ -982,6 +983,8 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 rx="8"
                 fill="#1c1917"
                 opacity="0.95"
+                stroke="#3f3f46"
+                strokeWidth="0.75"
               />
               <text
                 x="10"
@@ -1012,7 +1015,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             x={(padding.left + width - padding.right) / 2}
             y={height - 10}
             textAnchor="middle"
-            className="text-[11px] fill-stone-500 font-sans font-medium"
+            className="text-[11px] fill-stone-500 dark:fill-stone-400 font-sans font-medium"
           >
             Gestational Age (Weeks)
           </text>

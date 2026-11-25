@@ -139,6 +139,7 @@ function normalizeRoutineRow(raw: Record<string, unknown>): RoutineRecord {
   const rawDiaper = raw.diaper ?? raw.Diaper;
   const rawDiaperLoad = raw['diaper load'] ?? raw.diaper_load;
   const rawDuration = raw.feed_duration_min ?? raw['feed duration (min)'];
+  const rawMethod = raw.feeding_method ?? raw.method;
 
   return {
     id: Number(raw.id),
@@ -159,6 +160,8 @@ function normalizeRoutineRow(raw: Record<string, unknown>): RoutineRecord {
     remark: raw.remark !== null && raw.remark !== undefined ? String(raw.remark) : null,
     feed_duration_min:
       rawDuration !== null && rawDuration !== undefined ? Number(rawDuration) : null,
+    feeding_method:
+      rawMethod !== null && rawMethod !== undefined ? toNullableText(String(rawMethod)) : null,
   };
 }
 
@@ -500,6 +503,7 @@ function buildRoutinePayload(input: NewRoutineRecordInput, nonNullProfileId = fa
     name: toNullableText(input.name),
     remark: toNullableText(input.remark),
     feed_duration_min: toNullableInt(input.feed_duration_min),
+    feeding_method: toNullableText(input.feeding_method),
   };
 }
 
@@ -661,6 +665,9 @@ export async function updateRoutineRecord(
   if ('remark' in updates) payload.remark = toNullableText(updates.remark);
   if ('feed_duration_min' in updates) {
     payload.feed_duration_min = toNullableInt(updates.feed_duration_min);
+  }
+  if ('feeding_method' in updates) {
+    payload.feeding_method = toNullableText(updates.feeding_method);
   }
 
   if (!supabase) {

@@ -41,13 +41,13 @@ export const MilestoneRadarProgress: React.FC<MilestoneRadarProgressProps> = ({
   const overallPct = totalCount > 0 ? Math.round((totalCompleted / totalCount) * 100) : 0;
 
   return (
-    <div className="bg-white rounded-xl border border-stone-200 p-5 shadow-xs">
-      <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+    <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs transition-colors">
+      <div className="flex items-center justify-between pb-3 border-b border-stone-100 dark:border-stone-800">
         <div className="flex items-center gap-2">
-          <Award className="w-4 h-4 text-emerald-700" />
-          <h4 className="text-sm font-semibold text-stone-900">Developmental Progress</h4>
+          <Award className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+          <h4 className="text-sm font-semibold text-stone-900 dark:text-white">Developmental Progress</h4>
         </div>
-        <span className="text-xs font-semibold text-emerald-800">
+        <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-400">
           {totalCompleted} of {totalCount} completed ({overallPct}%)
         </span>
       </div>
@@ -57,7 +57,7 @@ export const MilestoneRadarProgress: React.FC<MilestoneRadarProgressProps> = ({
         {stats.map(({ category, meta, total, completed, pct }) => (
           <div key={category} className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-stone-800 flex items-center gap-1.5">
+              <span className="font-medium text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
                 <span className={`w-2 h-2 rounded-full ${
                   category === 'movement'
                     ? 'bg-amber-500'
@@ -69,21 +69,21 @@ export const MilestoneRadarProgress: React.FC<MilestoneRadarProgressProps> = ({
                 }`}></span>
                 {meta.label}
               </span>
-              <span className="text-stone-500 font-mono text-[11px]">
+              <span className="text-stone-500 dark:text-stone-400 font-mono text-[11px]">
                 {completed}/{total} ({pct}%)
               </span>
             </div>
             {/* Clean Progress track */}
-            <div className="w-full h-2 bg-stone-100 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
                   category === 'movement'
-                    ? 'bg-amber-600'
+                    ? 'bg-amber-600 dark:bg-amber-500'
                     : category === 'language'
-                    ? 'bg-sky-600'
+                    ? 'bg-sky-600 dark:bg-sky-500'
                     : category === 'cognitive'
-                    ? 'bg-emerald-600'
-                    : 'bg-rose-600'
+                    ? 'bg-emerald-600 dark:bg-emerald-500'
+                    : 'bg-rose-600 dark:bg-rose-500'
                 }`}
                 style={{ width: `${pct}%` }}
               ></div>
@@ -93,8 +93,8 @@ export const MilestoneRadarProgress: React.FC<MilestoneRadarProgressProps> = ({
       </div>
 
       {overallPct === 100 && (
-        <div className="mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-2.5 text-xs text-emerald-900">
-          <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+        <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-lg flex items-center gap-2.5 text-xs text-emerald-900 dark:text-emerald-200">
+          <CheckCircle2 className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
           <span>All developmental milestones for this stage have been achieved!</span>
         </div>
       )}

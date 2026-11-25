@@ -190,7 +190,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
   if (!activeProfile) {
     return (
       <div className="space-y-6">
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-8 md:p-10 text-center space-y-4 shadow-xs">
+        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-8 md:p-10 text-center space-y-4 shadow-xs transition-colors">
           <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
             <Baby className="w-7 h-7" />
           </div>
@@ -226,6 +226,13 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
               className="px-4 py-2.5 text-xs font-semibold text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 rounded-xl transition-colors cursor-pointer"
             >
               Log Growth ({growthRecords.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('stages')}
+              className="px-4 py-2.5 text-xs font-semibold text-rose-900 dark:text-rose-200 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-800 rounded-xl transition-colors cursor-pointer"
+            >
+              Stages &amp; Milestones
             </button>
             <button
               type="button"
@@ -278,24 +285,70 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
     growthRecords
   );
 
-  // Latest measurements
-  const latestBabyM = mergedBabyMeasurements[mergedBabyMeasurements.length - 1];
+  // Latest measurements per metric (with birth baseline fallback)
+  const birthDateShort = activeProfile.dateOfEvent ? activeProfile.dateOfEvent.slice(0, 10) : null;
+  const latestWeightM = [...mergedBabyMeasurements]
+    .reverse()
+    .find((m) => m.weightKg !== undefined && m.weightKg > 0);
+  const latestLengthM = [...mergedBabyMeasurements]
+    .reverse()
+    .find((m) => m.lengthCm !== undefined && m.lengthCm > 0);
+  const latestHcM = [...mergedBabyMeasurements]
+    .reverse()
+    .find((m) => m.headCircumferenceCm !== undefined && m.headCircumferenceCm > 0);
   const latestFetalM = activeFetalMeasurements[activeFetalMeasurements.length - 1];
+
+  const resolvedWeightKg =
+    latestWeightM?.weightKg ??
+    (activeProfile.birthWeightKg && activeProfile.birthWeightKg > 0
+      ? activeProfile.birthWeightKg
+      : undefined);
+  const resolvedWeightAgeMonths = latestWeightM ? latestWeightM.ageInMonths : 0;
+  const resolvedWeightDate = latestWeightM?.date ?? (resolvedWeightKg !== undefined ? birthDateShort : null);
+  const weightIsFromBirth =
+    !latestWeightM &&
+    resolvedWeightKg !== undefined &&
+    activeProfile.birthWeightKg !== undefined &&
+    activeProfile.birthWeightKg > 0;
+
+  const resolvedLengthCm =
+    latestLengthM?.lengthCm ??
+    (activeProfile.birthLengthCm && activeProfile.birthLengthCm > 0
+      ? activeProfile.birthLengthCm
+      : undefined);
+  const resolvedLengthAgeMonths = latestLengthM ? latestLengthM.ageInMonths : 0;
+  const resolvedLengthDate = latestLengthM?.date ?? (resolvedLengthCm !== undefined ? birthDateShort : null);
+  const lengthIsFromBirth =
+    resolvedLengthCm !== undefined &&
+    (!latestLengthM || latestLengthM.id.startsWith('profile-birth-length-'));
+
+  const resolvedHcCm =
+    latestHcM?.headCircumferenceCm ??
+    (activeProfile.birthHeadCircumferenceCm && activeProfile.birthHeadCircumferenceCm > 0
+      ? activeProfile.birthHeadCircumferenceCm
+      : undefined);
+  const resolvedHcAgeMonths = latestHcM ? latestHcM.ageInMonths : 0;
+  const resolvedHcDate = latestHcM?.date ?? (resolvedHcCm !== undefined ? birthDateShort : null);
+  const hcIsFromBirth =
+    !latestHcM &&
+    resolvedHcCm !== undefined &&
+    activeProfile.birthHeadCircumferenceCm !== undefined &&
+    activeProfile.birthHeadCircumferenceCm > 0;
 
   // Latest baby percentiles
   const weightPct =
-    isBaby && latestBabyM?.weightKg
-      ? calculatePercentile(latestBabyM.weightKg, latestBabyM.ageInMonths, 'weight', activeProfile.gender)
+    isBaby && resolvedWeightKg !== undefined
+      ? calculatePercentile(resolvedWeightKg, resolvedWeightAgeMonths, 'weight', activeProfile.gender)
       : null;
 
   const lengthPct =
-    isBaby && latestBabyM?.lengthCm
-      ? calculatePercentile(latestBabyM.lengthCm, latestBabyM.ageInMonths, 'length', activeProfile.gender)
+    isBaby && resolvedLengthCm !== undefined
+      ? calculatePercentile(resolvedLengthCm, resolvedLengthAgeMonths, 'length', activeProfile.gender)
       : null;
 
   const hcPct =
-    isBaby && latestBabyM?.headCircumferenceCm
-      ? calculatePercentile(latestBabyM.headCircumferenceCm, latestBabyM.ageInMonths, 'headCircumference', activeProfile.gender)
+    isBaby && resolvedHcCm !== undefined
+      ? calculatePercentile(resolvedHcCm, resolvedHcAgeMonths, 'headCircumference', activeProfile.gender)
       : null;
 
   const daysToDueDate = !isBaby && gestationalAgeInfo
@@ -385,10 +438,10 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
         <section id="card-cockpit" className="space-y-4">
           {/* Hero Banner with Nursery/Womb Ambiance and Clickable Pointers */}
           <div
-            className={`rounded-3xl border shadow-sm p-5 sm:p-6 transition-all relative overflow-hidden ${
+            className={`rounded-3xl border shadow-sm p-5 sm:p-6 transition-colors relative overflow-hidden bg-white dark:bg-stone-900 ${
               isBaby
-                ? 'bg-linear-to-r from-emerald-500/10 via-teal-500/10 to-amber-500/10 border-emerald-200/80 dark:border-emerald-900/50'
-                : 'bg-linear-to-r from-rose-500/10 via-amber-500/10 to-indigo-500/10 border-rose-200/80 dark:border-rose-900/50'
+                ? 'bg-linear-to-r from-emerald-500/10 via-teal-500/10 to-amber-500/10 dark:from-emerald-950/50 dark:via-stone-900 dark:to-amber-950/35 border-emerald-200/80 dark:border-emerald-900/50'
+                : 'bg-linear-to-r from-rose-500/10 via-amber-500/10 to-indigo-500/10 dark:from-rose-950/50 dark:via-stone-900 dark:to-indigo-950/35 border-rose-200/80 dark:border-rose-900/50'
             }`}
           >
             {/* Subtle background glow circle */}
@@ -465,7 +518,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                         <button
                           onClick={() => openPopup('baby-stage')}
                           title="Click to view Week 38 Developmental Leap details"
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-300 font-bold hover:bg-emerald-200 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-300 font-bold hover:bg-emerald-200 dark:hover:bg-emerald-900/70 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
                         >
                           <Sparkles className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
                           <span>{currentBabyAgeLabel} (Week {currentBabyWeeks})</span>
@@ -474,7 +527,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                         <button
                           onClick={() => openPopup('awake-window-detail')}
                           title="Click to view awake window science and overtired signs"
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-100 dark:bg-indigo-950/70 text-indigo-900 dark:text-indigo-300 font-semibold hover:bg-indigo-200 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-100 dark:bg-indigo-950/70 text-indigo-900 dark:text-indigo-300 font-semibold hover:bg-indigo-200 dark:hover:bg-indigo-900/70 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
                         >
                           <span>☀️ Awake Window: 2.75–3.25h</span>
                           <span className="text-[10px] opacity-70">➔</span>
@@ -482,7 +535,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                         <button
                           onClick={() => openPopup('baby-rec-nutrition')}
                           title="Click to view infant nutrition & solids progression"
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-900 dark:text-amber-300 font-semibold hover:bg-amber-200 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-900 dark:text-amber-300 font-semibold hover:bg-amber-200 dark:hover:bg-amber-900/70 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
                         >
                           <span>🥑 Finger Foods & Pincer</span>
                           <span className="text-[10px] opacity-70">➔</span>
@@ -493,9 +546,9 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                         <button
                           onClick={() => openPopup('fetal-gestational-age')}
                           title="Click to view gestational timeline and lung surfactant maturation"
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100 dark:bg-rose-950/70 text-rose-900 dark:text-rose-300 font-bold hover:bg-rose-200 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100 dark:bg-rose-950/70 text-rose-900 dark:text-rose-300 font-bold hover:bg-rose-200 dark:hover:bg-rose-900/70 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
                         >
-                          <HeartPulse className="w-3.5 h-3.5 text-rose-700 animate-pulse" />
+                          <HeartPulse className="w-3.5 h-3.5 text-rose-700 dark:text-rose-400 animate-pulse" />
                           <span>Week {gestationalAgeInfo?.weeks}, Day {gestationalAgeInfo?.days}</span>
                           <span className="text-[10px] opacity-70">➔</span>
                         </button>
@@ -516,7 +569,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                             )
                           }
                           title="Click to view due date countdown details"
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-900 dark:text-amber-300 font-semibold hover:bg-amber-200 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-900 dark:text-amber-300 font-semibold hover:bg-amber-200 dark:hover:bg-amber-900/70 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
                         >
                           <span>⏳ {daysToDueDate} days to Due Date</span>
                           <span className="text-[10px] opacity-70">➔</span>
@@ -524,7 +577,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                         <button
                           onClick={() => openPopup('fetal-size')}
                           title="Click to view botanical scale & sensory awakening"
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-300 font-semibold hover:bg-emerald-200 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-300 font-semibold hover:bg-emerald-200 dark:hover:bg-emerald-900/70 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
                         >
                           <span>🍆 Eggplant (~37.6 cm)</span>
                           <span className="text-[10px] opacity-70">➔</span>
@@ -636,7 +689,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                   {/* Clickable pointer button */}
                   <button
                     onClick={() => openPopup('baby-weight')}
-                    className="px-3 py-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 rounded-xl flex items-center gap-1.5 transition-all shadow-2xs hover:scale-105"
+                    className="px-3 py-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 rounded-xl flex items-center gap-1.5 transition-all shadow-2xs hover:scale-105"
                   >
                     <span>Full Analysis</span>
                     <Info className="w-3.5 h-3.5" />
@@ -648,18 +701,23 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                     <div className="text-xs text-stone-500 dark:text-stone-400 font-medium">Current Measured Weight</div>
                     <div
                       onClick={() => openPopup('baby-weight')}
-                      className="text-3xl sm:text-4xl font-black text-stone-900 dark:text-white tracking-tight mt-0.5 cursor-pointer hover:text-emerald-700 transition-colors"
+                      className="text-3xl sm:text-4xl font-black text-stone-900 dark:text-white tracking-tight mt-0.5 cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
                     >
-                      {latestBabyM?.weightKg
-                        ? UnitConverter.formatWeight(latestBabyM.weightKg, unitSystem)
-                        : '9.12 kg'}
+                      {resolvedWeightKg !== undefined
+                        ? UnitConverter.formatWeight(resolvedWeightKg, unitSystem)
+                        : '—'}
                     </div>
+                    {resolvedWeightDate && (
+                      <div className="text-[10px] text-stone-400 dark:text-stone-500 mt-0.5">
+                        {weightIsFromBirth ? `Birth · ${resolvedWeightDate}` : resolvedWeightDate}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mt-2.5 flex-wrap">
                       <button
                         onClick={() => openPopup('baby-weight')}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-200 transition-all cursor-pointer shadow-2xs hover:scale-105"
+                        className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-200 dark:hover:bg-emerald-900/70 transition-all cursor-pointer shadow-2xs hover:scale-105"
                       >
-                        {weightPct ? `${weightPct.percentile}th Pct` : '54th Pct'} ⓘ
+                        {weightPct ? `${weightPct.percentile}th Pct` : 'WHO Pct'} ⓘ
                       </button>
                       <button
                         onClick={() =>
@@ -677,7 +735,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                             'Weight Gain Rate'
                           )
                         }
-                        className="px-2.5 py-1 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-semibold hover:bg-stone-200 transition-all cursor-pointer shadow-2xs"
+                        className="px-2.5 py-1 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-semibold hover:bg-stone-200 dark:hover:bg-stone-700 transition-all cursor-pointer shadow-2xs"
                       >
                         +135g / week ⓘ
                       </button>
@@ -734,26 +792,31 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                       Length & Stature
                     </span>
                     <span className="text-[10px] font-bold text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 rounded-full uppercase">
-                      WHO 61st Pct
+                      {lengthPct ? `WHO ${lengthPct.percentile}th Pct` : 'WHO Pct'}
                     </span>
                   </div>
 
                   <div className="my-3">
                     <div className="text-2xl sm:text-3xl font-black text-stone-900 dark:text-white">
-                      {latestBabyM?.lengthCm
-                        ? UnitConverter.formatLength(latestBabyM.lengthCm, unitSystem)
-                        : '72.4 cm'}
+                      {resolvedLengthCm !== undefined
+                        ? UnitConverter.formatLength(resolvedLengthCm, unitSystem)
+                        : '—'}
                     </div>
+                    {resolvedLengthDate && (
+                      <div className="text-[10px] text-stone-400 dark:text-stone-500 mt-0.5">
+                        {lengthIsFromBirth ? `Birth · ${resolvedLengthDate}` : resolvedLengthDate}
+                      </div>
+                    )}
                     <div className="flex items-center gap-1.5 text-[11px] text-teal-800 dark:text-teal-300 font-semibold mt-1">
                       <TrendingUp className="w-3.5 h-3.5 shrink-0" />
-                      <span>~1.2 cm / mo skeletal velocity</span>
+                      <span>{lengthIsFromBirth ? 'From birth length' : '~1.2 cm / mo skeletal velocity'}</span>
                     </div>
                   </div>
 
                   <div className="w-full h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden mb-1.5">
                     <div
                       className="h-full bg-linear-to-r from-teal-500 to-sky-400 rounded-full"
-                      style={{ width: `${Math.min(100, Math.max(5, lengthPct?.percentile ?? 61))}%` }}
+                      style={{ width: `${Math.min(100, Math.max(5, lengthPct?.percentile ?? 50))}%` }}
                     />
                   </div>
                 </div>
@@ -778,16 +841,21 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                       Cranial & Brain
                     </span>
                     <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-full uppercase">
-                      WHO 58th Pct
+                      {hcPct ? `WHO ${hcPct.percentile}th Pct` : 'WHO Pct'}
                     </span>
                   </div>
 
                   <div className="my-3">
                     <div className="text-2xl sm:text-3xl font-black text-stone-900 dark:text-white">
-                      {latestBabyM?.headCircumferenceCm
-                        ? UnitConverter.formatLength(latestBabyM.headCircumferenceCm, unitSystem)
-                        : '45.4 cm'}
+                      {resolvedHcCm !== undefined
+                        ? UnitConverter.formatLength(resolvedHcCm, unitSystem)
+                        : '—'}
                     </div>
+                    {resolvedHcDate && (
+                      <div className="text-[10px] text-stone-400 dark:text-stone-500 mt-0.5">
+                        {hcIsFromBirth ? `Birth · ${resolvedHcDate}` : resolvedHcDate}
+                      </div>
+                    )}
                     <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 mt-1 flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       <span>Fontanelle: Soft & Flat</span>
@@ -797,7 +865,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                   <div className="w-full h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden mb-1.5">
                     <div
                       className="h-full bg-linear-to-r from-amber-500 to-orange-400 rounded-full"
-                      style={{ width: `${Math.min(100, Math.max(5, hcPct?.percentile ?? 58))}%` }}
+                      style={{ width: `${Math.min(100, Math.max(5, hcPct?.percentile ?? 50))}%` }}
                     />
                   </div>
                 </div>
@@ -823,7 +891,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                       </h3>
                       <button
                         onClick={onOpenFormulaModal}
-                        className="text-[11px] text-stone-500 dark:text-stone-400 hover:text-rose-700 underline text-left"
+                        className="text-[11px] text-stone-500 dark:text-stone-400 hover:text-rose-700 dark:hover:text-rose-300 underline text-left"
                       >
                         ACOG & Naegele Clinical Calculation Standard
                       </button>
@@ -832,7 +900,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
 
                   <button
                     onClick={() => openPopup('fetal-gestational-age')}
-                    className="px-3 py-1.5 text-xs font-bold text-rose-800 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 rounded-xl flex items-center gap-1.5 transition-all shadow-2xs hover:scale-105"
+                    className="px-3 py-1.5 text-xs font-bold text-rose-800 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 rounded-xl flex items-center gap-1.5 transition-all shadow-2xs hover:scale-105"
                   >
                     <span>Timeline &rarr;</span>
                   </button>
@@ -843,20 +911,20 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                     <div className="text-xs text-stone-500 dark:text-stone-400 font-medium">Active Gestational Age</div>
                     <div
                       onClick={() => openPopup('fetal-gestational-age')}
-                      className="text-3xl sm:text-4xl font-black text-stone-900 dark:text-white tracking-tight mt-0.5 cursor-pointer hover:text-rose-700 transition-colors"
+                      className="text-3xl sm:text-4xl font-black text-stone-900 dark:text-white tracking-tight mt-0.5 cursor-pointer hover:text-rose-700 dark:hover:text-rose-300 transition-colors"
                     >
                       Week {gestationalAgeInfo?.weeks}, Day {gestationalAgeInfo?.days}
                     </div>
                     <div className="flex items-center gap-2 mt-2.5 flex-wrap">
                       <button
                         onClick={() => openPopup('fetal-gestational-age')}
-                        className="px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 text-xs font-bold hover:bg-amber-200 transition-all cursor-pointer shadow-2xs hover:scale-105"
+                        className="px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 text-xs font-bold hover:bg-amber-200 dark:hover:bg-amber-900/70 transition-all cursor-pointer shadow-2xs hover:scale-105"
                       >
                         Trimester 3
                       </button>
                       <button
                         onClick={() => openPopup('fetal-gestational-age')}
-                        className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/80 text-rose-900 dark:text-rose-300 text-xs font-bold hover:bg-rose-200 transition-all cursor-pointer shadow-2xs hover:scale-105"
+                        className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/80 text-rose-900 dark:text-rose-300 text-xs font-bold hover:bg-rose-200 dark:hover:bg-rose-900/70 transition-all cursor-pointer shadow-2xs hover:scale-105"
                       >
                         Viability &gt;95% ⓘ
                       </button>
@@ -917,8 +985,13 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
 
                   <div className="my-3">
                     <div className="text-2xl sm:text-3xl font-black text-stone-900 dark:text-white">
-                      {latestFetalM?.efwGrams ? UnitConverter.formatFetalWeight(latestFetalM.efwGrams, unitSystem) : '1,040 g'}
+                      {latestFetalM?.efwGrams ? UnitConverter.formatFetalWeight(latestFetalM.efwGrams, unitSystem) : '—'}
                     </div>
+                    {latestFetalM?.date && (
+                      <div className="text-[10px] text-stone-400 dark:text-stone-500 mt-0.5">
+                        {latestFetalM.date}
+                      </div>
+                    )}
                     <div className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 mt-1">
                       ~180g / wk gain velocity
                     </div>
@@ -1270,7 +1343,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                       {BABY_RECIPES.slice(0, 2).map((r) => (
                         <span
                           key={r.id}
-                          className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200/60 text-emerald-950 dark:text-emerald-200 text-[10px] font-semibold flex items-center gap-1"
+                          className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200/60 dark:border-emerald-800/60 text-emerald-950 dark:text-emerald-200 text-[10px] font-semibold flex items-center gap-1"
                         >
                           <span>{r.emoji}</span>
                           <span className="truncate max-w-[90px]">{r.title.split(' ')[0]}</span>
@@ -1316,7 +1389,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                       {FETAL_MATERNAL_RECIPES.slice(0, 2).map((r) => (
                         <span
                           key={r.id}
-                          className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-200/60 text-indigo-950 dark:text-indigo-200 text-[10px] font-semibold flex items-center gap-1"
+                          className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-200/60 dark:border-indigo-800/60 text-indigo-950 dark:text-indigo-200 text-[10px] font-semibold flex items-center gap-1"
                         >
                           <span>{r.emoji}</span>
                           <span className="truncate max-w-[90px]">{r.title.split(' ')[0]}</span>
@@ -1510,7 +1583,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                         className={`p-4 rounded-2xl border transition-all flex items-start justify-between gap-3 ${
                           isDone
                             ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-900/60'
-                            : 'bg-stone-50 dark:bg-stone-800/60 border-stone-200/70 dark:border-stone-700/60 hover:border-emerald-300'
+                            : 'bg-stone-50 dark:bg-stone-800/60 border-stone-200/70 dark:border-stone-700/60 hover:border-emerald-300 dark:hover:border-emerald-700'
                         }`}
                       >
                         <div
@@ -1579,7 +1652,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
 
                   <button
                     onClick={() => setIsTimerActive((t) => !t)}
-                    className="p-2 rounded-xl bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-200 transition-colors"
+                    className="p-2 rounded-xl bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors"
                   >
                     {isTimerActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                   </button>
@@ -1590,7 +1663,7 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                       setTimerSeconds(0);
                       setLiveKicksCount(0);
                     }}
-                    className="p-2 rounded-xl bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-200 transition-colors"
+                    className="p-2 rounded-xl bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 transition-colors"
                   >
                     <RotateCcw className="w-4 h-4" />
                   </button>
@@ -1677,9 +1750,9 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
               {onOpenExportModal && (
                 <button
                   onClick={onOpenExportModal}
-                  className="px-3.5 py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 hover:bg-stone-50 text-xs font-bold text-stone-700 dark:text-stone-200 flex items-center gap-1.5 shadow-2xs"
+                  className="px-3.5 py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 hover:bg-stone-50 dark:hover:bg-stone-700 text-xs font-bold text-stone-700 dark:text-stone-200 flex items-center gap-1.5 shadow-2xs transition-colors"
                 >
-                  <FileText className="w-3.5 h-3.5 text-stone-500" />
+                  <FileText className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
                   <span>Export Report</span>
                 </button>
               )}
@@ -1850,11 +1923,11 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
         profile={activeProfile}
         unitSystem={unitSystem}
         data={{
-          weightKg: latestBabyM?.weightKg,
+          weightKg: resolvedWeightKg,
           weightPct: weightPct?.percentile,
-          lengthCm: latestBabyM?.lengthCm,
+          lengthCm: resolvedLengthCm,
           lengthPct: lengthPct?.percentile,
-          headCircumferenceCm: latestBabyM?.headCircumferenceCm,
+          headCircumferenceCm: resolvedHcCm,
           hcPct: hcPct?.percentile,
           completedMilestonesCount: activeCompletedMilestones.length,
           totalMilestonesCount: bracketMilestones.length || 8,

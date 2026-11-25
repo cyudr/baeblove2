@@ -24,12 +24,12 @@ export const GrowthVelocityCard: React.FC<GrowthVelocityCardProps> = ({
 
   if (sorted.length < 2) {
     return (
-      <div className="bg-white rounded-xl border border-stone-200 p-5 shadow-xs">
+      <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs transition-colors">
         <div className="flex items-center gap-2 mb-2">
-          <Activity className="w-4 h-4 text-emerald-700" />
-          <h4 className="text-sm font-semibold text-stone-900">Growth Velocity</h4>
+          <Activity className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+          <h4 className="text-sm font-semibold text-stone-900 dark:text-white">Growth Velocity</h4>
         </div>
-        <p className="text-xs text-stone-500 leading-relaxed">
+        <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">
           Log at least two pediatric checkup measurements to calculate weight gain velocity (grams/day) and length growth velocity.
         </p>
       </div>
@@ -80,13 +80,13 @@ export const GrowthVelocityCard: React.FC<GrowthVelocityCardProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-xl border border-stone-200 p-5 shadow-xs">
-      <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+    <div className="bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs transition-colors">
+      <div className="flex items-center justify-between pb-3 border-b border-stone-100 dark:border-stone-800">
         <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-emerald-700" />
-          <h4 className="text-sm font-semibold text-stone-900">Growth Velocity Rate</h4>
+          <Activity className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+          <h4 className="text-sm font-semibold text-stone-900 dark:text-white">Growth Velocity Rate</h4>
         </div>
-        <span className="text-xs text-stone-500">
+        <span className="text-xs text-stone-500 dark:text-stone-400">
           Between {formatAdaptiveAgeFromDays(previous.ageInDays ?? previous.ageInMonths * DAYS_PER_MONTH, { compact: true })} and{' '}
           {formatAdaptiveAgeFromDays(latest.ageInDays ?? latest.ageInMonths * DAYS_PER_MONTH, { compact: true })} ({diffDays} days)
         </span>
@@ -94,47 +94,47 @@ export const GrowthVelocityCard: React.FC<GrowthVelocityCardProps> = ({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
         {/* Weight gain stat */}
-        <div className="p-3.5 bg-stone-50 rounded-lg border border-stone-200/60">
-          <div className="flex items-center justify-between text-xs text-stone-500 mb-1">
+        <div className="p-3.5 bg-stone-50 dark:bg-stone-800/60 rounded-lg border border-stone-200/60 dark:border-stone-700/60 transition-colors">
+          <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
             <span className="flex items-center gap-1 font-medium">
-              <Scale className="w-3.5 h-3.5 text-emerald-700" />
+              <Scale className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
               Weight Gain Rate
             </span>
-            <span className="text-emerald-800 font-semibold flex items-center">
+            <span className="text-emerald-800 dark:text-emerald-400 font-semibold flex items-center">
               <ArrowUpRight className="w-3.5 h-3.5" />
               {weightVelocityGramsPerDay > 0 ? `+${weightVelocityGramsPerDay}` : weightVelocityGramsPerDay} g/day
             </span>
           </div>
-          <div className="text-lg font-bold text-stone-900">
+          <div className="text-lg font-bold text-stone-900 dark:text-white">
             {unitSystem === 'metric'
               ? `${(totalWeightGainGrams / 1000).toFixed(2)} kg gained`
               : `${((totalWeightGainGrams / 1000) * 2.20462).toFixed(2)} lb gained`}
           </div>
-          <p className="text-[11px] text-stone-500 mt-1">
+          <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1">
             Expected: {expectedGainStr}
           </p>
         </div>
 
         {/* Length growth stat */}
-        <div className="p-3.5 bg-stone-50 rounded-lg border border-stone-200/60">
-          <div className="flex items-center justify-between text-xs text-stone-500 mb-1">
+        <div className="p-3.5 bg-stone-50 dark:bg-stone-800/60 rounded-lg border border-stone-200/60 dark:border-stone-700/60 transition-colors">
+          <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
             <span className="flex items-center gap-1 font-medium">
-              <Ruler className="w-3.5 h-3.5 text-sky-700" />
+              <Ruler className="w-3.5 h-3.5 text-sky-700 dark:text-sky-400" />
               Length Velocity
             </span>
-            <span className="text-sky-800 font-semibold flex items-center">
+            <span className="text-sky-800 dark:text-sky-400 font-semibold flex items-center">
               <ArrowUpRight className="w-3.5 h-3.5" />
               +{lengthVelocityCmPerMonth} cm/mo
             </span>
           </div>
-          <div className="text-lg font-bold text-stone-900">
+          <div className="text-lg font-bold text-stone-900 dark:text-white">
             {latest.lengthCm && previous.lengthCm
               ? unitSystem === 'metric'
                 ? `+${(latest.lengthCm - previous.lengthCm).toFixed(1)} cm total`
                 : `+${((latest.lengthCm - previous.lengthCm) / 2.54).toFixed(1)} in total`
               : 'N/A'}
           </div>
-          <p className="text-[11px] text-stone-500 mt-1">
+          <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1">
             Linear skeletal elongation following normal percentile trajectory.
           </p>
         </div>

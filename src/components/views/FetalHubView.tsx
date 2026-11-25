@@ -54,10 +54,10 @@ export const FetalHubView: React.FC<FetalHubViewProps> = ({
     formulaSettings,
   } = useApp();
 
-  if (!activeProfile) return null;
-
   // Calculate current gestational age based on active formula settings
-  const ga = calculateGestationalAgeWithSettings(activeProfile.dateOfEvent, formulaSettings);
+  const ga = activeProfile
+    ? calculateGestationalAgeWithSettings(activeProfile.dateOfEvent, formulaSettings)
+    : { weeks: 28, days: 0, totalDays: 196, methodUsed: 'Naegele (280d)' };
   const currentWeek = Math.max(4, Math.min(42, ga.weeks || 28));
 
   const [selectedWeek, setSelectedWeek] = useState<number>(currentWeek);
@@ -84,7 +84,7 @@ export const FetalHubView: React.FC<FetalHubViewProps> = ({
   };
 
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
     if (isCounting) {
       interval = setInterval(() => {
         setElapsedSeconds((prev) => prev + 1);
@@ -94,6 +94,8 @@ export const FetalHubView: React.FC<FetalHubViewProps> = ({
       if (interval) clearInterval(interval);
     };
   }, [isCounting]);
+
+  if (!activeProfile) return null;
 
   const handleStartKickSession = () => {
     setIsCounting(true);

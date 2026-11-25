@@ -478,7 +478,7 @@ export const CardDetailPopupModal: React.FC<CardDetailPopupModalProps> = ({
           {/* ===================== BABY STAGE WONDER ===================== */}
           {type === 'baby-stage' && (
             <>
-              <div className="bg-linear-to-r from-amber-500/15 via-rose-500/10 to-teal-500/10 rounded-2xl p-4 border border-amber-200/80 dark:border-amber-900/40">
+              <div className="bg-linear-to-r from-amber-500/15 via-rose-500/10 to-teal-500/10 dark:from-amber-950/40 dark:via-rose-950/25 dark:to-teal-950/30 rounded-2xl p-4 border border-amber-200/80 dark:border-amber-900/40">
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">🥑</span>
                   <div>
@@ -710,7 +710,7 @@ export const CardDetailPopupModal: React.FC<CardDetailPopupModalProps> = ({
           {/* ===================== FETAL STAGE WONDER ===================== */}
           {type === 'fetal-stage' && (
             <>
-              <div className="bg-linear-to-r from-amber-500/15 via-rose-500/10 to-indigo-500/10 rounded-2xl p-4 border border-amber-200/80 dark:border-amber-900/40">
+              <div className="bg-linear-to-r from-amber-500/15 via-rose-500/10 to-indigo-500/10 dark:from-amber-950/40 dark:via-rose-950/25 dark:to-indigo-950/30 rounded-2xl p-4 border border-amber-200/80 dark:border-amber-900/40">
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">🍆</span>
                   <div>

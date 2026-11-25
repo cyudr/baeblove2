@@ -197,6 +197,7 @@ export interface RoutineRecord {
   name: string | null;
   remark: string | null;
   feed_duration_min: number | null;
+  feeding_method: string | null;
 }
 
 export interface NewRoutineRecordInput {
@@ -211,6 +212,7 @@ export interface NewRoutineRecordInput {
   name?: string | null;
   remark?: string | null;
   feed_duration_min?: number | null;
+  feeding_method?: string | null;
 }
 
 /**

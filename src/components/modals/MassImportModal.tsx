@@ -3,16 +3,21 @@ import { useApp } from '../../context/AppContext';
 import {
   DEFAULT_DIAPER_LOAD,
   classifyTemperature,
+  detectDefaultFeedingMethod,
   doesRecordMatchProfile,
   extractDiaperLoadFromText,
   formatDiaperLoad,
+  formatFeedingMethodLabel,
   getGrowthRecordDate,
   normalizeDiaperLoad,
+  normalizeFeedingMethod,
+  normalizeRoutineTimeHHMM,
   normalizeStoolValue,
   parseDiaperLoadCount,
 } from '../../utils/careInterpreter';
 import { StoolSelect } from '../common/StoolSelect';
 import { DiaperLoadControl } from '../common/DiaperLoadControl';
+import { FeedingMethodSelect } from '../common/FeedingMethodSelect';
 import type {
   GrowthRecord,
   NewGrowthRecordInput,
@@ -65,6 +70,8 @@ interface RoutineDraftRow {
   feedDurationMin: string;
   ebmMl: string;
   formulaMl: string;
+  feedingMethod: string;
+  methodTouched?: boolean;
   diaper: string;
   diaperLoad: string;
   stool: string;
@@ -135,6 +142,8 @@ function createEmptyRoutineRow(defaultDate: string, defaultLogger: string, idx =
     feedDurationMin: '',
     ebmMl: '',
     formulaMl: '',
+    feedingMethod: '',
+    methodTouched: false,
     diaper: '',
     diaperLoad: DEFAULT_DIAPER_LOAD,
     stool: '',
@@ -171,6 +180,11 @@ const MASS_IMPORT_ROUTINE_ITEM_SCHEMA = {
     ebmMl: { type: 'INTEGER', nullable: true, description: 'Expressed breast milk in mL' },
     formulaMl: { type: 'INTEGER', nullable: true, description: 'Infant formula in mL' },
     feedDurationMin: { type: 'INTEGER', nullable: true, description: 'Feed duration in minutes' },
+    feedingMethod: {
+      type: 'STRING',
+      nullable: true,
+      description: 'Feeding method: "bottle", "latch", "cup", or "stringe". Default "bottle" when ebmMl/formulaMl is present, or "latch" when only feedDurationMin is present.',
+    },
     diaper: { type: 'STRING', nullable: true, description: 'Wet, Dirty, Mixed, Dry, or custom' },
     diaperLoad: {
       type: 'STRING',
@@ -191,6 +205,7 @@ const MASS_IMPORT_ROUTINE_ITEM_SCHEMA = {
     'ebmMl',
     'formulaMl',
     'feedDurationMin',
+    'feedingMethod',
     'diaper',
     'diaperLoad',
     'stool',
@@ -230,6 +245,7 @@ function buildMassImportGeminiPayload(params: {
     '- ebmMl: integer milliliters of Expressed Breast Milk (EBM / breast milk / BM / pumped milk). Convert fl oz via 1 oz = 29.57 mL rounded to integer. Null if absent.',
     '- formulaMl: integer milliliters of infant formula (FM / formula). Convert fl oz to mL if needed. Null if absent.',
     '- feedDurationMin: integer minutes of feeding duration. Null if absent.',
+    '- feedingMethod: feeding method ("bottle", "latch", "cup", or "stringe"). Use "bottle" by default when ebmMl or formulaMl is present, or "latch" when only feedDurationMin is present (no milk volume). Null if not a feed.',
     '- diaper: normalize to "Wet", "Dirty", "Mixed", or "Dry" when clearly matching (pee/urine -> "Wet", poop/stool/BM -> "Dirty", both -> "Mixed"), or keep a concise custom label. Null if absent.',
     '- stool: baby stool color code ONLY using the legend M (Meconium), G (Greenish), GY (Greenish Yellow), Y (Yellow). Output ONLY the code ("M", "G", "GY", or "Y") with NO x1/x2/1x/2x behind it. Null if absent.',
     '- diaperLoad: multiplier/count formatted as "x1", "x2", "x3", "x4", etc. If a log writes "y x2", "m x4", "GY 3x", put the color code ("Y", "M", "GY") in stool and the multiplier ("x2", "x4", "x3") in diaperLoad. Use "x1" if diaper or stool is present with no explicit multiplier, or null if neither diaper nor stool is logged.',
@@ -393,18 +409,8 @@ function normalizeTextStr(val: unknown, fallback = ''): string {
   return fallback.trim();
 }
 
-function parseTimeToMinutes(timeStr: string | null | undefined): number | null {
-  if (!timeStr) return null;
-  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})/);
-  if (!match) return null;
-  const hh = Number(match[1]);
-  const mm = Number(match[2]);
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
-  return hh * 60 + mm;
-}
-
 interface DuplicateMatch {
-  level: 'exact' | 'possible';
+  level: 'duplicate' | 'conflict';
   reason: string;
 }
 
@@ -415,100 +421,171 @@ function formatRoutineSummary(rec: RoutineRecord): string {
   if (rec.emb_mL !== null) parts.push(`EBM ${rec.emb_mL} mL`);
   if (rec.formula_mL !== null) parts.push(`Formula ${rec.formula_mL} mL`);
   if (rec.feed_duration_min !== null) parts.push(`${rec.feed_duration_min} min`);
+  if (rec.feeding_method) parts.push(formatFeedingMethodLabel(rec.feeding_method));
   if (rec.diaper) parts.push(rec.diaper);
   if (rec['diaper load'] !== null) parts.push(formatDiaperLoad(rec['diaper load']));
   if (rec.stool) parts.push(`Stool ${rec.stool}`);
   return parts.join(' · ') || `Entry #${rec.id}`;
 }
 
+function formatRoutineDraftSummary(row: RoutineDraftRow): string {
+  const parts: string[] = [];
+  if (row.date) parts.push(row.date);
+  const t = normalizeRoutineTimeHHMM(row.time);
+  if (t) parts.push(t);
+  if (row.ebmMl.trim() !== '') parts.push(`EBM ${row.ebmMl.trim()} mL`);
+  if (row.formulaMl.trim() !== '') parts.push(`Formula ${row.formulaMl.trim()} mL`);
+  if (row.feedDurationMin.trim() !== '') parts.push(`${row.feedDurationMin.trim()} min`);
+  if (row.feedingMethod) parts.push(formatFeedingMethodLabel(row.feedingMethod));
+  if (row.diaper.trim() !== '') parts.push(row.diaper.trim());
+  const loadCount = parseDiaperLoadCount(row.diaperLoad, 1);
+  if (row.diaper.trim() !== '' || row.stool.trim() !== '' || loadCount !== 1) {
+    parts.push(formatDiaperLoad(loadCount));
+  }
+  if (row.stool.trim() !== '') parts.push(`Stool ${row.stool.trim()}`);
+  return parts.join(' · ');
+}
+
+/**
+ * Detect duplicated or conflicting routine entries strictly using Date and Time:
+ * - Same date & time + identical data -> 'duplicate'
+ * - Same date & time + differing data -> 'conflict'
+ * Checks both existing DB records and other rows in the current import batch.
+ */
 function findRoutineDuplicateMatch(
   row: RoutineDraftRow,
-  existingRecords: RoutineRecord[]
+  existingRecords: RoutineRecord[],
+  siblingRows: RoutineDraftRow[] = []
 ): DuplicateMatch | null {
   const rowDate = normalizeDateStr(row.date);
   if (!rowDate) return null;
 
+  const rowTime = normalizeRoutineTimeHHMM(row.time);
   const rowLoadCount = parseDiaperLoadCount(row.diaperLoad, 1);
   const rowLoadChanged = rowLoadCount !== 1;
+  const rowMethod = normalizeFeedingMethod(row.feedingMethod);
   const hasAnyMetric =
     row.ebmMl.trim() !== '' ||
     row.formulaMl.trim() !== '' ||
     row.feedDurationMin.trim() !== '' ||
+    rowMethod !== '' ||
     row.diaper.trim() !== '' ||
     row.stool.trim() !== '' ||
     rowLoadChanged ||
     row.remark.trim() !== '';
   if (!hasAnyMetric) return null;
 
-  const rowMins = parseTimeToMinutes(row.time);
   const rowEbm = row.ebmMl.trim() !== '' ? parseInt(row.ebmMl, 10) : null;
   const rowFormula = row.formulaMl.trim() !== '' ? parseInt(row.formulaMl, 10) : null;
   const rowDur = row.feedDurationMin.trim() !== '' ? parseInt(row.feedDurationMin, 10) : null;
   const rowDiaper = row.diaper.trim().toLowerCase();
-  const rowStool = row.stool.trim().toLowerCase();
+  const rowStool = normalizeStoolValue(row.stool).toLowerCase();
   const rowLoad: number | null =
     rowDiaper || rowStool || rowLoadChanged ? rowLoadCount : null;
+  const rowRemark = row.remark.trim().toLowerCase();
 
-  let possibleMatch: DuplicateMatch | null = null;
+  let conflictMatch: DuplicateMatch | null = null;
+  const dateTimeLabel = rowTime ? `${rowDate} ${rowTime}` : rowDate;
 
+  // 1. Check against existing database records by exact date & time
   for (const rec of existingRecords) {
     const recDate = normalizeDateStr(rec.date || rec.created_at);
     if (recDate !== rowDate) continue;
 
-    const recMins = parseTimeToMinutes(rec.time);
-    const recEbm = rec.emb_mL;
-    const recFormula = rec.formula_mL;
-    const recDur = rec.feed_duration_min;
+    const recTime = normalizeRoutineTimeHHMM(rec.time);
+    if (rowTime !== recTime) continue;
+
+    const recMethod = normalizeFeedingMethod(rec.feeding_method);
     const recDiaper = (rec.diaper || '').trim().toLowerCase();
-    const recStool = (rec.stool || '').trim().toLowerCase();
+    const recStool = normalizeStoolValue(rec.stool).toLowerCase();
     const recLoad = rec['diaper load'];
+    const recRemark = (rec.remark || '').trim().toLowerCase();
 
-    const sameEbm = rowEbm === recEbm;
-    const sameFormula = rowFormula === recFormula;
-    const sameDur = rowDur === recDur;
-    const sameDiaper = rowDiaper === recDiaper;
-    const sameStool = rowStool === recStool;
-    const sameLoad = rowLoad === recLoad;
+    const allFieldsMatch =
+      rowEbm === rec.emb_mL &&
+      rowFormula === rec.formula_mL &&
+      rowDur === rec.feed_duration_min &&
+      rowMethod === recMethod &&
+      rowDiaper === recDiaper &&
+      rowStool === recStool &&
+      rowLoad === recLoad &&
+      rowRemark === recRemark;
 
-    if (rowMins !== null && recMins !== null) {
-      const diffMins = Math.abs(rowMins - recMins);
-      if (
-        diffMins <= 5 &&
-        sameEbm &&
-        sameFormula &&
-        (sameDur || rowDur === null || recDur === null) &&
-        (sameDiaper || !rowDiaper || !recDiaper) &&
-        (sameStool || !rowStool || !recStool) &&
-        (sameLoad || !rowLoad || !recLoad)
-      ) {
-        return {
-          level: 'exact',
-          reason: `Already in DB: ${formatRoutineSummary(rec)}`,
-        };
-      }
-      if (diffMins <= 15 && !possibleMatch) {
-        possibleMatch = {
-          level: 'possible',
-          reason: `Similar DB entry (${diffMins === 0 ? 'same time' : `within ${diffMins}m`}): ${formatRoutineSummary(rec)}`,
-        };
-      }
-    } else if (
-      (rowEbm !== null || rowFormula !== null || rowDiaper !== '' || rowStool !== '') &&
-      sameEbm &&
-      sameFormula &&
-      sameDiaper &&
-      sameStool &&
-      (sameLoad || !rowLoad || !recLoad) &&
-      !possibleMatch
-    ) {
-      possibleMatch = {
-        level: 'possible',
-        reason: `Similar DB entry on ${rowDate}: ${formatRoutineSummary(rec)}`,
+    if (allFieldsMatch) {
+      return {
+        level: 'duplicate',
+        reason: `Duplicate in DB (${dateTimeLabel}): ${formatRoutineSummary(rec)}`,
+      };
+    }
+
+    if (!conflictMatch) {
+      conflictMatch = {
+        level: 'conflict',
+        reason: `Conflicting DB entry at ${dateTimeLabel}: ${formatRoutineSummary(rec)}`,
       };
     }
   }
 
-  return possibleMatch;
+  // 2. Check against other rows in the same import batch by exact date & time
+  for (let i = 0; i < siblingRows.length; i += 1) {
+    const other = siblingRows[i];
+    if (other._key === row._key) continue;
+
+    const otherDate = normalizeDateStr(other.date);
+    if (otherDate !== rowDate) continue;
+
+    const otherTime = normalizeRoutineTimeHHMM(other.time);
+    if (rowTime !== otherTime) continue;
+
+    const otherLoadCount = parseDiaperLoadCount(other.diaperLoad, 1);
+    const otherLoadChanged = otherLoadCount !== 1;
+    const otherMethod = normalizeFeedingMethod(other.feedingMethod);
+    const otherDiaper = other.diaper.trim().toLowerCase();
+    const otherStool = normalizeStoolValue(other.stool).toLowerCase();
+    const otherLoad: number | null =
+      otherDiaper || otherStool || otherLoadChanged ? otherLoadCount : null;
+    const otherEbm = other.ebmMl.trim() !== '' ? parseInt(other.ebmMl, 10) : null;
+    const otherFormula = other.formulaMl.trim() !== '' ? parseInt(other.formulaMl, 10) : null;
+    const otherDur = other.feedDurationMin.trim() !== '' ? parseInt(other.feedDurationMin, 10) : null;
+    const otherRemark = other.remark.trim().toLowerCase();
+
+    const otherHasMetric =
+      otherEbm !== null ||
+      otherFormula !== null ||
+      otherDur !== null ||
+      otherMethod !== '' ||
+      otherDiaper !== '' ||
+      otherStool !== '' ||
+      otherLoadChanged ||
+      otherRemark !== '';
+    if (!otherHasMetric) continue;
+
+    const allFieldsMatch =
+      rowEbm === otherEbm &&
+      rowFormula === otherFormula &&
+      rowDur === otherDur &&
+      rowMethod === otherMethod &&
+      rowDiaper === otherDiaper &&
+      rowStool === otherStool &&
+      rowLoad === otherLoad &&
+      rowRemark === otherRemark;
+
+    if (allFieldsMatch) {
+      return {
+        level: 'duplicate',
+        reason: `Duplicate of Routine Row #${i + 1} (${dateTimeLabel}): ${formatRoutineDraftSummary(other)}`,
+      };
+    }
+
+    if (!conflictMatch) {
+      conflictMatch = {
+        level: 'conflict',
+        reason: `Conflicting with Routine Row #${i + 1} at ${dateTimeLabel}: ${formatRoutineDraftSummary(other)}`,
+      };
+    }
+  }
+
+  return conflictMatch;
 }
 
 function formatGrowthSummary(rec: GrowthRecord, recDate: string): string {
@@ -519,9 +596,19 @@ function formatGrowthSummary(rec: GrowthRecord, recDate: string): string {
   return parts.join(' · ');
 }
 
+function formatGrowthDraftSummary(row: GrowthDraftRow): string {
+  const parts: string[] = [];
+  if (row.date) parts.push(row.date);
+  if (row.dailyWeight.trim() !== '') parts.push(`${row.dailyWeight.trim()} kg`);
+  if (row.dailyLength.trim() !== '') parts.push(`${row.dailyLength.trim()} cm`);
+  if (row.temperature.trim() !== '') parts.push(`${row.temperature.trim()}°C`);
+  return parts.join(' · ');
+}
+
 function findGrowthDuplicateMatch(
   row: GrowthDraftRow,
-  existingRecords: GrowthRecord[]
+  existingRecords: GrowthRecord[],
+  siblingRows: GrowthDraftRow[] = []
 ): DuplicateMatch | null {
   const rowDate = normalizeDateStr(row.date);
   if (!rowDate) return null;
@@ -536,40 +623,91 @@ function findGrowthDuplicateMatch(
   const rowWeight = row.dailyWeight.trim() !== '' ? parseFloat(row.dailyWeight) : null;
   const rowLength = row.dailyLength.trim() !== '' ? parseFloat(row.dailyLength) : null;
   const rowTemp = row.temperature.trim() !== '' ? parseFloat(row.temperature) : null;
+  const rowRemark = row.remark.trim().toLowerCase();
 
-  let possibleMatch: DuplicateMatch | null = null;
+  let conflictMatch: DuplicateMatch | null = null;
 
+  // 1. Check against existing database records by Date
   for (const rec of existingRecords) {
     const recDate = normalizeDateStr(getGrowthRecordDate(rec));
     if (recDate !== rowDate) continue;
 
-    const compared: boolean[] = [];
-    if (rowWeight !== null && Number.isFinite(rowWeight)) {
-      compared.push(rec.daily_weight !== null && Math.abs(rec.daily_weight - rowWeight) <= 0.01);
-    }
-    if (rowLength !== null && Number.isFinite(rowLength)) {
-      compared.push(rec.daily_length !== null && Math.abs(rec.daily_length - rowLength) <= 0.1);
-    }
-    if (rowTemp !== null && Number.isFinite(rowTemp)) {
-      compared.push(rec.temperature !== null && Math.abs(rec.temperature - rowTemp) <= 0.1);
-    }
+    const sameWeight =
+      rowWeight === null
+        ? rec.daily_weight === null
+        : rec.daily_weight !== null && Math.abs(rec.daily_weight - rowWeight) <= 0.01;
+    const sameLength =
+      rowLength === null
+        ? rec.daily_length === null
+        : rec.daily_length !== null && Math.abs(rec.daily_length - rowLength) <= 0.1;
+    const sameTemp =
+      rowTemp === null
+        ? rec.temperature === null
+        : rec.temperature !== null && Math.abs(rec.temperature - rowTemp) <= 0.1;
+    const sameRemark = rowRemark === (rec.remark || '').trim().toLowerCase();
 
-    if (compared.length > 0 && compared.every(Boolean)) {
+    if (sameWeight && sameLength && sameTemp && sameRemark) {
       return {
-        level: 'exact',
-        reason: `Already in DB: ${formatGrowthSummary(rec, recDate)}`,
+        level: 'duplicate',
+        reason: `Duplicate in DB (${recDate}): ${formatGrowthSummary(rec, recDate)}`,
       };
     }
 
-    if (!possibleMatch) {
-      possibleMatch = {
-        level: 'possible',
-        reason: `DB already has growth entry on ${recDate}: ${formatGrowthSummary(rec, recDate)}`,
+    if (!conflictMatch) {
+      conflictMatch = {
+        level: 'conflict',
+        reason: `Conflicting DB entry on ${recDate}: ${formatGrowthSummary(rec, recDate)}`,
       };
     }
   }
 
-  return possibleMatch;
+  // 2. Check against other rows in the same import batch by Date
+  for (let i = 0; i < siblingRows.length; i += 1) {
+    const other = siblingRows[i];
+    if (other._key === row._key) continue;
+
+    const otherDate = normalizeDateStr(other.date);
+    if (otherDate !== rowDate) continue;
+
+    const otherWeight = other.dailyWeight.trim() !== '' ? parseFloat(other.dailyWeight) : null;
+    const otherLength = other.dailyLength.trim() !== '' ? parseFloat(other.dailyLength) : null;
+    const otherTemp = other.temperature.trim() !== '' ? parseFloat(other.temperature) : null;
+    const otherRemark = other.remark.trim().toLowerCase();
+
+    const otherHasMetric =
+      otherWeight !== null || otherLength !== null || otherTemp !== null || otherRemark !== '';
+    if (!otherHasMetric) continue;
+
+    const sameWeight =
+      rowWeight === null
+        ? otherWeight === null
+        : otherWeight !== null && Math.abs(otherWeight - rowWeight) <= 0.01;
+    const sameLength =
+      rowLength === null
+        ? otherLength === null
+        : otherLength !== null && Math.abs(otherLength - rowLength) <= 0.1;
+    const sameTemp =
+      rowTemp === null
+        ? otherTemp === null
+        : otherTemp !== null && Math.abs(otherTemp - rowTemp) <= 0.1;
+    const sameRemark = rowRemark === otherRemark;
+
+    if (sameWeight && sameLength && sameTemp && sameRemark) {
+      return {
+        level: 'duplicate',
+        reason: `Duplicate of Growth Row #${i + 1} (${rowDate}): ${formatGrowthDraftSummary(other)}`,
+      };
+    }
+
+    if (!conflictMatch) {
+      conflictMatch = {
+        level: 'conflict',
+        reason: `Conflicting with Growth Row #${i + 1} on ${rowDate}: ${formatGrowthDraftSummary(other)}`,
+      };
+    }
+  }
+
+  return conflictMatch;
 }
 
 export const MassImportModal: React.FC<MassImportModalProps> = ({
@@ -690,13 +828,13 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, isAnalyzing, isImporting, onClose]);
 
-  // Real-time duplicate detection against existing database records
+  // Real-time duplicate & conflict detection by Date & Time against DB and current draft rows
   // (Must be declared before the conditional early return to satisfy React Rules of Hooks)
   const routineDupMap = useMemo(() => {
     const map = new Map<string, DuplicateMatch>();
     if (!isOpen) return map;
     for (const row of routineDrafts) {
-      const match = findRoutineDuplicateMatch(row, profileRoutineRecords);
+      const match = findRoutineDuplicateMatch(row, profileRoutineRecords, routineDrafts);
       if (match) map.set(row._key, match);
     }
     return map;
@@ -706,7 +844,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
     const map = new Map<string, DuplicateMatch>();
     if (!isOpen) return map;
     for (const row of growthDrafts) {
-      const match = findGrowthDuplicateMatch(row, profileGrowthRecords);
+      const match = findGrowthDuplicateMatch(row, profileGrowthRecords, growthDrafts);
       if (match) map.set(row._key, match);
     }
     return map;
@@ -1344,24 +1482,43 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             obj.diaperLoad ?? obj['diaper load'] ?? obj.diaper_load,
             extractedLoad || DEFAULT_DIAPER_LOAD
           );
+          const parsedDuration = normalizeIntStr(
+            obj.feedDurationMin ?? obj.feed_duration_min ?? obj['feed duration (min)']
+          );
+          const parsedEbm = normalizeIntStr(
+            obj.ebmMl ?? obj.emb_mL ?? obj['EBM (mL)'] ?? obj.ebm_ml
+          );
+          const parsedFormula = normalizeIntStr(
+            obj.formulaMl ?? obj.formula_mL ?? obj['Formula (mL)'] ?? obj.formula_ml
+          );
+          const explicitMethod = normalizeFeedingMethod(
+            obj.feedingMethod ?? obj.feeding_method ?? obj.method
+          );
+          const detectedMethod =
+            explicitMethod ||
+            detectDefaultFeedingMethod({
+              ebmMl: parsedEbm,
+              formulaMl: parsedFormula,
+              feedDurationMin: parsedDuration,
+            });
           const draft: RoutineDraftRow = {
             _key: makeRowKey('rt-ai', idx),
             selected: true,
             name: normalizeTextStr(obj.name, loggerFallback),
             date: normalizeDateStr(obj.date, defaultDate),
             time: normalizeTimeStr(obj.time),
-            feedDurationMin: normalizeIntStr(
-              obj.feedDurationMin ?? obj.feed_duration_min ?? obj['feed duration (min)']
-            ),
-            ebmMl: normalizeIntStr(obj.ebmMl ?? obj.emb_mL ?? obj['EBM (mL)'] ?? obj.ebm_ml),
-            formulaMl: normalizeIntStr(obj.formulaMl ?? obj.formula_mL ?? obj['Formula (mL)'] ?? obj.formula_ml),
+            feedDurationMin: parsedDuration,
+            ebmMl: parsedEbm,
+            formulaMl: parsedFormula,
+            feedingMethod: detectedMethod,
+            methodTouched: Boolean(explicitMethod),
             diaper: normalizeTextStr(rawDiaper),
             diaperLoad: parsedDiaperLoad,
             stool: normalizeStoolValue(rawStool),
             remark: normalizeTextStr(obj.remark),
           };
           const dup = findRoutineDuplicateMatch(draft, profileRoutineRecords);
-          if (dup?.level === 'exact') {
+          if (dup?.level === 'duplicate') {
             draft.selected = false;
           }
           return draft;
@@ -1371,6 +1528,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             r.ebmMl !== '' ||
             r.formulaMl !== '' ||
             r.feedDurationMin !== '' ||
+            r.feedingMethod !== '' ||
             r.diaper !== '' ||
             r.stool !== '' ||
             r.diaperLoad !== DEFAULT_DIAPER_LOAD ||
@@ -1391,7 +1549,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
             remark: normalizeTextStr(obj.remark),
           };
           const dup = findGrowthDuplicateMatch(draft, profileGrowthRecords);
-          if (dup?.level === 'exact') {
+          if (dup?.level === 'duplicate') {
             draft.selected = false;
           }
           return draft;
@@ -1420,6 +1578,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
               row.ebmMl.trim() !== '' ||
               row.formulaMl.trim() !== '' ||
               row.feedDurationMin.trim() !== '' ||
+              row.feedingMethod.trim() !== '' ||
               row.diaper.trim() !== '' ||
               row.stool.trim() !== '' ||
               row.diaperLoad !== DEFAULT_DIAPER_LOAD ||
@@ -1443,10 +1602,12 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       }
 
       const flaggedCount =
-        recognizedRoutine.filter((r) => findRoutineDuplicateMatch(r, profileRoutineRecords) !== null)
-          .length +
-        recognizedGrowth.filter((r) => findGrowthDuplicateMatch(r, profileGrowthRecords) !== null)
-          .length;
+        recognizedRoutine.filter(
+          (r) => findRoutineDuplicateMatch(r, profileRoutineRecords, recognizedRoutine) !== null
+        ).length +
+        recognizedGrowth.filter(
+          (r) => findGrowthDuplicateMatch(r, profileGrowthRecords, recognizedGrowth) !== null
+        ).length;
 
       const baseSummary =
         typeof parsedData.summary === 'string' && parsedData.summary.trim()
@@ -1457,7 +1618,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
 
       setAiSummary(
         flaggedCount > 0
-          ? `${baseSummary} (${flaggedCount} potential duplicate${flaggedCount === 1 ? '' : 's'} flagged against database.)`
+          ? `${baseSummary} (${flaggedCount} duplicate or conflicting ${flaggedCount === 1 ? 'entry' : 'entries'} flagged by date & time.)`
           : baseSummary
       );
       // Automatically switch to Tabular Data Entry so user reviews/edits before writing to database
@@ -1505,6 +1666,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
       (r.ebmMl.trim() !== '' ||
         r.formulaMl.trim() !== '' ||
         r.feedDurationMin.trim() !== '' ||
+        r.feedingMethod.trim() !== '' ||
         r.diaper.trim() !== '' ||
         r.stool.trim() !== '' ||
         r.diaperLoad !== DEFAULT_DIAPER_LOAD ||
@@ -1606,6 +1768,16 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
         ? routineDrafts
             .filter((r) => r.selected)
             .map((r) => {
+              const parsedDuration = parseSafeInt(r.feedDurationMin);
+              const parsedEbm = parseSafeInt(r.ebmMl);
+              const parsedFormula = parseSafeInt(r.formulaMl);
+              const cleanMethod = r.methodTouched
+                ? normalizeFeedingMethod(r.feedingMethod) || null
+                : detectDefaultFeedingMethod({
+                    ebmMl: parsedEbm,
+                    formulaMl: parsedFormula,
+                    feedDurationMin: parsedDuration,
+                  }) || null;
               const cleanDiaper = r.diaper.trim() || null;
               const cleanStool = normalizeStoolValue(r.stool) || null;
               const loadCount = parseDiaperLoadCount(r.diaperLoad, 1);
@@ -1616,9 +1788,10 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 name: r.name.trim() || null,
                 date: r.date.trim() || null,
                 time: r.time.trim() || null,
-                feed_duration_min: parseSafeInt(r.feedDurationMin),
-                emb_mL: parseSafeInt(r.ebmMl),
-                formula_mL: parseSafeInt(r.formulaMl),
+                feed_duration_min: parsedDuration,
+                emb_mL: parsedEbm,
+                formula_mL: parsedFormula,
+                feeding_method: cleanMethod,
                 diaper: cleanDiaper,
                 'diaper load': hasDiaperContext ? loadCount : null,
                 stool: cleanStool,
@@ -1630,6 +1803,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                 r.emb_mL !== null ||
                 r.formula_mL !== null ||
                 r.feed_duration_min !== null ||
+                r.feeding_method !== null ||
                 r.diaper !== null ||
                 r['diaper load'] !== null ||
                 r.stool !== null ||
@@ -1885,7 +2059,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
           </div>
 
           {/* 4 Entry Mode Tabs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1.5 bg-stone-100 dark:bg-stone-850 rounded-2xl border border-stone-200 dark:border-stone-800">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1.5 bg-stone-100 dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700/80 transition-colors">
             <button
               type="button"
               onClick={() => handleSwitchMode('tabular')}
@@ -2528,7 +2702,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                       <strong>
                         {activeFlaggedCount} {activeFlaggedCount === 1 ? 'entry' : 'entries'}
                       </strong>{' '}
-                      may already exist in your database. Exact matches are unchecked by default — review or check to import anyway.
+                      flagged with matching date &amp; time (duplicate or conflicting data). Duplicates are unchecked by default — review before saving.
                     </span>
                   </div>
                   {activeFlaggedSelectedCount > 0 && (
@@ -2599,14 +2773,14 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                           {dupMatch && (
                             <span
                               className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-md border ${
-                                dupMatch.level === 'exact'
+                                dupMatch.level === 'duplicate'
                                   ? 'bg-rose-100/90 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800'
                                   : 'bg-amber-100/90 dark:bg-amber-950/70 text-amber-900 dark:text-amber-300 border-amber-200 dark:border-amber-800'
                               }`}
                             >
                               <AlertTriangle className="w-3 h-3 shrink-0" />
                               <span>
-                                {dupMatch.level === 'exact' ? 'Already in DB' : 'Possible Duplicate'}
+                                {dupMatch.level === 'duplicate' ? 'Duplicate' : 'Conflicting Data'}
                               </span>
                             </span>
                           )}
@@ -2706,15 +2880,25 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                             min="0"
                             step="1"
                             value={row.feedDurationMin}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const nextDuration = e.target.value;
                               setRoutineDrafts((prev) =>
-                                prev.map((item) =>
-                                  item._key === row._key
-                                    ? { ...item, feedDurationMin: e.target.value }
-                                    : item
-                                )
-                              )
-                            }
+                                prev.map((item) => {
+                                  if (item._key !== row._key) return item;
+                                  return {
+                                    ...item,
+                                    feedDurationMin: nextDuration,
+                                    feedingMethod: item.methodTouched
+                                      ? item.feedingMethod
+                                      : detectDefaultFeedingMethod({
+                                          ebmMl: item.ebmMl,
+                                          formulaMl: item.formulaMl,
+                                          feedDurationMin: nextDuration,
+                                        }),
+                                  };
+                                })
+                              );
+                            }}
                             placeholder="e.g. 20"
                             className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
                           />
@@ -2729,15 +2913,25 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                             min="0"
                             step="5"
                             value={row.ebmMl}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const nextEbm = e.target.value;
                               setRoutineDrafts((prev) =>
-                                prev.map((item) =>
-                                  item._key === row._key
-                                    ? { ...item, ebmMl: e.target.value }
-                                    : item
-                                )
-                              )
-                            }
+                                prev.map((item) => {
+                                  if (item._key !== row._key) return item;
+                                  return {
+                                    ...item,
+                                    ebmMl: nextEbm,
+                                    feedingMethod: item.methodTouched
+                                      ? item.feedingMethod
+                                      : detectDefaultFeedingMethod({
+                                          ebmMl: nextEbm,
+                                          formulaMl: item.formulaMl,
+                                          feedDurationMin: item.feedDurationMin,
+                                        }),
+                                  };
+                                })
+                              );
+                            }}
                             placeholder="e.g. 90"
                             className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
                           />
@@ -2752,17 +2946,45 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                             min="0"
                             step="5"
                             value={row.formulaMl}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const nextFormula = e.target.value;
+                              setRoutineDrafts((prev) =>
+                                prev.map((item) => {
+                                  if (item._key !== row._key) return item;
+                                  return {
+                                    ...item,
+                                    formulaMl: nextFormula,
+                                    feedingMethod: item.methodTouched
+                                      ? item.feedingMethod
+                                      : detectDefaultFeedingMethod({
+                                          ebmMl: item.ebmMl,
+                                          formulaMl: nextFormula,
+                                          feedDurationMin: item.feedDurationMin,
+                                        }),
+                                  };
+                                })
+                              );
+                            }}
+                            placeholder="e.g. 60"
+                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div className="min-w-0">
+                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                            Method
+                          </label>
+                          <FeedingMethodSelect
+                            value={row.feedingMethod}
+                            onChange={(val) =>
                               setRoutineDrafts((prev) =>
                                 prev.map((item) =>
                                   item._key === row._key
-                                    ? { ...item, formulaMl: e.target.value }
+                                    ? { ...item, feedingMethod: val, methodTouched: true }
                                     : item
                                 )
                               )
                             }
-                            placeholder="e.g. 60"
-                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
                           />
                         </div>
 
@@ -2798,7 +3020,7 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                           />
                         </div>
 
-                        <div className="min-w-0 col-span-2 lg:col-span-4">
+                        <div className="min-w-0 col-span-2 lg:col-span-3">
                           <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
                             Diaper
                           </label>
@@ -2934,14 +3156,14 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                             {dupMatch && (
                               <span
                                 className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-md border ${
-                                  dupMatch.level === 'exact'
+                                  dupMatch.level === 'duplicate'
                                     ? 'bg-rose-100/90 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800'
                                     : 'bg-amber-100/90 dark:bg-amber-950/70 text-amber-900 dark:text-amber-300 border-amber-200 dark:border-amber-800'
                                 }`}
                               >
                                 <AlertTriangle className="w-3 h-3 shrink-0" />
                                 <span>
-                                  {dupMatch.level === 'exact' ? 'Already in DB' : 'Possible Duplicate'}
+                                  {dupMatch.level === 'duplicate' ? 'Duplicate' : 'Conflicting Data'}
                                 </span>
                               </span>
                             )}

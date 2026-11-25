@@ -126,7 +126,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     return (
                       <div
                         key={p.id}
-                        className={`w-full px-3.5 py-1.5 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-750 transition-colors ${
+                        className={`w-full px-3.5 py-1.5 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/60 transition-colors ${
                           isActive
                             ? 'font-bold text-stone-900 dark:text-white bg-emerald-50/60 dark:bg-emerald-950/40'
                             : 'text-stone-600 dark:text-stone-300'

@@ -212,6 +212,7 @@ export function buildGeminiSystemInstruction(input: GeminiContextInput): string 
       if (r.emb_mL !== null) parts.push(`EBM=${r.emb_mL}mL`);
       if (r.formula_mL !== null) parts.push(`Formula=${r.formula_mL}mL`);
       if (r.feed_duration_min !== null) parts.push(`duration=${r.feed_duration_min}min`);
+      if (r.feeding_method) parts.push(`method=${r.feeding_method}`);
       if (r.diaper) parts.push(`diaper=${r.diaper}`);
       if (r['diaper load'] !== null && r['diaper load'] !== undefined) {
         parts.push(`load=${formatDiaperLoad(r['diaper load'])}`);

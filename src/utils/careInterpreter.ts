@@ -106,6 +106,39 @@ export function mergeProfileGrowthMeasurements(
     });
   }
 
+  // If no length data exists in checkups or daily growth logs, include the profile's birth length
+  const hasAnyLength = merged.some(
+    (m) => typeof m.lengthCm === 'number' && Number.isFinite(m.lengthCm) && m.lengthCm > 0
+  );
+  if (
+    !hasAnyLength &&
+    typeof profile.birthLengthCm === 'number' &&
+    Number.isFinite(profile.birthLengthCm) &&
+    profile.birthLengthCm > 0
+  ) {
+    const birthDateStr = profile.dateOfEvent?.slice(0, 10) || '';
+    const existingBirthIdx = merged.findIndex(
+      (m) => (m.ageInDays ?? m.ageInMonths * DAYS_PER_MONTH) === 0 || (birthDateStr && m.date === birthDateStr)
+    );
+    if (existingBirthIdx >= 0) {
+      merged[existingBirthIdx] = {
+        ...merged[existingBirthIdx],
+        lengthCm: profile.birthLengthCm,
+      };
+    } else if (birthDateStr) {
+      merged.push({
+        id: `profile-birth-length-${profile.id}`,
+        profileId: profile.id,
+        date: birthDateStr,
+        ageInDays: 0,
+        ageInMonths: 0,
+        ageInWeeks: 0,
+        lengthCm: profile.birthLengthCm,
+        notes: 'Birth length (from profile)',
+      });
+    }
+  }
+
   return merged.sort((a, b) => {
     const aDays = a.ageInDays ?? a.ageInMonths * DAYS_PER_MONTH;
     const bDays = b.ageInDays ?? b.ageInMonths * DAYS_PER_MONTH;
@@ -163,13 +196,17 @@ export function classifyTemperature(tempC: number): TempClassification {
 export interface GrowthInterpretation {
   totalRecords: number;
   latestWeightKg: number | null;
+  latestWeightDate: string | null;
   weightDeltaGrams: number | null;
   weightVelocityGramsPerDay: number | null;
   weightPercentile: number | null;
   latestLengthCm: number | null;
+  latestLengthDate: string | null;
   lengthDeltaCm: number | null;
   lengthPercentile: number | null;
+  lengthIsFromBirth: boolean;
   latestTempC: number | null;
+  latestTempDate: string | null;
   tempClass: TempClassification | null;
   minTempC: number | null;
   maxTempC: number | null;
@@ -202,6 +239,7 @@ export function interpretGrowthTable(
   const prevWeightRow = weightRows.length >= 2 ? weightRows[weightRows.length - 2] : undefined;
 
   const latestWeightKg = latestWeightRow?.daily_weight ?? null;
+  const latestWeightDate = latestWeightRow ? getGrowthRecordDate(latestWeightRow) : null;
   let weightDeltaGrams: number | null = null;
   let weightVelocityGramsPerDay: number | null = null;
 
@@ -225,15 +263,33 @@ export function interpretGrowthTable(
 
   const latestLengthRow = lengthRows[lengthRows.length - 1];
   const prevLengthRow = lengthRows.length >= 2 ? lengthRows[lengthRows.length - 2] : undefined;
-  const latestLengthCm = latestLengthRow?.daily_length ?? null;
+  const profileBirthLength =
+    profile?.type === 'baby' &&
+    typeof profile.birthLengthCm === 'number' &&
+    Number.isFinite(profile.birthLengthCm) &&
+    profile.birthLengthCm > 0
+      ? profile.birthLengthCm
+      : null;
+
+  const lengthIsFromBirth = !latestLengthRow && profileBirthLength !== null;
+  const latestLengthCm = latestLengthRow?.daily_length ?? profileBirthLength ?? null;
+  const latestLengthDate = latestLengthRow
+    ? getGrowthRecordDate(latestLengthRow)
+    : lengthIsFromBirth && profile?.dateOfEvent
+      ? profile.dateOfEvent.slice(0, 10)
+      : null;
   const lengthDeltaCm =
     latestLengthRow && prevLengthRow && latestLengthRow.daily_length !== null && prevLengthRow.daily_length !== null
       ? Math.round((latestLengthRow.daily_length - prevLengthRow.daily_length) * 10) / 10
-      : null;
+      : latestLengthRow && latestLengthRow.daily_length !== null && profileBirthLength !== null
+        ? Math.round((latestLengthRow.daily_length - profileBirthLength) * 10) / 10
+        : null;
 
   const ageMonthsForLength = latestLengthRow
     ? getProfileAgeMonths(profile, `${getGrowthRecordDate(latestLengthRow)}T12:00:00`)
-    : null;
+    : lengthIsFromBirth
+      ? 0
+      : null;
   const lengthPercentile =
     latestLengthCm !== null && ageMonthsForLength !== null && profile?.type === 'baby'
       ? calculatePercentile(latestLengthCm, ageMonthsForLength, 'length', profile.gender).percentile
@@ -241,6 +297,7 @@ export function interpretGrowthTable(
 
   const latestTempRow = tempRows[tempRows.length - 1];
   const latestTempC = latestTempRow?.temperature ?? null;
+  const latestTempDate = latestTempRow ? getGrowthRecordDate(latestTempRow) : null;
   const tempClass = latestTempC !== null ? classifyTemperature(latestTempC) : null;
 
   const tempValues = tempRows.map((r) => r.temperature as number);
@@ -268,11 +325,17 @@ export function interpretGrowthTable(
 
   if (latestLengthCm !== null) {
     const pctText = lengthPercentile !== null ? ` (~${lengthPercentile}th WHO percentile)` : '';
-    const deltaText =
-      lengthDeltaCm !== null
-        ? ` (${lengthDeltaCm >= 0 ? '+' : ''}${lengthDeltaCm} cm from previous)`
-        : '';
-    insights.push(`Latest recorded length is ${latestLengthCm.toFixed(1)} cm${pctText}${deltaText}.`);
+    if (lengthIsFromBirth) {
+      insights.push(
+        `Birth length is ${latestLengthCm.toFixed(1)} cm${pctText} (used until a newer length measurement is logged).`
+      );
+    } else {
+      const deltaText =
+        lengthDeltaCm !== null
+          ? ` (${lengthDeltaCm >= 0 ? '+' : ''}${lengthDeltaCm} cm from previous)`
+          : '';
+      insights.push(`Latest recorded length is ${latestLengthCm.toFixed(1)} cm${pctText}${deltaText}.`);
+    }
   }
 
   if (latestTempC !== null && tempClass) {
@@ -288,13 +351,17 @@ export function interpretGrowthTable(
   return {
     totalRecords: records.length,
     latestWeightKg,
+    latestWeightDate,
     weightDeltaGrams,
     weightVelocityGramsPerDay,
     weightPercentile,
     latestLengthCm,
+    latestLengthDate,
     lengthDeltaCm,
     lengthPercentile,
+    lengthIsFromBirth,
     latestTempC,
+    latestTempDate,
     tempClass,
     minTempC,
     maxTempC,
@@ -365,6 +432,91 @@ export const STOOL_TYPE_OPTIONS = [
   { code: 'GY', label: 'GY - Greenish Yellow' },
   { code: 'Y', label: 'Y - Yellow' },
 ] as const;
+
+export const FEEDING_METHOD_OPTIONS = [
+  { value: 'bottle', label: 'Bottle' },
+  { value: 'latch', label: 'Latch' },
+  { value: 'cup', label: 'Cup' },
+  { value: 'stringe', label: 'Stringe' },
+] as const;
+
+export type FeedingMethodValue = (typeof FEEDING_METHOD_OPTIONS)[number]['value'];
+
+export function normalizeFeedingMethod(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const lower = trimmed.toLowerCase();
+  if (lower === 'bottle' || lower.includes('bottle')) return 'bottle';
+  if (
+    lower === 'latch' ||
+    lower.includes('latch') ||
+    lower === 'breast' ||
+    lower === 'breastfeed' ||
+    lower === 'breastfeeding' ||
+    lower === 'nursing' ||
+    lower === 'direct'
+  ) {
+    return 'latch';
+  }
+  if (lower === 'cup' || lower.includes('cup')) return 'cup';
+  if (lower === 'stringe' || lower === 'syringe' || lower.includes('stringe') || lower.includes('syringe')) {
+    return 'stringe';
+  }
+  return trimmed;
+}
+
+export function formatFeedingMethodLabel(raw: string | null | undefined): string {
+  if (!raw || !raw.trim()) return '';
+  const normalized = normalizeFeedingMethod(raw);
+  const found = FEEDING_METHOD_OPTIONS.find((opt) => opt.value === normalized);
+  if (found) return found.label;
+  return raw.trim();
+}
+
+function parsePositiveMetric(value: number | string | null | undefined): number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return 0;
+    const n = Number(trimmed);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+  return 0;
+}
+
+/**
+ * Auto-detect default feeding method from feeding inputs:
+ * - EBM (mL) or Formula (mL) detected -> "bottle"
+ * - Only Feed Duration (min) detected -> "latch"
+ * - Otherwise -> ""
+ */
+export function detectDefaultFeedingMethod(params: {
+  ebmMl?: number | string | null;
+  formulaMl?: number | string | null;
+  feedDurationMin?: number | string | null;
+}): FeedingMethodValue | '' {
+  const hasEbm = parsePositiveMetric(params.ebmMl) > 0;
+  const hasFormula = parsePositiveMetric(params.formulaMl) > 0;
+  const hasDuration = parsePositiveMetric(params.feedDurationMin) > 0;
+
+  if (hasEbm || hasFormula) return 'bottle';
+  if (hasDuration) return 'latch';
+  return '';
+}
+
+export function normalizeRoutineTimeHHMM(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return '';
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return '';
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
 
 export const DEFAULT_DIAPER_LOAD = 'x1';
 

@@ -329,58 +329,7 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
     );
   }
 
-  if (!activeProfile) {
-    return (
-      <div className="space-y-6">
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-8 md:p-10 text-center space-y-4">
-          <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 flex items-center justify-center">
-            <Sparkles className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-stone-900 dark:text-white">
-              Add a Child or Pregnancy Profile
-            </h2>
-            <p className="text-xs text-stone-500 dark:text-stone-400 mt-1 max-w-md mx-auto">
-              Create a profile in Supabase with birth date or due date to unlock stage expectations, family wishes, and milestone tracking. You can still log ad hoc notes below.
-            </p>
-          </div>
-          {onOpenProfileModal && (
-            <button
-              type="button"
-              onClick={onOpenProfileModal}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl shadow-xs transition-colors cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add New Profile</span>
-            </button>
-          )}
-        </div>
-
-        {renderAdHocNoteForm()}
-        {renderNotesList()}
-
-        <EditAuthModal
-          isOpen={Boolean(pendingAuthNote)}
-          title="Authenticate to Edit Note"
-          description={
-            pendingAuthNote
-              ? `Enter your bae_Key passkey to edit note #${pendingAuthNote.id}.`
-              : undefined
-          }
-          onClose={() => setPendingAuthNote(null)}
-          onAuthenticated={() => {
-            if (pendingAuthNote) {
-              const target = pendingAuthNote;
-              setPendingAuthNote(null);
-              applyEditNote(target);
-            }
-          }}
-        />
-      </div>
-    );
-  }
-
-  const isFetal = activeProfile.type === 'fetal';
+  const isFetal = activeProfile?.type === 'fetal';
 
   return (
     <div className="space-y-6">
@@ -398,7 +347,7 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
         </div>
 
         <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto shrink-0">
-          <div className="flex items-center gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-2xl border border-stone-200/80 dark:border-stone-700/80">
+          <div className="flex items-center gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-2xl border border-stone-200/80 dark:border-stone-700/80 transition-colors">
             <button
               type="button"
               onClick={() => setSubTab('stages')}
@@ -444,6 +393,35 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
           </div>
         </div>
       </div>
+
+      {/* Optional compact prompt when no profile is active yet */}
+      {!activeProfile && (
+        <div className="bg-amber-50/70 dark:bg-amber-950/30 rounded-3xl border border-amber-200/80 dark:border-amber-900/50 p-4 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-2xl bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-xs sm:text-sm font-bold text-stone-900 dark:text-white">
+                Browsing Stages &amp; Milestones Guide
+              </h3>
+              <p className="text-[11px] text-stone-600 dark:text-stone-400 mt-0.5">
+                Add a baby or pregnancy profile to auto-sync to your child&apos;s exact age and save wishes or milestone checkmarks.
+              </p>
+            </div>
+          </div>
+          {onOpenProfileModal && (
+            <button
+              type="button"
+              onClick={onOpenProfileModal}
+              className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-stone-900 hover:bg-stone-800 dark:bg-stone-100 dark:hover:bg-white dark:text-stone-900 rounded-xl shadow-xs transition-colors cursor-pointer shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Profile</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Active Sub-View */}
       {subTab === 'notes' ? (

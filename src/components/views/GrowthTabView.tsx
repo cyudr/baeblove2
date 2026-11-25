@@ -29,6 +29,7 @@ import {
   RotateCcw,
   Lock,
   ChevronDown,
+  AlertTriangle,
 } from 'lucide-react';
 
 function getCurrentDateStr(): string {
@@ -175,6 +176,70 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     return classifyTemperature(parsed);
   }, [temperature]);
 
+  // Detect potentially duplicated or conflicting growth entry by Date
+  const dateCollision = useMemo<{
+    level: 'duplicate' | 'conflict';
+    existing: GrowthRecord;
+    summary: string;
+  } | null>(() => {
+    const cleanDate = growthDate.trim().slice(0, 10);
+    if (!cleanDate) return null;
+
+    const parsedWeight = dailyWeight.trim() !== '' ? parseFloat(dailyWeight) : null;
+    const parsedLength = dailyLength.trim() !== '' ? parseFloat(dailyLength) : null;
+    const parsedTemp = temperature.trim() !== '' ? parseFloat(temperature) : null;
+    const cleanRemark = growthRemark.trim().toLowerCase();
+
+    const hasEnteredData =
+      (parsedWeight !== null && Number.isFinite(parsedWeight)) ||
+      (parsedLength !== null && Number.isFinite(parsedLength)) ||
+      (parsedTemp !== null && Number.isFinite(parsedTemp)) ||
+      cleanRemark !== '';
+
+    for (const rec of profileGrowthRecords) {
+      if (editingGrowthId !== null && rec.id === editingGrowthId) continue;
+      const recDate = getGrowthRecordDate(rec);
+      if (recDate !== cleanDate) continue;
+
+      const summaryParts: string[] = [recDate];
+      if (rec.daily_weight !== null) summaryParts.push(`${rec.daily_weight} kg`);
+      if (rec.daily_length !== null) summaryParts.push(`${rec.daily_length} cm`);
+      if (rec.temperature !== null) summaryParts.push(`${rec.temperature}°C`);
+
+      const sameWeight =
+        parsedWeight === null
+          ? rec.daily_weight === null
+          : rec.daily_weight !== null && Math.abs(rec.daily_weight - parsedWeight) <= 0.01;
+      const sameLength =
+        parsedLength === null
+          ? rec.daily_length === null
+          : rec.daily_length !== null && Math.abs(rec.daily_length - parsedLength) <= 0.1;
+      const sameTemp =
+        parsedTemp === null
+          ? rec.temperature === null
+          : rec.temperature !== null && Math.abs(rec.temperature - parsedTemp) <= 0.1;
+      const sameRemark = cleanRemark === (rec.remark || '').trim().toLowerCase();
+
+      const allMatch = hasEnteredData && sameWeight && sameLength && sameTemp && sameRemark;
+
+      return {
+        level: allMatch ? 'duplicate' : 'conflict',
+        existing: rec,
+        summary: summaryParts.join(' · '),
+      };
+    }
+
+    return null;
+  }, [
+    growthDate,
+    dailyWeight,
+    dailyLength,
+    temperature,
+    growthRemark,
+    profileGrowthRecords,
+    editingGrowthId,
+  ]);
+
   const resetGrowthForm = (preserveLogger = false) => {
     setEditingGrowthId(null);
     setGrowthDate(getCurrentDateStr());
@@ -275,11 +340,14 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     <div className="space-y-6">
       {/* Header Card */}
       <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4 transition-colors">
-        <div>
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-2xl bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 flex items-center justify-center shadow-2xs shrink-0">
+            <Scale className="w-4 h-4" />
+          </div>
           <h2 className="text-xl font-bold text-stone-900 dark:text-white">
             {activeProfile?.type === 'fetal'
               ? 'Fetal Growth & Biometric Curves'
-              : 'Growth Tracking & WHO Curves'}
+              : 'Growth Tracking'}
           </h2>
         </div>
 
@@ -524,6 +592,35 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
           </div>
         </div>
 
+        {dateCollision && (
+          <div
+            className={`px-3 py-2.5 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 ${
+              dateCollision.level === 'duplicate'
+                ? 'bg-rose-50/90 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/70 text-rose-900 dark:text-rose-200'
+                : 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/70 text-amber-900 dark:text-amber-200'
+            }`}
+          >
+            <div className="flex items-start gap-2 min-w-0 flex-1">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <span className="font-bold">
+                  {dateCollision.level === 'duplicate'
+                    ? 'Duplicate entry detected (same date): '
+                    : 'Conflicting entry on same date: '}
+                </span>
+                <span className="break-words">{dateCollision.summary}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => requestEditGrowth(dateCollision.existing)}
+              className="px-2.5 py-1 text-[11px] font-bold bg-white dark:bg-stone-900 border border-current/25 rounded-lg hover:opacity-85 transition-opacity cursor-pointer shrink-0"
+            >
+              Edit Existing
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 items-stretch sm:items-end">
           <div className="flex-1 min-w-0">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
@@ -592,6 +689,11 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                   ? UnitConverter.formatWeight(growthInsights.latestWeightKg, unitSystem)
                   : '—'}
               </div>
+              {growthInsights.latestWeightDate && (
+                <div className="text-[10px] text-stone-400 dark:text-stone-500 mt-0.5 truncate">
+                  {growthInsights.latestWeightDate}
+                </div>
+              )}
               {growthInsights.weightPercentile !== null && (
                 <div className="sm:hidden text-[10px] font-bold text-emerald-700 dark:text-emerald-400 mt-0.5">
                   WHO {growthInsights.weightPercentile}th %ile
@@ -635,6 +737,15 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                   ? UnitConverter.formatLength(growthInsights.latestLengthCm, unitSystem)
                   : '—'}
               </div>
+              {(growthInsights.latestLengthDate || growthInsights.lengthIsFromBirth) && (
+                <div className="text-[10px] text-stone-400 dark:text-stone-500 mt-0.5 truncate">
+                  {growthInsights.lengthIsFromBirth
+                    ? growthInsights.latestLengthDate
+                      ? `Birth · ${growthInsights.latestLengthDate}`
+                      : 'Birth length'
+                    : growthInsights.latestLengthDate}
+                </div>
+              )}
               {growthInsights.lengthPercentile !== null && (
                 <div className="sm:hidden text-[10px] font-bold text-teal-700 dark:text-teal-400 mt-0.5">
                   WHO {growthInsights.lengthPercentile}th %ile
@@ -642,12 +753,18 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               )}
             </div>
             <div className="pt-2 border-t border-stone-100 dark:border-stone-800 text-[10px] sm:text-[11px] text-stone-500 dark:text-stone-400 truncate">
-              Δ{' '}
-              <strong className="text-stone-800 dark:text-stone-200">
-                {growthInsights.lengthDeltaCm !== null
-                  ? `${growthInsights.lengthDeltaCm >= 0 ? '+' : ''}${growthInsights.lengthDeltaCm} cm`
-                  : '—'}
-              </strong>
+              {growthInsights.lengthIsFromBirth ? (
+                <span className="text-stone-500 dark:text-stone-400">From birth data</span>
+              ) : (
+                <>
+                  Δ{' '}
+                  <strong className="text-stone-800 dark:text-stone-200">
+                    {growthInsights.lengthDeltaCm !== null
+                      ? `${growthInsights.lengthDeltaCm >= 0 ? '+' : ''}${growthInsights.lengthDeltaCm} cm`
+                      : '—'}
+                  </strong>
+                </>
+              )}
             </div>
           </div>
 
@@ -679,6 +796,11 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                   </span>
                 )}
               </div>
+              {growthInsights.latestTempDate && (
+                <div className="text-[10px] text-stone-400 dark:text-stone-500 mt-0.5 truncate">
+                  {growthInsights.latestTempDate}
+                </div>
+              )}
               {growthInsights.tempClass && (
                 <div className="sm:hidden text-[10px] font-bold text-amber-700 dark:text-amber-400 mt-0.5 truncate">
                   {growthInsights.tempClass.label}
@@ -704,7 +826,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
       </div>
 
       {/* Clinical Interpretation Box */}
-      <div className="bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200/80 dark:border-amber-900/50 rounded-3xl p-4 sm:p-5">
+      <div className="bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200/80 dark:border-amber-900/50 rounded-3xl p-4 sm:p-5 transition-colors">
         <div className="flex items-center gap-2 text-xs font-bold text-amber-900 dark:text-amber-300 mb-2">
           <Sparkles className="w-4 h-4" />
           <span>Growth &amp; Vitals Interpretation</span>
@@ -735,7 +857,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
           onOpenFormulaModal={onOpenFormulaModal}
         />
       ) : (
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors">
           <div>
             <h3 className="text-sm font-bold text-stone-900 dark:text-white">
               Add a Profile to Plot WHO / Fetal Percentile Curves
@@ -758,12 +880,12 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
       )}
 
       {/* Logged Daily Growth Table */}
-      <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden">
+      <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-colors">
         <div className="px-5 py-3.5 border-b border-stone-100 dark:border-stone-800 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs font-bold text-stone-800 dark:text-stone-200 uppercase tracking-wider">
             Logged Daily Growth Entries ({filteredGrowth.length})
           </h3>
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-xs transition-colors">
             <Filter className="w-3.5 h-3.5 text-stone-400" />
             <select
               aria-label="Filter growth records by person who logged them"
@@ -771,9 +893,9 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
               onChange={(e) => setLoggerFilter(e.target.value)}
               className="bg-transparent text-stone-700 dark:text-stone-200 font-semibold focus:outline-hidden cursor-pointer"
             >
-              <option value="all">All Loggers</option>
+              <option value="all" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">All Loggers</option>
               {availableLoggers.map((n) => (
-                <option key={n} value={n}>
+                <option key={n} value={n} className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">
                   {n}
                 </option>
               ))}
@@ -788,7 +910,7 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
+                <tr className="bg-stone-50/80 dark:bg-stone-800/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                   <th className="py-3 px-4">Date</th>
                   {activeProfile?.type === 'baby' && <th className="py-3 px-4">Age</th>}
                   <th className="py-3 px-4">Logged By</th>

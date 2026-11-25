@@ -3,14 +3,17 @@ import { Droplets, Scale, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
   DEFAULT_DIAPER_LOAD,
+  detectDefaultFeedingMethod,
   getGrowthRecordDate,
   getRoutineRecordDate,
   normalizeDiaperLoad,
+  normalizeFeedingMethod,
   normalizeStoolValue,
   parseDiaperLoadCount,
 } from '../../utils/careInterpreter';
 import { StoolSelect } from '../common/StoolSelect';
 import { DiaperLoadControl } from '../common/DiaperLoadControl';
+import { FeedingMethodSelect } from '../common/FeedingMethodSelect';
 import type { GrowthRecord, RoutineRecord } from '../../types';
 
 const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
@@ -43,6 +46,8 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
   const [ebmMl, setEbmMl] = useState('');
   const [formulaMl, setFormulaMl] = useState('');
   const [feedDurationMin, setFeedDurationMin] = useState('');
+  const [feedingMethod, setFeedingMethod] = useState('');
+  const [methodTouched, setMethodTouched] = useState(false);
   const [diaper, setDiaper] = useState('');
   const [diaperLoad, setDiaperLoad] = useState(DEFAULT_DIAPER_LOAD);
   const [stool, setStool] = useState('');
@@ -74,12 +79,33 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
           ? String(routineRecord.feed_duration_min)
           : ''
       );
+      const existingMethod = normalizeFeedingMethod(routineRecord.feeding_method);
+      setFeedingMethod(
+        existingMethod ||
+          detectDefaultFeedingMethod({
+            ebmMl: routineRecord.emb_mL,
+            formulaMl: routineRecord.formula_mL,
+            feedDurationMin: routineRecord.feed_duration_min,
+          })
+      );
+      setMethodTouched(Boolean(existingMethod));
       setDiaper(routineRecord.diaper ?? '');
       setDiaperLoad(normalizeDiaperLoad(routineRecord['diaper load'], DEFAULT_DIAPER_LOAD));
       setStool(normalizeStoolValue(routineRecord.stool));
       setRemark(routineRecord.remark ?? '');
     }
   }, [growthRecord, routineRecord]);
+
+  useEffect(() => {
+    if (!routineRecord || methodTouched) return;
+    setFeedingMethod(
+      detectDefaultFeedingMethod({
+        ebmMl,
+        formulaMl,
+        feedDurationMin,
+      })
+    );
+  }, [routineRecord, ebmMl, formulaMl, feedDurationMin, methodTouched]);
 
   if (!growthRecord && !routineRecord) return null;
 
@@ -125,6 +151,13 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
         const parsedEbm = ebmMl.trim() !== '' ? parseInt(ebmMl, 10) : null;
         const parsedFormula = formulaMl.trim() !== '' ? parseInt(formulaMl, 10) : null;
         const parsedDuration = feedDurationMin.trim() !== '' ? parseInt(feedDurationMin, 10) : null;
+        const cleanMethod = methodTouched
+          ? normalizeFeedingMethod(feedingMethod) || null
+          : detectDefaultFeedingMethod({
+              ebmMl: parsedEbm,
+              formulaMl: parsedFormula,
+              feedDurationMin: parsedDuration,
+            }) || null;
         const cleanStool = normalizeStoolValue(stool) || null;
         const loadCount = parseDiaperLoadCount(diaperLoad, 1);
         const loadChanged = loadCount !== 1;
@@ -134,13 +167,14 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
           parsedEbm === null &&
           parsedFormula === null &&
           parsedDuration === null &&
+          !cleanMethod &&
           !diaper.trim() &&
           !cleanStool &&
           !loadChanged &&
           !remark.trim()
         ) {
           setErrorMsg(
-            'Enter at least one routine value (EBM, Formula, duration, diaper, stool, or remark).'
+            'Enter at least one routine value (EBM, Formula, duration, method, diaper, stool, or remark).'
           );
           return;
         }
@@ -151,6 +185,7 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
           emb_mL: parsedEbm,
           formula_mL: parsedFormula,
           feed_duration_min: parsedDuration,
+          feeding_method: cleanMethod,
           diaper: diaper.trim() || null,
           'diaper load': hasDiaperContext ? loadCount : null,
           stool: cleanStool,
@@ -317,7 +352,7 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
                     EBM (mL)
@@ -358,6 +393,18 @@ export const EditCareRecordModal: React.FC<EditCareRecordModalProps> = ({
                     onChange={(e) => setFeedDurationMin(e.target.value)}
                     placeholder="e.g. 20"
                     className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                    Method
+                  </label>
+                  <FeedingMethodSelect
+                    value={feedingMethod}
+                    onChange={(val) => {
+                      setFeedingMethod(val);
+                      setMethodTouched(true);
+                    }}
                   />
                 </div>
               </div>

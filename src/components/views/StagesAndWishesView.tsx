@@ -13,6 +13,8 @@ import {
   BabyWeekStage,
 } from '../../data/stagesExpectationsData';
 import { calculateGestationalAge } from '../../data/fetalStandards';
+import { computeExactAgeFromBirth, getLocalTodayDateStr } from '../../utils/ageCalculator';
+import type { ChildProfile } from '../../types';
 import {
   Sparkles,
   Heart,
@@ -56,28 +58,26 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
     activeLoveNotes,
     deleteLoveNote,
     formulaSettings,
+    unitSystem,
   } = useApp();
 
-  if (!activeProfile) return null;
+  const isBaby = activeProfile ? activeProfile.type === 'baby' : true;
 
-  const isBaby = activeProfile.type === 'baby';
-
-  // Calculate current age
-  const today = new Date();
-  const eventDate = new Date(activeProfile.dateOfEvent);
-
+  // Calculate current age safely (guards against missing/malformed dateOfEvent)
   let currentBabyMonth = 0;
   let currentBabyWeek = 1;
   let currentFetalWeek = 28;
 
-  if (isBaby) {
-    const diffTime = today.getTime() - eventDate.getTime();
-    const totalDays = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
-    currentBabyMonth = Math.floor(totalDays / 30.4375);
-    currentBabyWeek = Math.max(1, Math.min(52, Math.floor(totalDays / 7)));
-  } else {
-    const ga = calculateGestationalAge(activeProfile.dateOfEvent);
-    currentFetalWeek = Math.max(4, Math.min(42, ga.weeks || 28));
+  if (activeProfile) {
+    if (isBaby) {
+      const exact = computeExactAgeFromBirth(activeProfile.dateOfEvent, getLocalTodayDateStr());
+      const totalDays = exact ? Math.max(0, exact.totalDays) : 0;
+      currentBabyMonth = exact ? exact.calendarYears * 12 + exact.calendarMonths : 0;
+      currentBabyWeek = Math.max(1, Math.min(52, Math.floor(totalDays / 7) || 1));
+    } else {
+      const ga = calculateGestationalAge(activeProfile.dateOfEvent);
+      currentFetalWeek = Number.isFinite(ga.weeks) ? Math.max(4, Math.min(42, ga.weeks || 28)) : 28;
+    }
   }
 
   // Toggle for baby: 'weeks' vs 'months'
@@ -96,9 +96,7 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
   });
 
   // Selected week for fetal
-  const [selectedFetalWeek, setSelectedFetalWeek] = useState<number>(() => {
-    return currentFetalWeek;
-  });
+  const [selectedFetalWeek, setSelectedFetalWeek] = useState<number>(() => currentFetalWeek);
 
   // Popup modal state for pointer details
   const [popupType, setPopupType] = useState<PopupCardType | null>(null);
@@ -111,7 +109,7 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
 
   // Auto toggle and sync all cards when profile switches
   React.useEffect(() => {
-    if (activeProfile?.type === 'baby') {
+    if (isBaby) {
       setSelectedBabyWeek(currentBabyWeek);
       const months = BABY_MONTH_STAGES.map((s) => s.month);
       const closest = months.reduce((prev, curr) =>
@@ -121,7 +119,18 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
     } else {
       setSelectedFetalWeek(currentFetalWeek);
     }
-  }, [activeProfile?.id, currentBabyWeek, currentBabyMonth, currentFetalWeek]);
+  }, [activeProfile?.id, isBaby, currentBabyWeek, currentBabyMonth, currentFetalWeek]);
+
+  const fallbackProfile: ChildProfile = {
+    id: 'browse-baby',
+    name: 'Baby',
+    type: 'baby',
+    gender: 'undisclosed',
+    dateOfEvent: getLocalTodayDateStr(),
+    avatarColor: '#10b981',
+    avatarIcon: '👶',
+  };
+  const modalProfile = activeProfile ?? fallbackProfile;
 
   // Current active data
   const currentBabyMonthStage: BabyMonthStage =
@@ -219,7 +228,7 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
       </div>
 
       {/* Lively Hero Stage Header */}
-      <div className="relative overflow-hidden rounded-3xl bg-linear-to-br from-amber-500/15 via-rose-500/10 to-teal-500/10 border border-amber-200/70 dark:border-amber-900/50 p-6 md:p-8 shadow-xs">
+      <div className="relative overflow-hidden rounded-3xl bg-white dark:bg-stone-900 bg-linear-to-br from-amber-50/90 via-rose-50/60 to-teal-50/60 dark:from-amber-950/40 dark:via-stone-900 dark:to-teal-950/35 border border-amber-200/70 dark:border-amber-900/50 p-6 md:p-8 shadow-xs transition-colors">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
@@ -477,7 +486,7 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
                     {stageRecs.pillar1.desc}
                   </p>
                 </div>
-                <div className="mt-3 pt-2 border-t border-emerald-200/40 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                <div className="mt-3 pt-2 border-t border-emerald-200/40 dark:border-emerald-900/50 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
                   <span>View Details &rarr;</span>
                   <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
@@ -495,14 +504,14 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
                       Pillar 02 · {stageRecs.pillar2.tag}
                     </span>
                   </div>
-                  <h4 className="text-xs font-bold text-stone-900 dark:text-white mb-1 group-hover:text-indigo-700 transition-colors">
+                  <h4 className="text-xs font-bold text-stone-900 dark:text-white mb-1 group-hover:text-indigo-700 dark:group-hover:text-indigo-300 transition-colors">
                     {stageRecs.pillar2.title}
                   </h4>
                   <p className="text-[11px] text-stone-600 dark:text-stone-300 leading-relaxed">
                     {stageRecs.pillar2.desc}
                   </p>
                 </div>
-                <div className="mt-3 pt-2 border-t border-indigo-200/40 text-[10px] font-bold text-indigo-800 dark:text-indigo-300 flex items-center justify-between">
+                <div className="mt-3 pt-2 border-t border-indigo-200/40 dark:border-indigo-900/50 text-[10px] font-bold text-indigo-800 dark:text-indigo-300 flex items-center justify-between">
                   <span>View Details &rarr;</span>
                   <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
@@ -520,14 +529,14 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
                       Pillar 03 · {stageRecs.pillar3.tag}
                     </span>
                   </div>
-                  <h4 className="text-xs font-bold text-stone-900 dark:text-white mb-1 group-hover:text-amber-700 transition-colors">
+                  <h4 className="text-xs font-bold text-stone-900 dark:text-white mb-1 group-hover:text-amber-700 dark:group-hover:text-amber-300 transition-colors">
                     {stageRecs.pillar3.title}
                   </h4>
                   <p className="text-[11px] text-stone-600 dark:text-stone-300 leading-relaxed">
                     {stageRecs.pillar3.desc}
                   </p>
                 </div>
-                <div className="mt-3 pt-2 border-t border-amber-200/40 text-[10px] font-bold text-amber-800 dark:text-amber-300 flex items-center justify-between">
+                <div className="mt-3 pt-2 border-t border-amber-200/40 dark:border-amber-900/50 text-[10px] font-bold text-amber-800 dark:text-amber-300 flex items-center justify-between">
                   <span>View Details &rarr;</span>
                   <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
@@ -545,14 +554,14 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
                       Pillar 04 · {stageRecs.pillar4.tag}
                     </span>
                   </div>
-                  <h4 className="text-xs font-bold text-stone-900 dark:text-white mb-1 group-hover:text-rose-700 transition-colors">
+                  <h4 className="text-xs font-bold text-stone-900 dark:text-white mb-1 group-hover:text-rose-700 dark:group-hover:text-rose-300 transition-colors">
                     {stageRecs.pillar4.title}
                   </h4>
                   <p className="text-[11px] text-stone-600 dark:text-stone-300 leading-relaxed">
                     {stageRecs.pillar4.desc}
                   </p>
                 </div>
-                <div className="mt-3 pt-2 border-t border-rose-200/40 text-[10px] font-bold text-rose-800 dark:text-rose-300 flex items-center justify-between">
+                <div className="mt-3 pt-2 border-t border-rose-200/40 dark:border-rose-900/50 text-[10px] font-bold text-rose-800 dark:text-rose-300 flex items-center justify-between">
                   <span>View Details &rarr;</span>
                   <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
@@ -560,7 +569,7 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
             </div>
 
             {/* Evidence-Based Food & Recipe Suggestions Section */}
-            <div className="p-5 rounded-3xl bg-linear-to-r from-emerald-500/10 via-teal-500/5 to-amber-500/10 border border-emerald-200/80 dark:border-emerald-900/50 space-y-4">
+            <div className="mt-4 p-5 rounded-3xl bg-emerald-50/50 dark:bg-stone-800/40 bg-linear-to-r from-emerald-500/10 via-teal-500/5 to-amber-500/10 dark:from-emerald-950/40 dark:via-teal-950/25 dark:to-amber-950/30 border border-emerald-200/80 dark:border-emerald-900/50 space-y-4 transition-colors">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 flex items-center justify-center font-bold text-sm">
@@ -822,7 +831,7 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
               </h3>
             </div>
             <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-              Little letters of hope and wonder written for {activeProfile.name} during their journey.
+              Little letters of hope and wonder written for {activeProfile?.name || 'your little one'} during their journey.
             </p>
           </div>
 
@@ -894,8 +903,8 @@ export const StagesAndWishesView: React.FC<StagesAndWishesViewProps> = ({
         isOpen={isPopupOpen}
         onClose={() => setIsPopupOpen(false)}
         type={popupType}
-        profile={activeProfile}
-        unitSystem="metric"
+        profile={modalProfile}
+        unitSystem={unitSystem}
         data={{
           currentBabyWeeks: selectedBabyWeek,
           currentBabyMonth: selectedMonth,

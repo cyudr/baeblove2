@@ -7,6 +7,7 @@ import {
   UnitConverter,
 } from '../../data/growthStandards';
 import { BabyMeasurement, ChildProfile, UnitSystem } from '../../types';
+import { useApp } from '../../context/AppContext';
 import {
   computeAutoZoomRange,
   computeNiceAxisScale,
@@ -81,6 +82,8 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
   unitSystem,
   onOpenFormulaModal,
 }) => {
+  const { theme } = useApp();
+  const isDark = theme === 'dark';
   const [metric, setMetric] = useState<MetricType>('weight');
   const [zoomMode, setZoomMode] = useState<GrowthZoomMode>('auto');
   const [timeScaleMode, setTimeScaleMode] = useState<AgeAxisScaleMode>('auto');
@@ -721,13 +724,13 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
           <defs>
             {/* Soft gradient for 15th-85th percentile band */}
             <linearGradient id="bandInnerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#dcfce7" stopOpacity="0.75" />
-              <stop offset="100%" stopColor="#dcfce7" stopOpacity="0.35" />
+              <stop offset="0%" stopColor={isDark ? '#064e3b' : '#dcfce7'} stopOpacity={isDark ? '0.55' : '0.75'} />
+              <stop offset="100%" stopColor={isDark ? '#064e3b' : '#dcfce7'} stopOpacity={isDark ? '0.22' : '0.35'} />
             </linearGradient>
             {/* Softer outer gradient for 3rd-97th */}
             <linearGradient id="bandOuterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#f4f4f5" stopOpacity="0.8" />
-              <stop offset="100%" stopColor="#f4f4f5" stopOpacity="0.4" />
+              <stop offset="0%" stopColor={isDark ? '#292524' : '#f4f4f5'} stopOpacity={isDark ? '0.75' : '0.8'} />
+              <stop offset="100%" stopColor={isDark ? '#292524' : '#f4f4f5'} stopOpacity={isDark ? '0.35' : '0.4'} />
             </linearGradient>
             <clipPath id="whoPlotAreaClip">
               <rect
@@ -749,7 +752,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   y1={y}
                   x2={width - padding.right}
                   y2={y}
-                  stroke="#e7e5e4"
+                  stroke={isDark ? '#292524' : '#e7e5e4'}
                   strokeDasharray="3 3"
                   strokeWidth="1"
                 />
@@ -758,14 +761,14 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   y1={y}
                   x2={padding.left}
                   y2={y}
-                  stroke="#a8a29e"
+                  stroke={isDark ? '#57534e' : '#a8a29e'}
                   strokeWidth="1"
                 />
                 <text
                   x={padding.left - 8}
                   y={y + 3.5}
                   textAnchor="end"
-                  className="text-[10px] fill-stone-500 font-mono"
+                  className="text-[10px] fill-stone-500 dark:fill-stone-400 font-mono"
                 >
                   {tickVal.toFixed(yScale.decimals)} {yUnitSuffix}
                 </text>
@@ -784,7 +787,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   y1={padding.top}
                   x2={x}
                   y2={height - padding.bottom}
-                  stroke="#f5f5f4"
+                  stroke={isDark ? '#292524' : '#f5f5f4'}
                   strokeWidth="1"
                 />
                 <line
@@ -792,14 +795,14 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   y1={height - padding.bottom}
                   x2={x}
                   y2={height - padding.bottom + 4}
-                  stroke="#a8a29e"
+                  stroke={isDark ? '#57534e' : '#a8a29e'}
                   strokeWidth="1"
                 />
                 <text
                   x={x}
                   y={height - padding.bottom + 18}
                   textAnchor="middle"
-                  className="text-[10px] fill-stone-500 font-mono"
+                  className="text-[10px] fill-stone-500 dark:fill-stone-400 font-mono"
                 >
                   {formatAgeAxisTick(tickVal, effectiveUnit, xTickSpec.decimals)}
                 </text>
@@ -813,7 +816,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             y1={padding.top}
             x2={padding.left}
             y2={height - padding.bottom}
-            stroke="#d6d3d1"
+            stroke={isDark ? '#44403c' : '#d6d3d1'}
             strokeWidth="1"
           />
           <line
@@ -821,7 +824,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             y1={height - padding.bottom}
             x2={width - padding.right}
             y2={height - padding.bottom}
-            stroke="#d6d3d1"
+            stroke={isDark ? '#44403c' : '#d6d3d1'}
             strokeWidth="1"
           />
 
@@ -841,32 +844,32 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 <path
                   d={makePath('p97')}
                   fill="none"
-                  stroke="#a8a29e"
+                  stroke={isDark ? '#78716c' : '#a8a29e'}
                   strokeWidth="1"
                   strokeDasharray="2 3"
                 />
                 <path
                   d={makePath('p85')}
                   fill="none"
-                  stroke="#86efac"
+                  stroke={isDark ? '#059669' : '#86efac'}
                   strokeWidth="1"
                 />
                 <path
                   d={makePath('p50')}
                   fill="none"
-                  stroke="#15803d"
+                  stroke={isDark ? '#34d399' : '#15803d'}
                   strokeWidth="2"
                 />
                 <path
                   d={makePath('p15')}
                   fill="none"
-                  stroke="#86efac"
+                  stroke={isDark ? '#059669' : '#86efac'}
                   strokeWidth="1"
                 />
                 <path
                   d={makePath('p3')}
                   fill="none"
-                  stroke="#a8a29e"
+                  stroke={isDark ? '#78716c' : '#a8a29e'}
                   strokeWidth="1"
                   strokeDasharray="2 3"
                 />
@@ -876,21 +879,21 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               <text
                 x={width - padding.right + 4}
                 y={scaleY(curve[curve.length - 1].p97) + 3}
-                className="text-[9px] fill-stone-400 font-sans font-medium"
+                className="text-[9px] fill-stone-400 dark:fill-stone-400 font-sans font-medium"
               >
                 97th
               </text>
               <text
                 x={width - padding.right + 4}
                 y={scaleY(curve[curve.length - 1].p50) + 3}
-                className="text-[9px] fill-emerald-800 font-sans font-semibold"
+                className="text-[9px] fill-emerald-800 dark:fill-emerald-400 font-sans font-semibold"
               >
                 50th
               </text>
               <text
                 x={width - padding.right + 4}
                 y={scaleY(curve[curve.length - 1].p3) + 3}
-                className="text-[9px] fill-stone-400 font-sans font-medium"
+                className="text-[9px] fill-stone-400 dark:fill-stone-400 font-sans font-medium"
               >
                 3rd
               </text>
@@ -902,7 +905,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             <path
               d={userPath}
               fill="none"
-              stroke="#0f766e"
+              stroke={isDark ? '#2dd4bf' : '#0f766e'}
               strokeWidth="2.75"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -917,7 +920,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 y1={hoveredPoint.y}
                 x2={hoveredPoint.x}
                 y2={hoveredPoint.y}
-                stroke="#0f766e"
+                stroke={isDark ? '#2dd4bf' : '#0f766e'}
                 strokeWidth="1"
                 strokeDasharray="3 3"
                 opacity="0.7"
@@ -927,7 +930,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 y1={hoveredPoint.y}
                 x2={hoveredPoint.x}
                 y2={height - padding.bottom}
-                stroke="#0f766e"
+                stroke={isDark ? '#2dd4bf' : '#0f766e'}
                 strokeWidth="1"
                 strokeDasharray="3 3"
                 opacity="0.7"
@@ -977,8 +980,8 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   cx={m.x}
                   cy={m.y}
                   r={isHovered ? 9 : 6}
-                  fill="#0f766e"
-                  opacity={isHovered ? 0.25 : 0.15}
+                  fill={isDark ? '#2dd4bf' : '#0f766e'}
+                  opacity={isHovered ? 0.28 : 0.18}
                   className="transition-all"
                 />
                 {/* Solid core */}
@@ -986,8 +989,8 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   cx={m.x}
                   cy={m.y}
                   r={isHovered ? 5.5 : 4}
-                  fill="#0f766e"
-                  stroke="#ffffff"
+                  fill={isDark ? '#2dd4bf' : '#0f766e'}
+                  stroke={isDark ? '#1c1917' : '#ffffff'}
                   strokeWidth="2"
                   className="transition-all"
                 />
@@ -1013,24 +1016,24 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                     cx={scrubberState.svgX}
                     cy={scaleY(scrubberState.p50)}
                     r="4.5"
-                    fill="#15803d"
-                    stroke="#ffffff"
+                    fill={isDark ? '#34d399' : '#15803d'}
+                    stroke={isDark ? '#1c1917' : '#ffffff'}
                     strokeWidth="1.5"
                   />
                   <circle
                     cx={scrubberState.svgX}
                     cy={scaleY(scrubberState.p97)}
                     r="3"
-                    fill="#a8a29e"
-                    stroke="#ffffff"
+                    fill={isDark ? '#78716c' : '#a8a29e'}
+                    stroke={isDark ? '#1c1917' : '#ffffff'}
                     strokeWidth="1"
                   />
                   <circle
                     cx={scrubberState.svgX}
                     cy={scaleY(scrubberState.p3)}
                     r="3"
-                    fill="#a8a29e"
-                    stroke="#ffffff"
+                    fill={isDark ? '#78716c' : '#a8a29e'}
+                    stroke={isDark ? '#1c1917' : '#ffffff'}
                     strokeWidth="1"
                   />
                 </>
@@ -1133,6 +1136,8 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 rx="8"
                 fill="#1c1917"
                 opacity="0.95"
+                stroke="#3f3f46"
+                strokeWidth="0.75"
               />
               <text
                 x="10"
@@ -1163,7 +1168,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             x={(padding.left + width - padding.right) / 2}
             y={height - 10}
             textAnchor="middle"
-            className="text-[11px] fill-stone-500 font-sans font-medium"
+            className="text-[11px] fill-stone-500 dark:fill-stone-400 font-sans font-medium"
           >
             {getAgeAxisLabel(effectiveUnit)}
             {effectiveUnit !== 'days' && xSpanDays <= 35

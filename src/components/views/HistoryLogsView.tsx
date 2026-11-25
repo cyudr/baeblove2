@@ -5,6 +5,7 @@ import {
   classifyTemperature,
   doesRecordMatchProfile,
   formatDiaperLoad,
+  formatFeedingMethodLabel,
   getGrowthRecordDate,
   getRoutineRecordDate,
 } from '../../utils/careInterpreter';
@@ -226,13 +227,14 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
+              <tr className="bg-stone-50/80 dark:bg-stone-800/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                 <th className="py-3 px-4">Date &amp; Time</th>
                 <th className="py-3 px-4">Logged By</th>
                 <th className="py-3 px-4">EBM (mL)</th>
                 <th className="py-3 px-4">Formula (mL)</th>
                 <th className="py-3 px-4">Total (mL)</th>
                 <th className="py-3 px-4">Duration</th>
+                <th className="py-3 px-4">Method</th>
                 <th className="py-3 px-4">Diaper</th>
                 <th className="py-3 px-4">Diaper Load</th>
                 <th className="py-3 px-4">Stool</th>
@@ -243,6 +245,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
             <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
               {filteredRoutine.map((row) => {
                 const totalVol = (row.emb_mL ?? 0) + (row.formula_mL ?? 0);
+                const methodLabel = formatFeedingMethodLabel(row.feeding_method);
                 const deleteKey = `routine-${row.id}`;
                 return (
                   <tr
@@ -271,6 +274,15 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                       {row.feed_duration_min !== null
                         ? `${row.feed_duration_min} min`
                         : '—'}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      {methodLabel ? (
+                        <span className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200 font-semibold">
+                          {methodLabel}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       {row.diaper ? (
@@ -384,7 +396,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
+              <tr className="bg-stone-50/80 dark:bg-stone-800/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                 <th className="py-3 px-4">Date</th>
                 {isBaby && <th className="py-3 px-4">Age</th>}
                 <th className="py-3 px-4">Logged By</th>
@@ -537,7 +549,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
+                  <tr className="bg-stone-50/80 dark:bg-stone-800/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                     <th className="py-3 px-4">Date</th>
                     <th className="py-3 px-4">Logged By</th>
                     <th className="py-3 px-4">Age</th>
@@ -653,7 +665,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-stone-50/80 dark:bg-stone-850/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
+                <tr className="bg-stone-50/80 dark:bg-stone-800/80 border-b border-stone-200 dark:border-stone-800 text-stone-500 dark:text-stone-400 text-[11px] font-semibold">
                   <th className="py-3 px-4">Date</th>
                   <th className="py-3 px-4">Logged By</th>
                   <th className="py-3 px-4">Gestational Age</th>
@@ -853,9 +865,9 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
               onChange={(e) => setLoggerFilter(e.target.value)}
               className="bg-transparent text-stone-700 dark:text-stone-200 font-semibold focus:outline-hidden cursor-pointer"
             >
-              <option value="all">All Loggers</option>
+              <option value="all" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">All Loggers</option>
               {availableLoggers.map((n) => (
-                <option key={n} value={n}>
+                <option key={n} value={n} className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">
                   {n}
                 </option>
               ))}
@@ -923,7 +935,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
       </div>
 
       {/* Sub-Tab Bar */}
-      <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-stone-100 dark:bg-stone-850 rounded-2xl border border-stone-200 dark:border-stone-800">
+      <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-stone-100 dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700/80 transition-colors">
         <button
           type="button"
           onClick={() => setActiveSubTab('all')}
