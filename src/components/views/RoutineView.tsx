@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
+  DEFAULT_MILK_FORMULA,
   doesRecordMatchProfile,
   getRoutineRecordDate,
   interpretGrowthTable,
@@ -22,6 +23,7 @@ import {
   Filter,
   RotateCcw,
   Lock,
+  Calculator,
 } from 'lucide-react';
 
 const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
@@ -82,8 +84,20 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [pendingAuthRecord, setPendingAuthRecord] = useState<RoutineRecord | null>(null);
 
+  // Editable Milk Intake Formula state (x–y mL/kg/day, feeds/day, z% target in range)
+  const [minRateInput, setMinRateInput] = useState<string>(String(DEFAULT_MILK_FORMULA.minMlPerKg));
+  const [maxRateInput, setMaxRateInput] = useState<string>(String(DEFAULT_MILK_FORMULA.maxMlPerKg));
+  const [feedsPerDayInput, setFeedsPerDayInput] = useState<string>(
+    String(DEFAULT_MILK_FORMULA.feedsPerDay)
+  );
+  const [targetPctInput, setTargetPctInput] = useState<string>(
+    String(DEFAULT_MILK_FORMULA.targetRangePct)
+  );
+  const [customWeightInput, setCustomWeightInput] = useState<string>('');
+
   useEffect(() => {
     setLoggerFilter('all');
+    setCustomWeightInput('');
   }, [activeProfile?.id]);
 
   // Populate form when navigated from History tab to edit a specific record
@@ -151,9 +165,56 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     return latestBaby?.weightKg ?? activeProfile?.birthWeightKg ?? null;
   }, [growthInsights.latestWeightKg, activeBabyMeasurements, activeProfile?.birthWeightKg]);
 
+  const effectiveWeightKg = useMemo(() => {
+    const trimmed = customWeightInput.trim();
+    if (trimmed !== '') {
+      const parsed = parseFloat(trimmed);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return referenceWeightKg;
+  }, [customWeightInput, referenceWeightKg]);
+
+  const milkFormulaConfig = useMemo(() => {
+    const parsedMin = parseFloat(minRateInput);
+    const parsedMax = parseFloat(maxRateInput);
+    const parsedFeeds = parseFloat(feedsPerDayInput);
+    const parsedZ = parseFloat(targetPctInput);
+
+    const minMlPerKg =
+      Number.isFinite(parsedMin) && parsedMin > 0 ? parsedMin : DEFAULT_MILK_FORMULA.minMlPerKg;
+    const maxMlPerKg =
+      Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : DEFAULT_MILK_FORMULA.maxMlPerKg;
+    const feedsPerDay =
+      Number.isFinite(parsedFeeds) && parsedFeeds > 0
+        ? Math.min(24, parsedFeeds)
+        : DEFAULT_MILK_FORMULA.feedsPerDay;
+    const targetRangePct = Number.isFinite(parsedZ)
+      ? Math.min(100, Math.max(0, parsedZ))
+      : DEFAULT_MILK_FORMULA.targetRangePct;
+
+    return { minMlPerKg, maxMlPerKg, feedsPerDay, targetRangePct };
+  }, [minRateInput, maxRateInput, feedsPerDayInput, targetPctInput]);
+
+  const lowFormulaRate = Math.min(milkFormulaConfig.minMlPerKg, milkFormulaConfig.maxMlPerKg);
+  const highFormulaRate = Math.max(milkFormulaConfig.minMlPerKg, milkFormulaConfig.maxMlPerKg);
+  const isFormulaCustomized =
+    minRateInput !== String(DEFAULT_MILK_FORMULA.minMlPerKg) ||
+    maxRateInput !== String(DEFAULT_MILK_FORMULA.maxMlPerKg) ||
+    feedsPerDayInput !== String(DEFAULT_MILK_FORMULA.feedsPerDay) ||
+    targetPctInput !== String(DEFAULT_MILK_FORMULA.targetRangePct) ||
+    customWeightInput.trim() !== '';
+
+  const resetMilkFormula = () => {
+    setMinRateInput(String(DEFAULT_MILK_FORMULA.minMlPerKg));
+    setMaxRateInput(String(DEFAULT_MILK_FORMULA.maxMlPerKg));
+    setFeedsPerDayInput(String(DEFAULT_MILK_FORMULA.feedsPerDay));
+    setTargetPctInput(String(DEFAULT_MILK_FORMULA.targetRangePct));
+    setCustomWeightInput('');
+  };
+
   const routineInsights = useMemo(
-    () => interpretRoutineTable(filteredRoutine, referenceWeightKg),
-    [filteredRoutine, referenceWeightKg]
+    () => interpretRoutineTable(filteredRoutine, effectiveWeightKg, milkFormulaConfig),
+    [filteredRoutine, effectiveWeightKg, milkFormulaConfig]
   );
 
   const resetRoutineForm = (preserveLogger = false) => {
@@ -548,6 +609,328 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         )}
       </form>
 
+      {/* Milk Intake Formula & Feed Targets Card */}
+      <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 md:p-6 shadow-xs space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
+                <Calculator className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-stone-900 dark:text-white">
+                  Milk Intake Formula &amp; Feed Targets
+                </h3>
+                <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                  Weight-based daily range ({lowFormulaRate}–{highFormulaRate} mL/kg/day) with{' '}
+                  {milkFormulaConfig.targetRangePct}% range target (
+                  {routineInsights.effectiveTargetMlPerKg} mL/kg) across{' '}
+                  {milkFormulaConfig.feedsPerDay} feeds/day.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {routineInsights.todayBucket.feedCount > 0 &&
+              routineInsights.todayBucket.feedCount !== milkFormulaConfig.feedsPerDay && (
+                <button
+                  type="button"
+                  onClick={() => setFeedsPerDayInput(String(routineInsights.todayBucket.feedCount))}
+                  className="px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors cursor-pointer"
+                >
+                  Use {routineInsights.activeDateLabel.toLowerCase()}&apos;s{' '}
+                  {routineInsights.todayBucket.feedCount} feeds
+                </button>
+              )}
+            {isFormulaCustomized && (
+              <button
+                type="button"
+                onClick={resetMilkFormula}
+                className="px-2.5 py-1.5 text-[11px] font-semibold text-stone-600 dark:text-stone-300 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset Defaults</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Editable Formula Parameters */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div>
+            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+              Min Rate <span className="font-mono text-stone-400">(x, mL/kg)</span>
+            </label>
+            <input
+              type="number"
+              min="1"
+              step="5"
+              value={minRateInput}
+              onChange={(e) => setMinRateInput(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+              Max Rate <span className="font-mono text-stone-400">(y, mL/kg)</span>
+            </label>
+            <input
+              type="number"
+              min="1"
+              step="5"
+              value={maxRateInput}
+              onChange={(e) => setMaxRateInput(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300">
+                Feeds / Day
+              </label>
+              <span className="text-[10px] font-mono text-stone-400">
+                ~{(24 / milkFormulaConfig.feedsPerDay).toFixed(1)}h apart
+              </span>
+            </div>
+            <input
+              type="number"
+              min="1"
+              max="24"
+              step="1"
+              value={feedsPerDayInput}
+              onChange={(e) => setFeedsPerDayInput(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300">
+                Target in Range <span className="font-mono text-stone-400">(z%)</span>
+              </label>
+              <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 font-semibold">
+                {routineInsights.effectiveTargetMlPerKg} mL/kg
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="5"
+                value={targetPctInput}
+                onChange={(e) => setTargetPctInput(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              />
+              <input
+                type="range"
+                aria-label="Target percentage within min-max milk intake range"
+                min={0}
+                max={100}
+                step={5}
+                value={milkFormulaConfig.targetRangePct}
+                onChange={(e) => setTargetPctInput(e.target.value)}
+                className="w-full accent-emerald-600 cursor-pointer h-1.5"
+              />
+            </div>
+          </div>
+
+          <div className="col-span-2 sm:col-span-1">
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300">
+                Baby Weight (kg)
+              </label>
+              <span className="text-[10px] font-semibold text-stone-400">
+                {customWeightInput.trim() !== ''
+                  ? 'Custom'
+                  : referenceWeightKg !== null
+                    ? 'Auto'
+                    : 'Needed'}
+              </span>
+            </div>
+            <input
+              type="number"
+              min="0.1"
+              step="0.01"
+              value={customWeightInput}
+              onChange={(e) => setCustomWeightInput(e.target.value)}
+              placeholder={
+                referenceWeightKg !== null ? referenceWeightKg.toFixed(2) : 'e.g. 4.50'
+              }
+              className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+            />
+          </div>
+        </div>
+
+        {/* Per-Feed & Per-Day Target / Min-Max Displays */}
+        {effectiveWeightKg !== null &&
+        routineInsights.recommendedFeedMl !== null &&
+        routineInsights.perFeedMinMl !== null &&
+        routineInsights.perFeedMaxMl !== null &&
+        routineInsights.estimatedTargetMl !== null &&
+        routineInsights.targetMinMl !== null &&
+        routineInsights.targetMaxMl !== null ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            {/* Per Feed Panel */}
+            <div className="rounded-2xl border border-emerald-200/90 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
+                  Recommended Feed Target (Per Feed)
+                </span>
+                <span className="text-[10px] font-mono font-bold text-emerald-800 dark:text-emerald-300">
+                  {milkFormulaConfig.feedsPerDay} feeds/day · {milkFormulaConfig.targetRangePct}%
+                </span>
+              </div>
+
+              <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                <div>
+                  <span className="text-3xl font-black font-mono text-stone-900 dark:text-white">
+                    {routineInsights.recommendedFeedMl}
+                  </span>
+                  <span className="text-sm font-bold text-stone-500 dark:text-stone-400 ml-1">
+                    mL / feed
+                  </span>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wider font-semibold text-stone-500 dark:text-stone-400">
+                    Min – Max Range
+                  </div>
+                  <div className="text-sm font-bold font-mono text-stone-800 dark:text-stone-200">
+                    {routineInsights.perFeedMinMl} – {routineInsights.perFeedMaxMl} mL
+                  </div>
+                </div>
+              </div>
+
+              {/* Range Bar with z% Target Marker */}
+              <div className="space-y-1">
+                <div className="relative h-2 rounded-full bg-emerald-200/70 dark:bg-emerald-900/60">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full bg-emerald-500/80 dark:bg-emerald-400/80"
+                    style={{ width: `${milkFormulaConfig.targetRangePct}%` }}
+                  />
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-stone-900 dark:bg-white border-2 border-emerald-500 shadow-xs"
+                    style={{ left: `${milkFormulaConfig.targetRangePct}%` }}
+                    title={`Recommended target (${milkFormulaConfig.targetRangePct}%): ${routineInsights.recommendedFeedMl} mL`}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] font-mono text-stone-500 dark:text-stone-400">
+                  <span>Min {routineInsights.perFeedMinMl} mL</span>
+                  <span className="font-semibold text-emerald-800 dark:text-emerald-300">
+                    Target ({milkFormulaConfig.targetRangePct}%): {routineInsights.recommendedFeedMl} mL
+                  </span>
+                  <span>Max {routineInsights.perFeedMaxMl} mL</span>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-emerald-200/70 dark:border-emerald-900/50 flex flex-wrap items-center justify-between gap-2 text-[11px] text-stone-600 dark:text-stone-300">
+                <span>
+                  {routineInsights.avgMlPerFeed !== null ? (
+                    <>
+                      {routineInsights.activeDateLabel} avg:{' '}
+                      <strong className="font-mono text-stone-900 dark:text-white">
+                        {routineInsights.avgMlPerFeed} mL/feed
+                      </strong>{' '}
+                      (
+                      {routineInsights.avgMlPerFeed - routineInsights.recommendedFeedMl >= 0
+                        ? '+'
+                        : ''}
+                      {routineInsights.avgMlPerFeed - routineInsights.recommendedFeedMl} mL vs target)
+                    </>
+                  ) : (
+                    <>
+                      Based on {effectiveWeightKg.toFixed(2)} kg ÷ {milkFormulaConfig.feedsPerDay}{' '}
+                      feeds/day
+                    </>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            {/* Per Day Panel */}
+            <div className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-stone-800 dark:text-stone-200">
+                  Daily Milk Target (Per Day)
+                </span>
+                <span className="text-[10px] font-mono font-bold text-stone-500 dark:text-stone-400">
+                  {effectiveWeightKg.toFixed(2)} kg × {routineInsights.effectiveTargetMlPerKg} mL/kg
+                </span>
+              </div>
+
+              <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                <div>
+                  <span className="text-3xl font-black font-mono text-stone-900 dark:text-white">
+                    {routineInsights.estimatedTargetMl}
+                  </span>
+                  <span className="text-sm font-bold text-stone-500 dark:text-stone-400 ml-1">
+                    mL / day
+                  </span>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wider font-semibold text-stone-500 dark:text-stone-400">
+                    Min – Max Range
+                  </div>
+                  <div className="text-sm font-bold font-mono text-stone-800 dark:text-stone-200">
+                    {routineInsights.targetMinMl} – {routineInsights.targetMaxMl} mL
+                  </div>
+                </div>
+              </div>
+
+              {/* Range Bar with z% Target Marker */}
+              <div className="space-y-1">
+                <div className="relative h-2 rounded-full bg-stone-200 dark:bg-stone-700">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full bg-stone-500/80 dark:bg-stone-400/80"
+                    style={{ width: `${milkFormulaConfig.targetRangePct}%` }}
+                  />
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-stone-900 dark:bg-white border-2 border-stone-500 shadow-xs"
+                    style={{ left: `${milkFormulaConfig.targetRangePct}%` }}
+                    title={`Daily target (${milkFormulaConfig.targetRangePct}%): ${routineInsights.estimatedTargetMl} mL`}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] font-mono text-stone-500 dark:text-stone-400">
+                  <span>
+                    Min {routineInsights.targetMinMl} mL ({lowFormulaRate}/kg)
+                  </span>
+                  <span className="font-semibold text-stone-800 dark:text-stone-200">
+                    Target ({milkFormulaConfig.targetRangePct}%): {routineInsights.estimatedTargetMl} mL
+                  </span>
+                  <span>
+                    Max {routineInsights.targetMaxMl} mL ({highFormulaRate}/kg)
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-stone-200/80 dark:border-stone-700/60 flex flex-wrap items-center justify-between gap-2 text-[11px] text-stone-600 dark:text-stone-300">
+                <span>
+                  {routineInsights.activeDateLabel} logged:{' '}
+                  <strong className="font-mono text-stone-900 dark:text-white">
+                    {routineInsights.todayBucket.totalMl} mL
+                  </strong>{' '}
+                  ({routineInsights.targetProgressPct ?? 0}% of target)
+                </span>
+                <span className="font-mono font-semibold text-stone-700 dark:text-stone-200">
+                  {routineInsights.estimatedTargetMl - routineInsights.todayBucket.totalMl > 0
+                    ? `${routineInsights.estimatedTargetMl - routineInsights.todayBucket.totalMl} mL left`
+                    : 'Daily target reached'}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-stone-200 dark:border-stone-700 p-4 text-xs text-stone-500 dark:text-stone-400">
+            No baby weight found yet for this profile. Log a weight in the <strong>Growth</strong>{' '}
+            tab or type a weight in <strong>Baby Weight (kg)</strong> above to calculate per-feed
+            and daily milk intake targets.
+          </div>
+        )}
+      </div>
+
       {/* Analytics & Interpretation KPI Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
         {/* Total Milk Intake */}
@@ -560,7 +943,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               </span>
               {routineInsights.targetProgressPct !== null && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100/80 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300">
-                  {routineInsights.targetProgressPct}% goal
+                  {routineInsights.targetProgressPct}% target
                 </span>
               )}
             </div>
@@ -601,8 +984,10 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
             <div className="flex justify-between text-[10px] text-stone-400 dark:text-stone-500 font-medium">
               <span>EBM {routineInsights.ebmSharePct}%</span>
               <span>
-                {routineInsights.estimatedTargetMl
-                  ? `Est. target ~${routineInsights.estimatedTargetMl} mL`
+                {routineInsights.estimatedTargetMl &&
+                routineInsights.targetMinMl &&
+                routineInsights.targetMaxMl
+                  ? `Target ${routineInsights.estimatedTargetMl} mL (${routineInsights.targetMinMl}–${routineInsights.targetMaxMl})`
                   : `Formula ${routineInsights.formulaSharePct}%`}
               </span>
             </div>
@@ -629,6 +1014,19 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                   {routineInsights.avgMlPerFeed ? `${routineInsights.avgMlPerFeed} mL` : '—'}
                 </strong>
               </div>
+              {routineInsights.recommendedFeedMl !== null &&
+                routineInsights.perFeedMinMl !== null &&
+                routineInsights.perFeedMaxMl !== null && (
+                  <div>
+                    Rec. target:{' '}
+                    <strong className="text-emerald-700 dark:text-emerald-400">
+                      {routineInsights.recommendedFeedMl} mL
+                    </strong>{' '}
+                    <span className="text-stone-400">
+                      ({routineInsights.perFeedMinMl}–{routineInsights.perFeedMaxMl})
+                    </span>
+                  </div>
+                )}
               <div>
                 Avg duration:{' '}
                 <strong className="text-stone-800 dark:text-stone-200">

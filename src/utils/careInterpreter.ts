@@ -294,6 +294,20 @@ export interface DailyRoutineBucket {
   totalDiapers: number;
 }
 
+export interface MilkFormulaConfig {
+  minMlPerKg: number;
+  maxMlPerKg: number;
+  feedsPerDay: number;
+  targetRangePct: number;
+}
+
+export const DEFAULT_MILK_FORMULA: MilkFormulaConfig = {
+  minMlPerKg: 150,
+  maxMlPerKg: 200,
+  feedsPerDay: 8,
+  targetRangePct: 80,
+};
+
 export interface RoutineInterpretation {
   activeDateLabel: string;
   isToday: boolean;
@@ -302,9 +316,13 @@ export interface RoutineInterpretation {
   ebmSharePct: number;
   formulaSharePct: number;
   avgMlPerFeed: number | null;
+  effectiveTargetMlPerKg: number | null;
   estimatedTargetMl: number | null;
   targetMinMl: number | null;
   targetMaxMl: number | null;
+  perFeedMinMl: number | null;
+  perFeedMaxMl: number | null;
+  recommendedFeedMl: number | null;
   targetProgressPct: number | null;
   lastFeedLabel: string | null;
   dailySeries: DailyRoutineBucket[];
@@ -355,7 +373,8 @@ function emptyBucket(date: string): DailyRoutineBucket {
 
 export function interpretRoutineTable(
   records: RoutineRecord[],
-  latestWeightKg: number | null
+  latestWeightKg: number | null,
+  formulaConfig: MilkFormulaConfig = DEFAULT_MILK_FORMULA
 ): RoutineInterpretation {
   const todayStr = new Date().toISOString().split('T')[0];
   const bucketMap = new Map<string, DailyRoutineBucket>();
@@ -433,22 +452,41 @@ export function interpretRoutineTable(
       ? Math.round(todayBucket.totalMl / todayBucket.feedCount)
       : null;
 
-  // Weight-based infant fluid target (~150 mL/kg/day, typical range 120–180 mL/kg/day, capped reasonably around 950–1000 mL for older infants)
-  const estimatedTargetMl =
-    latestWeightKg && latestWeightKg > 0
-      ? Math.min(1000, Math.round(latestWeightKg * 150))
-      : null;
-  const targetMinMl =
-    latestWeightKg && latestWeightKg > 0
-      ? Math.min(850, Math.round(latestWeightKg * 120))
-      : null;
-  const targetMaxMl =
-    latestWeightKg && latestWeightKg > 0
-      ? Math.min(1100, Math.round(latestWeightKg * 180))
-      : null;
+  // Weight-based milk intake formula: x to y mL/kg/day (defaults 150–200), target at z% in [x, y] (default 80%)
+  const rawMin = Number.isFinite(formulaConfig.minMlPerKg) && formulaConfig.minMlPerKg > 0
+    ? formulaConfig.minMlPerKg
+    : DEFAULT_MILK_FORMULA.minMlPerKg;
+  const rawMax = Number.isFinite(formulaConfig.maxMlPerKg) && formulaConfig.maxMlPerKg > 0
+    ? formulaConfig.maxMlPerKg
+    : DEFAULT_MILK_FORMULA.maxMlPerKg;
+  const lowRate = Math.min(rawMin, rawMax);
+  const highRate = Math.max(rawMin, rawMax);
+  const feedsPerDay =
+    Number.isFinite(formulaConfig.feedsPerDay) && formulaConfig.feedsPerDay > 0
+      ? formulaConfig.feedsPerDay
+      : DEFAULT_MILK_FORMULA.feedsPerDay;
+  const clampedZ = Number.isFinite(formulaConfig.targetRangePct)
+    ? Math.min(100, Math.max(0, formulaConfig.targetRangePct))
+    : DEFAULT_MILK_FORMULA.targetRangePct;
+
+  const hasValidWeight = latestWeightKg !== null && Number.isFinite(latestWeightKg) && latestWeightKg > 0;
+  const effectiveTargetMlPerKg =
+    Math.round((lowRate + (clampedZ / 100) * (highRate - lowRate)) * 10) / 10;
+
+  const targetMinMl = hasValidWeight ? Math.round((latestWeightKg as number) * lowRate) : null;
+  const targetMaxMl = hasValidWeight ? Math.round((latestWeightKg as number) * highRate) : null;
+  const estimatedTargetMl = hasValidWeight
+    ? Math.round((latestWeightKg as number) * (lowRate + (clampedZ / 100) * (highRate - lowRate)))
+    : null;
+
+  const perFeedMinMl = targetMinMl !== null ? Math.round(targetMinMl / feedsPerDay) : null;
+  const perFeedMaxMl = targetMaxMl !== null ? Math.round(targetMaxMl / feedsPerDay) : null;
+  const recommendedFeedMl =
+    estimatedTargetMl !== null ? Math.round(estimatedTargetMl / feedsPerDay) : null;
+
   const targetProgressPct =
     estimatedTargetMl && estimatedTargetMl > 0
-      ? Math.min(150, Math.round((todayBucket.totalMl / estimatedTargetMl) * 100))
+      ? Math.min(200, Math.round((todayBucket.totalMl / estimatedTargetMl) * 100))
       : null;
 
   // Latest feeding timestamp label
@@ -482,21 +520,25 @@ export function interpretRoutineTable(
       `${dayPrefix}'s total milk intake is ${todayBucket.totalMl} mL across ${todayBucket.feedCount} feed${todayBucket.feedCount === 1 ? '' : 's'}${splitText}${avgMlPerFeed ? `, averaging ${avgMlPerFeed} mL/feed` : ''}.`
     );
 
-    if (estimatedTargetMl && targetMinMl && targetMaxMl) {
+    if (estimatedTargetMl && targetMinMl && targetMaxMl && recommendedFeedMl && perFeedMinMl && perFeedMaxMl) {
       if (todayBucket.totalMl >= targetMinMl && todayBucket.totalMl <= targetMaxMl) {
         insights.push(
-          `Intake is right within the weight-calibrated daily target band (${targetMinMl}–${targetMaxMl} mL/day based on ${latestWeightKg?.toFixed(2)} kg).`
+          `Intake is within your ${lowRate}–${highRate} mL/kg daily range (${targetMinMl}–${targetMaxMl} mL/day; ${clampedZ}% target is ${estimatedTargetMl} mL/day or ~${recommendedFeedMl} mL/feed across ${feedsPerDay} feeds for ${latestWeightKg?.toFixed(2)} kg).`
         );
       } else if (todayBucket.totalMl < targetMinMl) {
         insights.push(
-          `Currently at ${targetProgressPct}% of the ~${estimatedTargetMl} mL weight-based daily estimate (${targetMinMl}–${targetMaxMl} mL range).`
+          `Currently at ${targetProgressPct}% of your ${estimatedTargetMl} mL daily target (${clampedZ}% of ${targetMinMl}–${targetMaxMl} mL/day; recommended ~${recommendedFeedMl} mL/feed, range ${perFeedMinMl}–${perFeedMaxMl} mL/feed).`
         );
       } else {
         insights.push(
-          `Intake exceeds the typical ~${estimatedTargetMl} mL daily benchmark — common during growth spurts.`
+          `Intake exceeds your ${targetMaxMl} mL daily upper range (${highRate} mL/kg) — common during growth spurts.`
         );
       }
     }
+  } else if (estimatedTargetMl && targetMinMl && targetMaxMl && recommendedFeedMl && perFeedMinMl && perFeedMaxMl) {
+    insights.push(
+      `Based on ${latestWeightKg?.toFixed(2)} kg at ${lowRate}–${highRate} mL/kg/day (${clampedZ}% target = ${effectiveTargetMlPerKg} mL/kg), daily target is ${estimatedTargetMl} mL (${targetMinMl}–${targetMaxMl} mL) and recommended feed target is ${recommendedFeedMl} mL/feed (${perFeedMinMl}–${perFeedMaxMl} mL across ${feedsPerDay} feeds/day).`
+    );
   }
 
   if (todayBucket.totalDiapers > 0) {
@@ -527,9 +569,13 @@ export function interpretRoutineTable(
     ebmSharePct,
     formulaSharePct,
     avgMlPerFeed,
+    effectiveTargetMlPerKg,
     estimatedTargetMl,
     targetMinMl,
     targetMaxMl,
+    perFeedMinMl,
+    perFeedMaxMl,
+    recommendedFeedMl,
     targetProgressPct,
     lastFeedLabel,
     dailySeries,
