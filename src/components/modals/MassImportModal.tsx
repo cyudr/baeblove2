@@ -46,7 +46,7 @@ import {
 export type MassImportTable = 'auto' | 'routine' | 'growth';
 type ImportSourceMode = 'tabular' | 'camera' | 'photo' | 'file';
 
-const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
+const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed'] as const;
 
 function tempBadgeClasses(severity: 'low' | 'normal' | 'elevated' | 'fever'): string {
   switch (severity) {
@@ -185,7 +185,7 @@ const MASS_IMPORT_ROUTINE_ITEM_SCHEMA = {
       nullable: true,
       description: 'Feeding method: "bottle", "latch", "cup", or "stringe". Default "bottle" when ebmMl/formulaMl is present, or "latch" when only feedDurationMin is present.',
     },
-    diaper: { type: 'STRING', nullable: true, description: 'Wet, Dirty, Mixed, Dry, or custom' },
+    diaper: { type: 'STRING', nullable: true, description: 'Wet, Dirty, Mixed, or custom' },
     diaperLoad: {
       type: 'STRING',
       nullable: true,
@@ -246,7 +246,7 @@ function buildMassImportGeminiPayload(params: {
     '- formulaMl: integer milliliters of infant formula (FM / formula). Convert fl oz to mL if needed. Null if absent.',
     '- feedDurationMin: integer minutes of feeding duration. Null if absent.',
     '- feedingMethod: feeding method ("bottle", "latch", "cup", or "stringe"). Use "bottle" by default when ebmMl or formulaMl is present, or "latch" when only feedDurationMin is present (no milk volume). Null if not a feed.',
-    '- diaper: normalize to "Wet", "Dirty", "Mixed", or "Dry" when clearly matching (pee/urine -> "Wet", poop/stool/BM -> "Dirty", both -> "Mixed"), or keep a concise custom label. Null if absent.',
+    '- diaper: normalize to "Wet", "Dirty", or "Mixed" when clearly matching (pee/urine -> "Wet", poop/stool/BM -> "Dirty", both -> "Mixed"), or keep a concise custom label. Null if absent.',
     '- stool: baby stool color code ONLY using the legend M (Meconium), G (Greenish), GY (Greenish Yellow), Y (Yellow). Output ONLY the code ("M", "G", "GY", or "Y") with NO x1/x2/1x/2x behind it. Null if absent.',
     '- diaperLoad: multiplier/count formatted as "x1", "x2", "x3", "x4", etc. If a log writes "y x2", "m x4", "GY 3x", put the color code ("Y", "M", "GY") in stool and the multiplier ("x2", "x4", "x3") in diaperLoad. Use "x1" if diaper or stool is present with no explicit multiplier, or null if neither diaper nor stool is logged.',
     '- name: person who logged the entry (e.g. "Mom", "Dad", "Caregiver"). Do NOT put the baby name here. Use defaultLogger if omitted, or null if both empty.',
@@ -2809,218 +2809,224 @@ export const MassImportModal: React.FC<MassImportModalProps> = ({
                         </div>
                       )}
 
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-                            Logged By
-                          </label>
-                          <input
-                            type="text"
-                            value={row.name}
-                            onChange={(e) =>
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) =>
-                                  item._key === row._key
-                                    ? { ...item, name: e.target.value }
-                                    : item
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3">
+                          <div className="min-w-0 col-span-2 sm:col-span-1">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Logged By
+                            </label>
+                            <input
+                              type="text"
+                              value={row.name}
+                              onChange={(e) =>
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) =>
+                                    item._key === row._key
+                                      ? { ...item, name: e.target.value }
+                                      : item
+                                  )
                                 )
-                              )
-                            }
-                            placeholder="e.g. Mom, Dad, Caregiver"
-                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-                          />
-                        </div>
+                              }
+                              placeholder="e.g. Mom, Dad, Caregiver"
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                            />
+                          </div>
 
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-                            Date
-                          </label>
-                          <input
-                            type="date"
-                            value={row.date}
-                            onChange={(e) =>
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) =>
-                                  item._key === row._key
-                                    ? { ...item, date: e.target.value }
-                                    : item
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Date
+                            </label>
+                            <input
+                              type="date"
+                              value={row.date}
+                              onChange={(e) =>
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) =>
+                                    item._key === row._key
+                                      ? { ...item, date: e.target.value }
+                                      : item
+                                  )
                                 )
-                              )
-                            }
-                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-                          />
-                        </div>
+                              }
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                            />
+                          </div>
 
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-                            Time
-                          </label>
-                          <input
-                            type="time"
-                            value={row.time}
-                            onChange={(e) =>
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) =>
-                                  item._key === row._key
-                                    ? { ...item, time: e.target.value }
-                                    : item
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Time
+                            </label>
+                            <input
+                              type="time"
+                              value={row.time}
+                              onChange={(e) =>
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) =>
+                                    item._key === row._key
+                                      ? { ...item, time: e.target.value }
+                                      : item
+                                  )
                                 )
-                              )
-                            }
-                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-                          />
+                              }
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                            />
+                          </div>
                         </div>
 
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-                            Feed Duration (min)
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={row.feedDurationMin}
-                            onChange={(e) => {
-                              const nextDuration = e.target.value;
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) => {
-                                  if (item._key !== row._key) return item;
-                                  return {
-                                    ...item,
-                                    feedDurationMin: nextDuration,
-                                    feedingMethod: item.methodTouched
-                                      ? item.feedingMethod
-                                      : detectDefaultFeedingMethod({
-                                          ebmMl: item.ebmMl,
-                                          formulaMl: item.formulaMl,
-                                          feedDurationMin: nextDuration,
-                                        }),
-                                  };
-                                })
-                              );
-                            }}
-                            placeholder="e.g. 20"
-                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-                          />
-                        </div>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Feed Duration (min)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={row.feedDurationMin}
+                              onChange={(e) => {
+                                const nextDuration = e.target.value;
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) => {
+                                    if (item._key !== row._key) return item;
+                                    return {
+                                      ...item,
+                                      feedDurationMin: nextDuration,
+                                      feedingMethod: item.methodTouched
+                                        ? item.feedingMethod
+                                        : detectDefaultFeedingMethod({
+                                            ebmMl: item.ebmMl,
+                                            formulaMl: item.formulaMl,
+                                            feedDurationMin: nextDuration,
+                                          }),
+                                    };
+                                  })
+                                );
+                              }}
+                              placeholder="e.g. 20"
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                            />
+                          </div>
 
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-                            EBM (mL)
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="5"
-                            value={row.ebmMl}
-                            onChange={(e) => {
-                              const nextEbm = e.target.value;
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) => {
-                                  if (item._key !== row._key) return item;
-                                  return {
-                                    ...item,
-                                    ebmMl: nextEbm,
-                                    feedingMethod: item.methodTouched
-                                      ? item.feedingMethod
-                                      : detectDefaultFeedingMethod({
-                                          ebmMl: nextEbm,
-                                          formulaMl: item.formulaMl,
-                                          feedDurationMin: item.feedDurationMin,
-                                        }),
-                                  };
-                                })
-                              );
-                            }}
-                            placeholder="e.g. 90"
-                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-                          />
-                        </div>
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              EBM (mL)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="5"
+                              value={row.ebmMl}
+                              onChange={(e) => {
+                                const nextEbm = e.target.value;
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) => {
+                                    if (item._key !== row._key) return item;
+                                    return {
+                                      ...item,
+                                      ebmMl: nextEbm,
+                                      feedingMethod: item.methodTouched
+                                        ? item.feedingMethod
+                                        : detectDefaultFeedingMethod({
+                                            ebmMl: nextEbm,
+                                            formulaMl: item.formulaMl,
+                                            feedDurationMin: item.feedDurationMin,
+                                          }),
+                                    };
+                                  })
+                                );
+                              }}
+                              placeholder="e.g. 90"
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                            />
+                          </div>
 
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-                            Formula (mL)
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="5"
-                            value={row.formulaMl}
-                            onChange={(e) => {
-                              const nextFormula = e.target.value;
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) => {
-                                  if (item._key !== row._key) return item;
-                                  return {
-                                    ...item,
-                                    formulaMl: nextFormula,
-                                    feedingMethod: item.methodTouched
-                                      ? item.feedingMethod
-                                      : detectDefaultFeedingMethod({
-                                          ebmMl: item.ebmMl,
-                                          formulaMl: nextFormula,
-                                          feedDurationMin: item.feedDurationMin,
-                                        }),
-                                  };
-                                })
-                              );
-                            }}
-                            placeholder="e.g. 60"
-                            className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-                          />
-                        </div>
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Formula (mL)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="5"
+                              value={row.formulaMl}
+                              onChange={(e) => {
+                                const nextFormula = e.target.value;
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) => {
+                                    if (item._key !== row._key) return item;
+                                    return {
+                                      ...item,
+                                      formulaMl: nextFormula,
+                                      feedingMethod: item.methodTouched
+                                        ? item.feedingMethod
+                                        : detectDefaultFeedingMethod({
+                                            ebmMl: item.ebmMl,
+                                            formulaMl: nextFormula,
+                                            feedDurationMin: item.feedDurationMin,
+                                          }),
+                                    };
+                                  })
+                                );
+                              }}
+                              placeholder="e.g. 60"
+                              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+                            />
+                          </div>
 
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-                            Method
-                          </label>
-                          <FeedingMethodSelect
-                            value={row.feedingMethod}
-                            onChange={(val) =>
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) =>
-                                  item._key === row._key
-                                    ? { ...item, feedingMethod: val, methodTouched: true }
-                                    : item
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Method
+                            </label>
+                            <FeedingMethodSelect
+                              value={row.feedingMethod}
+                              onChange={(val) =>
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) =>
+                                    item._key === row._key
+                                      ? { ...item, feedingMethod: val, methodTouched: true }
+                                      : item
+                                  )
                                 )
-                              )
-                            }
-                          />
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Stool
+                            </label>
+                            <StoolSelect
+                              value={row.stool}
+                              onChange={(val) =>
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) =>
+                                    item._key === row._key ? { ...item, stool: val } : item
+                                  )
+                                )
+                              }
+                            />
+                          </div>
+
+                          <div className="min-w-0">
+                            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                              Diaper Load
+                            </label>
+                            <DiaperLoadControl
+                              value={row.diaperLoad}
+                              onChange={(val) =>
+                                setRoutineDrafts((prev) =>
+                                  prev.map((item) =>
+                                    item._key === row._key ? { ...item, diaperLoad: val } : item
+                                  )
+                                )
+                              }
+                            />
+                          </div>
                         </div>
 
                         <div className="min-w-0">
-                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-                            Stool
-                          </label>
-                          <StoolSelect
-                            value={row.stool}
-                            onChange={(val) =>
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) =>
-                                  item._key === row._key ? { ...item, stool: val } : item
-                                )
-                              )
-                            }
-                          />
-                        </div>
-
-                        <div className="min-w-0">
-                          <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-                            Diaper Load
-                          </label>
-                          <DiaperLoadControl
-                            value={row.diaperLoad}
-                            onChange={(val) =>
-                              setRoutineDrafts((prev) =>
-                                prev.map((item) =>
-                                  item._key === row._key ? { ...item, diaperLoad: val } : item
-                                )
-                              )
-                            }
-                          />
-                        </div>
-
-                        <div className="min-w-0 col-span-2 lg:col-span-3">
                           <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
                             Diaper
                           </label>

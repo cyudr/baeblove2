@@ -21,18 +21,16 @@ import { AskGeminiModal } from '../modals/AskGeminiModal';
 import { StoolSelect } from '../common/StoolSelect';
 import { DiaperLoadControl } from '../common/DiaperLoadControl';
 import { FeedingMethodSelect } from '../common/FeedingMethodSelect';
+import { RoutineSummaryAndChartsGrid } from '../charts/RoutineTrendCharts';
 import type { RoutineRecord } from '../../types';
 import {
   Droplets,
-  Clock,
   Plus,
-  RefreshCw,
   Pencil,
   Trash2,
   Check,
   X,
   Sparkles,
-  Baby,
   Filter,
   RotateCcw,
   Lock,
@@ -42,7 +40,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 
-const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
+const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed'] as const;
 
 function getCurrentDateStr(): string {
   const now = new Date();
@@ -73,8 +71,6 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     activeBabyMeasurements,
     growthRecords,
     routineRecords,
-    isCareTablesLoading,
-    refreshCareTables,
     addRoutineRecord,
     editRoutineRecord,
     removeRoutineRecord,
@@ -564,26 +560,6 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     }
   };
 
-  const maxSeriesMl = Math.max(
-    1,
-    ...routineInsights.dailySeries.map((d) => d.totalMl),
-    routineInsights.estimatedTargetMl ?? 0
-  );
-
-  const maxSeriesDiapers = Math.max(
-    6,
-    ...routineInsights.dailySeries.map((d) => d.totalDiapers)
-  );
-
-  const daysWithDiapers = routineInsights.dailySeries.filter((d) => d.totalDiapers > 0);
-  const sevenDayAvgDiapers =
-    daysWithDiapers.length > 0
-      ? Math.round(
-          (daysWithDiapers.reduce((sum, d) => sum + d.totalDiapers, 0) / daysWithDiapers.length) *
-            10
-        ) / 10
-      : 0;
-
   return (
     <div className="space-y-6">
       {/* Header Card */}
@@ -600,16 +576,6 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void refreshCareTables()}
-            disabled={isCareTablesLoading}
-            className="px-3.5 py-2 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200/70 dark:border-stone-700 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isCareTablesLoading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setIsAskGeminiOpen(true)}
             className="px-3.5 py-2 text-xs font-bold text-emerald-900 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
           >
@@ -624,57 +590,41 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         onSubmit={handleSaveRoutine}
         className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-colors"
       >
-        {!isLogCardExpanded ? (
-          <button
-            type="button"
-            onClick={() => setIsLogCardExpanded(true)}
-            aria-expanded={false}
-            className="w-full p-5 md:p-6 flex items-center justify-between gap-3 text-left hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors cursor-pointer"
-          >
-            <div className="flex items-center gap-2 flex-wrap min-w-0">
-              <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
-                <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>
-                  {editingRoutineId !== null
-                    ? `Edit Routine Entry #${editingRoutineId}`
-                    : 'Log Routine Entry'}
-                </span>
-              </h3>
-              {activeProfile && (
-                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
-                  Profile: {activeProfile.name}
-                </span>
-              )}
-            </div>
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 dark:text-stone-400 shrink-0">
-              <span className="hidden sm:inline">Expand</span>
-              <ChevronDown className="w-4 h-4" />
-            </span>
-          </button>
-        ) : (
+        <button
+          type="button"
+          onClick={() => setIsLogCardExpanded((prev) => !prev)}
+          aria-expanded={isLogCardExpanded}
+          className={`w-full p-5 md:p-6 flex items-center justify-between gap-3 text-left hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors cursor-pointer ${
+            isLogCardExpanded ? 'border-b border-stone-100 dark:border-stone-800' : ''
+          }`}
+        >
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2 whitespace-nowrap">
+              <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>
+                {editingRoutineId !== null
+                  ? `Edit Routine Entry #${editingRoutineId}`
+                  : 'Log Routine Entry'}
+              </span>
+            </h3>
+            {activeProfile && (
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 whitespace-nowrap">
+                Profile: {activeProfile.name}
+              </span>
+            )}
+          </div>
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 dark:text-stone-400 shrink-0">
+            <span className="hidden sm:inline">{isLogCardExpanded ? 'Fold' : 'Expand'}</span>
+            <ChevronDown
+              className={`w-4 h-4 transition-transform ${isLogCardExpanded ? 'rotate-180' : ''}`}
+            />
+          </span>
+        </button>
+
+        {isLogCardExpanded && (
           <div className="p-5 md:p-6 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setIsLogCardExpanded(false)}
-                aria-expanded={true}
-                className="flex items-center gap-2 flex-wrap text-left flex-1 min-w-0 cursor-pointer group"
-              >
-                <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2 group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">
-                  <Plus className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span>
-                    {editingRoutineId !== null
-                      ? `Edit Routine Entry #${editingRoutineId}`
-                      : 'Log Routine Entry'}
-                  </span>
-                </h3>
-                {activeProfile && (
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
-                    Profile: {activeProfile.name}
-                  </span>
-                )}
-              </button>
-              <div className="flex flex-wrap items-center gap-1.5">
+            {(latestRoutineRecord || editingRoutineId !== null) && (
+              <div className="flex flex-wrap items-center gap-2">
                 {latestRoutineRecord && (
                   <>
                     <button
@@ -707,17 +657,8 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                     <span>Cancel edit</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setIsLogCardExpanded(false)}
-                  aria-label="Fold Log Routine Entry card"
-                  title="Fold card"
-                  className="p-1.5 rounded-xl text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                >
-                  <ChevronDown className="w-4 h-4 rotate-180 transition-transform" />
-                </button>
               </div>
-            </div>
+            )}
 
         {retrieveNotice && (
           <div className="px-3 py-2 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-900/60 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2">
@@ -732,117 +673,123 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
           </div>
         )}
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Logged By
-            </label>
-            <input
-              type="text"
-              value={loggedBy}
-              onChange={(e) => setLoggedBy(e.target.value)}
-              placeholder="e.g. Mom, Dad, Caregiver"
-              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-            />
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3">
+            <div className="min-w-0 col-span-2 sm:col-span-1">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                Logged By
+              </label>
+              <input
+                type="text"
+                value={loggedBy}
+                onChange={(e) => setLoggedBy(e.target.value)}
+                placeholder="e.g. Mom, Dad, Caregiver"
+                className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="min-w-0">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                Date
+              </label>
+              <input
+                type="date"
+                value={routineDate}
+                onChange={(e) => setRoutineDate(e.target.value)}
+                className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="min-w-0">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                Time
+              </label>
+              <input
+                type="time"
+                value={routineTime}
+                onChange={(e) => setRoutineTime(e.target.value)}
+                className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+            <div className="min-w-0">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                Feed Duration (min)
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={feedDurationMin}
+                onChange={(e) => setFeedDurationMin(e.target.value)}
+                placeholder="e.g. 20"
+                className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="min-w-0">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                EBM (mL)
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="5"
+                value={ebmMl}
+                onChange={(e) => setEbmMl(e.target.value)}
+                placeholder="e.g. 90"
+                className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="min-w-0">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                Formula (mL)
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="5"
+                value={formulaMl}
+                onChange={(e) => setFormulaMl(e.target.value)}
+                placeholder="e.g. 60"
+                className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="min-w-0">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                Method
+              </label>
+              <FeedingMethodSelect
+                value={feedingMethod}
+                onChange={(val) => {
+                  setFeedingMethod(val);
+                  setMethodTouched(true);
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+            <div className="min-w-0">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                Stool
+              </label>
+              <StoolSelect value={stool} onChange={setStool} />
+            </div>
+
+            <div className="min-w-0">
+              <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
+                Diaper Load
+              </label>
+              <DiaperLoadControl value={diaperLoad} onChange={setDiaperLoad} />
+            </div>
           </div>
 
           <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Date
-            </label>
-            <input
-              type="date"
-              value={routineDate}
-              onChange={(e) => setRoutineDate(e.target.value)}
-              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-            />
-          </div>
-
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Time
-            </label>
-            <input
-              type="time"
-              value={routineTime}
-              onChange={(e) => setRoutineTime(e.target.value)}
-              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-            />
-          </div>
-
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Feed Duration (min)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={feedDurationMin}
-              onChange={(e) => setFeedDurationMin(e.target.value)}
-              placeholder="e.g. 20"
-              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-            />
-          </div>
-
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              EBM (mL)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="5"
-              value={ebmMl}
-              onChange={(e) => setEbmMl(e.target.value)}
-              placeholder="e.g. 90"
-              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-            />
-          </div>
-
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Formula (mL)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="5"
-              value={formulaMl}
-              onChange={(e) => setFormulaMl(e.target.value)}
-              placeholder="e.g. 60"
-              className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
-            />
-          </div>
-
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Method
-            </label>
-            <FeedingMethodSelect
-              value={feedingMethod}
-              onChange={(val) => {
-                setFeedingMethod(val);
-                setMethodTouched(true);
-              }}
-            />
-          </div>
-
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Stool
-            </label>
-            <StoolSelect value={stool} onChange={setStool} />
-          </div>
-
-          <div className="min-w-0">
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
-              Diaper Load
-            </label>
-            <DiaperLoadControl value={diaperLoad} onChange={setDiaperLoad} />
-          </div>
-
-          <div className="min-w-0 col-span-2 lg:col-span-3">
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300 mb-1">
               Diaper
             </label>
@@ -1053,317 +1000,11 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         )}
       </div>
 
-      {/* Analytics & Interpretation KPI Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-        {/* Total Milk Intake */}
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between transition-colors">
-          <div>
-            <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
-              <span className="flex items-center gap-2">
-                <Droplets className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                Milk Intake ({routineInsights.activeDateLabel})
-              </span>
-              {routineInsights.targetProgressPct !== null && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100/80 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300">
-                  {routineInsights.targetProgressPct}% target
-                </span>
-              )}
-            </div>
-            <div className="text-3xl font-black text-stone-900 dark:text-white mt-2">
-              {routineInsights.todayBucket.totalMl}{' '}
-              <span className="text-base font-bold text-stone-400">mL</span>
-            </div>
-            <div className="text-[11px] text-stone-500 dark:text-stone-400 mt-1">
-              EBM:{' '}
-              <strong className="text-emerald-700 dark:text-emerald-400">
-                {routineInsights.todayBucket.ebmMl} mL
-              </strong>
-              {' · '}
-              Formula:{' '}
-              <strong className="text-amber-700 dark:text-amber-400">
-                {routineInsights.todayBucket.formulaMl} mL
-              </strong>
-            </div>
-          </div>
-
-          <div className="mt-3 space-y-1.5">
-            <div className="w-full h-2.5 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden flex">
-              {routineInsights.todayBucket.totalMl > 0 && (
-                <>
-                  <div
-                    className="h-full bg-emerald-500"
-                    style={{ width: `${routineInsights.ebmSharePct}%` }}
-                    title={`EBM ${routineInsights.ebmSharePct}%`}
-                  />
-                  <div
-                    className="h-full bg-amber-500"
-                    style={{ width: `${routineInsights.formulaSharePct}%` }}
-                    title={`Formula ${routineInsights.formulaSharePct}%`}
-                  />
-                </>
-              )}
-            </div>
-            <div className="flex justify-between text-[10px] text-stone-400 dark:text-stone-500 font-medium">
-              <span>EBM {routineInsights.ebmSharePct}%</span>
-              <span>
-                {routineInsights.estimatedTargetMl &&
-                routineInsights.targetMinMl &&
-                routineInsights.targetMaxMl
-                  ? `Target ${routineInsights.estimatedTargetMl} mL (${routineInsights.targetMinMl}–${routineInsights.targetMaxMl})`
-                  : `Formula ${routineInsights.formulaSharePct}%`}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Combined Feeding Rhythm & 7-Day Volume Trend Card */}
-        <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs flex flex-col justify-between gap-4 transition-colors">
-          <div>
-            <div className="flex items-center justify-between gap-2 text-xs font-bold text-stone-700 dark:text-stone-200">
-              <span className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
-                <span>Feeding Rhythm</span>
-              </span>
-              <span className="text-[10px] font-normal text-stone-500 dark:text-stone-400 truncate max-w-[160px]">
-                Last:{' '}
-                <strong className="font-semibold text-stone-700 dark:text-stone-200">
-                  {routineInsights.lastFeedLabel ?? 'None yet'}
-                </strong>
-              </span>
-            </div>
-            <div className="flex flex-wrap items-baseline justify-between gap-2 mt-2">
-              <div className="text-3xl font-black text-stone-900 dark:text-white">
-                {routineInsights.todayBucket.feedCount}{' '}
-                <span className="text-base font-bold text-stone-400">
-                  feed{routineInsights.todayBucket.feedCount === 1 ? '' : 's'}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-stone-500 dark:text-stone-400">
-                <span>
-                  Avg:{' '}
-                  <strong className="text-stone-800 dark:text-stone-200">
-                    {routineInsights.avgMlPerFeed ? `${routineInsights.avgMlPerFeed} mL` : '—'}
-                  </strong>
-                </span>
-                <span>
-                  Dur:{' '}
-                  <strong className="text-stone-800 dark:text-stone-200">
-                    {routineInsights.todayBucket.avgDurationMin !== null
-                      ? `${routineInsights.todayBucket.avgDurationMin} min`
-                      : '—'}
-                  </strong>
-                </span>
-              </div>
-            </div>
-            {routineInsights.recommendedFeedMl !== null &&
-              routineInsights.perFeedMinMl !== null &&
-              routineInsights.perFeedMaxMl !== null && (
-                <div className="text-[11px] text-stone-500 dark:text-stone-400 mt-1">
-                  Rec. target:{' '}
-                  <strong className="text-emerald-700 dark:text-emerald-400">
-                    {routineInsights.recommendedFeedMl} mL
-                  </strong>{' '}
-                  <span className="text-stone-400">
-                    ({routineInsights.perFeedMinMl}–{routineInsights.perFeedMaxMl})
-                  </span>
-                </div>
-              )}
-          </div>
-
-          {/* 7-Day Volume Trend */}
-          <div className="pt-3 border-t border-stone-100 dark:border-stone-800">
-            <div className="flex items-center justify-between text-[11px] font-bold text-stone-600 dark:text-stone-300 mb-2">
-              <span>7-Day Volume Trend</span>
-              <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400">
-                Avg {routineInsights.sevenDayAvgMl ?? 0} mL
-              </span>
-            </div>
-
-            <div className="flex items-end justify-between gap-1.5 h-24 pt-2">
-              {routineInsights.dailySeries.map((bucket) => {
-                const ebmHeight = Math.round((bucket.ebmMl / maxSeriesMl) * 100);
-                const formulaHeight = Math.round((bucket.formulaMl / maxSeriesMl) * 100);
-                const dayLabel = bucket.date.slice(5);
-                return (
-                  <div
-                    key={bucket.date}
-                    className="flex-1 flex flex-col items-center gap-1 h-full justify-end"
-                    title={`${bucket.date}: ${bucket.totalMl} mL (EBM ${bucket.ebmMl} / Formula ${bucket.formulaMl})`}
-                  >
-                    <div className="w-full max-w-[22px] flex-1 flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
-                      {formulaHeight > 0 && (
-                        <div
-                          className="w-full bg-amber-400 dark:bg-amber-500 transition-all"
-                          style={{ height: `${formulaHeight}%` }}
-                        />
-                      )}
-                      {ebmHeight > 0 && (
-                        <div
-                          className="w-full bg-emerald-500 dark:bg-emerald-400 transition-all"
-                          style={{ height: `${ebmHeight}%` }}
-                        />
-                      )}
-                    </div>
-                    <span className="text-[9px] font-mono text-stone-400 dark:text-stone-500">
-                      {dayLabel}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="mt-2 flex items-center gap-3 text-[10px] text-stone-500 dark:text-stone-400">
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2 h-2 rounded-xs bg-emerald-500 dark:bg-emerald-400" />
-                EBM
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2 h-2 rounded-xs bg-amber-400 dark:bg-amber-500" />
-                Formula
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Diaper Output & 7-Day Chart */}
-        <div className="md:col-span-2 bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-colors">
-          <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-stone-100 dark:divide-stone-800 h-full">
-            {/* Diaper Output Summary */}
-            <div className="p-5 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
-                  <span className="flex items-center gap-2">
-                    <Baby className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                    Diaper Output
-                  </span>
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      routineInsights.todayBucket.wetDiapers +
-                        routineInsights.todayBucket.mixedDiapers >=
-                      6
-                        ? 'bg-emerald-100/80 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300'
-                        : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300'
-                    }`}
-                  >
-                    {routineInsights.todayBucket.wetDiapers + routineInsights.todayBucket.mixedDiapers}/6
-                    wet
-                  </span>
-                </div>
-                <div className="text-3xl font-black text-stone-900 dark:text-white mt-2">
-                  {routineInsights.todayBucket.totalDiapers}{' '}
-                  <span className="text-base font-bold text-stone-400">changes</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5 mt-2 text-[11px]">
-                  <span className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/50 text-sky-800 dark:text-sky-300 font-semibold">
-                    Wet: {routineInsights.todayBucket.wetDiapers}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 font-semibold">
-                    Dirty: {routineInsights.todayBucket.dirtyDiapers}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 font-semibold">
-                    Mixed: {routineInsights.todayBucket.mixedDiapers}
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-3 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[10px] text-stone-500 dark:text-stone-400">
-                Pediatric hydration benchmark: ≥6 wet diapers/day
-              </div>
-            </div>
-
-            {/* 7-Day Diaper Output Stacked Bar Chart */}
-            <div className="p-5 flex flex-col justify-between">
-              <div className="flex items-center justify-between text-xs font-bold text-stone-700 dark:text-stone-200">
-                <span>7-Day Diaper Output</span>
-                <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400">
-                  Avg {sevenDayAvgDiapers}/day
-                </span>
-              </div>
-
-              <div className="relative flex items-end justify-between gap-1.5 h-28 pt-3">
-                {/* 6-diaper pediatric hydration reference line */}
-                <div
-                  className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-emerald-400/70 dark:border-emerald-600/60"
-                  style={{
-                    bottom: `calc(${Math.round((6 / maxSeriesDiapers) * 100)}% * 0.72 + 14px)`,
-                  }}
-                  title="Pediatric hydration benchmark: 6 wet diapers/day"
-                />
-                {routineInsights.dailySeries.map((bucket) => {
-                  const wetHeight = Math.round((bucket.wetDiapers / maxSeriesDiapers) * 100);
-                  const mixedHeight = Math.round((bucket.mixedDiapers / maxSeriesDiapers) * 100);
-                  const dirtyHeight = Math.round((bucket.dirtyDiapers / maxSeriesDiapers) * 100);
-                  const otherDiapers = Math.max(
-                    0,
-                    bucket.totalDiapers -
-                      (bucket.wetDiapers + bucket.mixedDiapers + bucket.dirtyDiapers)
-                  );
-                  const otherHeight = Math.round((otherDiapers / maxSeriesDiapers) * 100);
-                  const dayLabel = bucket.date.slice(5);
-                  return (
-                    <div
-                      key={bucket.date}
-                      className="relative z-10 flex-1 flex flex-col items-center gap-1 h-full justify-end"
-                      title={`${bucket.date}: ${bucket.totalDiapers} changes (Wet ${bucket.wetDiapers}, Mixed ${bucket.mixedDiapers}, Dirty ${bucket.dirtyDiapers})`}
-                    >
-                      <span className="text-[9px] font-mono font-semibold text-stone-500 dark:text-stone-400 leading-none h-2.5">
-                        {bucket.totalDiapers > 0 ? bucket.totalDiapers : ''}
-                      </span>
-                      <div className="w-full max-w-[22px] flex-1 flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
-                        {otherHeight > 0 && (
-                          <div
-                            className="w-full bg-stone-400 dark:bg-stone-500 transition-all"
-                            style={{ height: `${otherHeight}%` }}
-                          />
-                        )}
-                        {dirtyHeight > 0 && (
-                          <div
-                            className="w-full bg-amber-400 dark:bg-amber-500 transition-all"
-                            style={{ height: `${dirtyHeight}%` }}
-                          />
-                        )}
-                        {mixedHeight > 0 && (
-                          <div
-                            className="w-full bg-emerald-500 dark:bg-emerald-400 transition-all"
-                            style={{ height: `${mixedHeight}%` }}
-                          />
-                        )}
-                        {wetHeight > 0 && (
-                          <div
-                            className="w-full bg-sky-500 dark:bg-sky-400 transition-all"
-                            style={{ height: `${wetHeight}%` }}
-                          />
-                        )}
-                      </div>
-                      <span className="text-[9px] font-mono text-stone-400 dark:text-stone-500">
-                        {dayLabel}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-2 pt-2 border-t border-stone-100 dark:border-stone-800 flex flex-wrap items-center justify-between gap-2 text-[10px] text-stone-500 dark:text-stone-400">
-                <div className="flex items-center gap-2.5">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-xs bg-sky-500 dark:bg-sky-400" />
-                    Wet
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-xs bg-emerald-500 dark:bg-emerald-400" />
-                    Mixed
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-xs bg-amber-400 dark:bg-amber-500" />
-                    Dirty
-                  </span>
-                </div>
-                <span>Benchmark: ≥6 wet/day</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Analytics & Interactive Daily / Weekly / Monthly Box Plot Charts */}
+      <RoutineSummaryAndChartsGrid
+        records={filteredRoutine}
+        routineInsights={routineInsights}
+      />
 
       {/* Clinical Interpretation Box */}
       <div className="bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-200/80 dark:border-emerald-900/50 rounded-3xl p-4 sm:p-5 transition-colors">

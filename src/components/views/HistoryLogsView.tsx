@@ -27,7 +27,6 @@ import {
   Pencil,
   Droplets,
   Scale,
-  RefreshCw,
   Filter,
   Sparkles,
 } from 'lucide-react';
@@ -102,8 +101,6 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
     activeFetalMeasurements,
     growthRecords,
     routineRecords,
-    isCareTablesLoading,
-    refreshCareTables,
     removeGrowthRecord,
     removeRoutineRecord,
     getAttachedFetalMeasurements,
@@ -889,16 +886,6 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>Mass Import</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void refreshCareTables()}
-            disabled={isCareTablesLoading}
-            className="px-3 py-2 text-xs font-semibold text-stone-700 dark:text-stone-200 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200/60 dark:border-stone-700/60 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isCareTablesLoading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
           </button>
 
           {activeProfile && onOpenEditProfileModal && (

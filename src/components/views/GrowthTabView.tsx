@@ -19,7 +19,6 @@ import {
   Ruler,
   Thermometer,
   Plus,
-  RefreshCw,
   Pencil,
   Trash2,
   Check,
@@ -86,8 +85,6 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
     activeFetalMeasurements,
     unitSystem,
     growthRecords,
-    isCareTablesLoading,
-    refreshCareTables,
     addGrowthRecord,
     editGrowthRecord,
     removeGrowthRecord,
@@ -354,16 +351,6 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void refreshCareTables()}
-            disabled={isCareTablesLoading}
-            className="px-3 py-1.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 text-xs font-semibold text-stone-700 dark:text-stone-200 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isCareTablesLoading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setIsAskGeminiOpen(true)}
             className="px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 text-xs font-bold text-emerald-900 dark:text-emerald-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
           >
@@ -400,57 +387,41 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
         onSubmit={handleSaveGrowth}
         className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-colors"
       >
-        {!isLogCardExpanded ? (
-          <button
-            type="button"
-            onClick={() => setIsLogCardExpanded(true)}
-            aria-expanded={false}
-            className="w-full p-5 md:p-6 flex items-center justify-between gap-3 text-left hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors cursor-pointer"
-          >
-            <div className="flex items-center gap-2 flex-wrap min-w-0">
-              <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
-                <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span>
-                  {editingGrowthId !== null
-                    ? `Edit Growth Entry #${editingGrowthId}`
-                    : 'Log Daily Growth & Vitals'}
-                </span>
-              </h3>
-              {activeProfile && (
-                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
-                  Profile: {activeProfile.name}
-                </span>
-              )}
-            </div>
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 dark:text-stone-400 shrink-0">
-              <span className="hidden sm:inline">Expand</span>
-              <ChevronDown className="w-4 h-4" />
-            </span>
-          </button>
-        ) : (
+        <button
+          type="button"
+          onClick={() => setIsLogCardExpanded((prev) => !prev)}
+          aria-expanded={isLogCardExpanded}
+          className={`w-full p-5 md:p-6 flex items-center justify-between gap-3 text-left hover:bg-stone-50/70 dark:hover:bg-stone-800/40 transition-colors cursor-pointer ${
+            isLogCardExpanded ? 'border-b border-stone-100 dark:border-stone-800' : ''
+          }`}
+        >
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2 whitespace-nowrap">
+              <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span>
+                {editingGrowthId !== null
+                  ? `Edit Growth Entry #${editingGrowthId}`
+                  : 'Log Daily Growth & Vitals'}
+              </span>
+            </h3>
+            {activeProfile && (
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 whitespace-nowrap">
+                Profile: {activeProfile.name}
+              </span>
+            )}
+          </div>
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 dark:text-stone-400 shrink-0">
+            <span className="hidden sm:inline">{isLogCardExpanded ? 'Fold' : 'Expand'}</span>
+            <ChevronDown
+              className={`w-4 h-4 transition-transform ${isLogCardExpanded ? 'rotate-180' : ''}`}
+            />
+          </span>
+        </button>
+
+        {isLogCardExpanded && (
           <div className="p-5 md:p-6 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setIsLogCardExpanded(false)}
-                aria-expanded={true}
-                className="flex items-center gap-2 flex-wrap text-left flex-1 min-w-0 cursor-pointer group"
-              >
-                <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2 group-hover:text-amber-700 dark:group-hover:text-amber-300 transition-colors">
-                  <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                  <span>
-                    {editingGrowthId !== null
-                      ? `Edit Growth Entry #${editingGrowthId}`
-                      : 'Log Daily Growth & Vitals'}
-                  </span>
-                </h3>
-                {activeProfile && (
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
-                    Profile: {activeProfile.name}
-                  </span>
-                )}
-              </button>
-              <div className="flex flex-wrap items-center gap-1.5">
+            {(latestGrowthRecord || editingGrowthId !== null) && (
+              <div className="flex flex-wrap items-center gap-2">
                 {latestGrowthRecord && (
                   <>
                     <button
@@ -483,17 +454,8 @@ export const GrowthTabView: React.FC<GrowthTabViewProps> = ({
                     <span>Cancel edit</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setIsLogCardExpanded(false)}
-                  aria-label="Fold Log Daily Growth & Vitals card"
-                  title="Fold card"
-                  className="p-1.5 rounded-xl text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-100 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                >
-                  <ChevronDown className="w-4 h-4 rotate-180 transition-transform" />
-                </button>
               </div>
-            </div>
+            )}
 
         {retrieveNotice && (
           <div className="px-3 py-2 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-2">

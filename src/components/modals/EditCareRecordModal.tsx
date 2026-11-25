@@ -16,7 +16,7 @@ import { DiaperLoadControl } from '../common/DiaperLoadControl';
 import { FeedingMethodSelect } from '../common/FeedingMethodSelect';
 import type { GrowthRecord, RoutineRecord } from '../../types';
 
-const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed', 'Dry'] as const;
+const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed'] as const;
 
 interface EditCareRecordModalProps {
   growthRecord: GrowthRecord | null;

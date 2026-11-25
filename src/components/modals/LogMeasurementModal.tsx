@@ -369,27 +369,42 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-          {/* Date & Calculated Age / Gestational Age */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
+          {/* Row 1: Date & Logged By */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="min-w-0">
               <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
                 Date of Visit / Scan
               </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  required
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-                />
-              </div>
+              <input
+                type="date"
+                required
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+              />
             </div>
 
-            {activeProfile.type === 'baby' ? (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
+            <div className="min-w-0">
+              <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                Logged By (optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Mom, Dad, Caregiver"
+                value={loggedByInput}
+                onChange={(e) => setLoggedByInput(e.target.value)}
+                className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+              />
+            </div>
+          </div>
+
+          {/* BABY SPECIFIC FIELDS */}
+          {activeProfile.type === 'baby' && (
+            <>
+              {/* Row 2: Age (Weeks) & Age (Months) */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
                     Age (Weeks)
                   </label>
@@ -399,10 +414,10 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     required
                     value={ageWeeks}
                     onChange={(e) => handleWeeksChange(parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
                     Age (Months)
                   </label>
@@ -412,87 +427,75 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     required
                     value={ageMonths}
                     onChange={(e) => handleMonthsChange(parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
                   />
                 </div>
               </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Weeks</label>
-                  <input
-                    type="number"
-                    min="4"
-                    max="43"
-                    value={gestationalWeeks}
-                    onChange={(e) => setGestationalWeeks(parseInt(e.target.value) || 0)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Days</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="6"
-                    value={gestationalDays}
-                    onChange={(e) => setGestationalDays(parseInt(e.target.value) || 0)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
 
-          {/* BABY SPECIFIC FIELDS */}
-          {activeProfile.type === 'baby' && (
-            <>
-              {/* Weight */}
+              {/* Row 3: Weight & Length / Height */}
               <div>
-                <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                  Weight ({unitSystem === 'metric' ? 'kg' : 'lb & oz'})
-                </label>
-                {unitSystem === 'metric' ? (
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="e.g. 7.25"
-                    value={weightInput}
-                    onChange={(e) => setWeightInput(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-                  />
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="relative">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="min-w-0">
+                    <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                      Weight ({unitSystem === 'metric' ? 'kg' : 'lb & oz'})
+                    </label>
+                    {unitSystem === 'metric' ? (
                       <input
                         type="number"
-                        step="1"
-                        placeholder="Pounds (lbs)"
+                        step="0.01"
+                        placeholder="e.g. 7.25"
                         value={weightInput}
                         onChange={(e) => setWeightInput(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                        className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
                       />
-                      <span className="absolute right-3 top-2.5 text-xs text-stone-400">lbs</span>
-                    </div>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        step="0.1"
-                        max="15.9"
-                        placeholder="Ounces (oz)"
-                        value={weightOzInput}
-                        onChange={(e) => setWeightOzInput(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-                      />
-                      <span className="absolute right-3 top-2.5 text-xs text-stone-400">oz</span>
-                    </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <div className="relative min-w-0">
+                          <input
+                            type="number"
+                            step="1"
+                            placeholder="lbs"
+                            value={weightInput}
+                            onChange={(e) => setWeightInput(e.target.value)}
+                            className="w-full min-w-0 px-2.5 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                          />
+                          <span className="absolute right-2 top-2.5 text-[11px] text-stone-400">lbs</span>
+                        </div>
+                        <div className="relative min-w-0">
+                          <input
+                            type="number"
+                            step="0.1"
+                            max="15.9"
+                            placeholder="oz"
+                            value={weightOzInput}
+                            onChange={(e) => setWeightOzInput(e.target.value)}
+                            className="w-full min-w-0 px-2.5 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                          />
+                          <span className="absolute right-2 top-2.5 text-[11px] text-stone-400">oz</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  <div className="min-w-0">
+                    <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                      Length / Height ({unitSystem === 'metric' ? 'cm' : 'inches'})
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      placeholder={unitSystem === 'metric' ? 'e.g. 65.5' : 'e.g. 25.8'}
+                      value={lengthInput}
+                      onChange={(e) => setLengthInput(e.target.value)}
+                      className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                    />
+                  </div>
+                </div>
 
                 {/* Instant Percentile Badge */}
                 {weightPercentilePreview && (
                   <div className="mt-1.5 flex items-center gap-1.5 text-xs text-emerald-800 dark:text-emerald-300">
-                    <Sparkles className="w-3.5 h-3.5" />
+                    <Sparkles className="w-3.5 h-3.5 shrink-0" />
                     <span>
                       Approx. <strong>{weightPercentilePreview.percentile}th percentile</strong> (WHO median:{' '}
                       {UnitConverter.formatWeight(weightPercentilePreview.p50, unitSystem)})
@@ -501,22 +504,9 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                 )}
               </div>
 
-              {/* Length & Head Circumference */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                    Length / Height ({unitSystem === 'metric' ? 'cm' : 'inches'})
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    placeholder={unitSystem === 'metric' ? 'e.g. 65.5' : 'e.g. 25.8'}
-                    value={lengthInput}
-                    onChange={(e) => setLengthInput(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-                  />
-                </div>
-                <div>
+              {/* Row 4: Head Circumference & Body Temperature */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
                     Head Circumference ({unitSystem === 'metric' ? 'cm' : 'inches'})
                   </label>
@@ -526,16 +516,12 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder={unitSystem === 'metric' ? 'e.g. 42.0' : 'e.g. 16.5'}
                     value={hcInput}
                     onChange={(e) => setHcInput(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
                   />
                 </div>
-              </div>
-
-              {/* Optional Temperature & Logged By (synced to Supabase growth table) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                    Body Temperature (°C, optional)
+                    Temperature (°C, optional)
                   </label>
                   <input
                     type="number"
@@ -545,25 +531,13 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder="e.g. 36.8"
                     value={temperatureInput}
                     onChange={(e) => setTemperatureInput(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                    Logged By (optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Mom, Dad, Caregiver"
-                    value={loggedByInput}
-                    onChange={(e) => setLoggedByInput(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
                   />
                 </div>
               </div>
 
               {/* Checkup flag */}
-              <label className="flex items-center gap-2 cursor-pointer pt-1">
+              <label className="flex items-center gap-2 cursor-pointer pt-0.5">
                 <input
                   type="checkbox"
                   checked={pediatricianVisit}
@@ -577,7 +551,33 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
 
           {/* FETAL ULTRASOUND FIELDS */}
           {activeProfile.type === 'fetal' && (
-            <div className="space-y-3">
+            <div className="space-y-3.5">
+              {/* Row 2: Gestational Weeks & Days */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
+                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Weeks</label>
+                  <input
+                    type="number"
+                    min="4"
+                    max="43"
+                    value={gestationalWeeks}
+                    onChange={(e) => setGestationalWeeks(parseInt(e.target.value) || 0)}
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">Days</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="6"
+                    value={gestationalDays}
+                    onChange={(e) => setGestationalDays(parseInt(e.target.value) || 0)}
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
+                  />
+                </div>
+              </div>
+
               {/* Formula Source Banner */}
               <div className="p-2.5 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/40 rounded-xl flex items-center justify-between text-xs text-amber-950 dark:text-amber-200">
                 <div className="flex items-center gap-1.5 truncate">
@@ -595,8 +595,9 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                 )}
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div>
+              {/* Row 3: BPD & HC */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">BPD (mm)</label>
                   <input
                     type="number"
@@ -604,10 +605,10 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder="Head diam."
                     value={bpdInput}
                     onChange={(e) => setBpdInput(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-lg focus:outline-hidden focus:border-stone-400 font-mono"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">HC (mm)</label>
                   <input
                     type="number"
@@ -615,10 +616,14 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder="Head circ."
                     value={hcUltrasoundInput}
                     onChange={(e) => setHcUltrasoundInput(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-lg focus:outline-hidden focus:border-stone-400 font-mono"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
                   />
                 </div>
-                <div>
+              </div>
+
+              {/* Row 4: AC & FL */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">AC (mm)</label>
                   <input
                     type="number"
@@ -626,10 +631,10 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder="Abdomen"
                     value={acInput}
                     onChange={(e) => setAcInput(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-lg focus:outline-hidden focus:border-stone-400 font-mono"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">FL (mm)</label>
                   <input
                     type="number"
@@ -637,7 +642,7 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder="Femur"
                     value={flInput}
                     onChange={(e) => setFlInput(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-lg focus:outline-hidden focus:border-stone-400 font-mono"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400 font-mono"
                   />
                 </div>
               </div>
@@ -656,9 +661,9 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                 </div>
               )}
 
-              {/* EFW & Fundal Height */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <div>
+              {/* Row 5: Fetal Weight & Fundal Height */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
                     Fetal Weight ({unitSystem === 'metric' ? 'g' : 'oz'})
                   </label>
@@ -667,10 +672,10 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder={unitSystem === 'metric' ? 'e.g. 350' : 'e.g. 12'}
                     value={efwInput}
                     onChange={(e) => setEfwInput(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
                     Fundal Height (cm)
                   </label>
@@ -680,10 +685,14 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder="e.g. 24"
                     value={fundalHeightInput}
                     onChange={(e) => setFundalHeightInput(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
                   />
                 </div>
-                <div>
+              </div>
+
+              {/* Row 6: Mother's Weight & Scan Clinic */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
                     Mother's Weight ({unitSystem === 'metric' ? 'kg' : 'lbs'})
                   </label>
@@ -693,13 +702,10 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder={unitSystem === 'metric' ? 'e.g. 64.5' : 'e.g. 142'}
                     value={maternalWeightInput}
                     onChange={(e) => setMaternalWeightInput(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
                   />
                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
                     Scan Clinic / Facility
                   </label>
@@ -708,26 +714,14 @@ export const LogMeasurementModal: React.FC<LogMeasurementModalProps> = ({
                     placeholder="e.g. St. Jude Ultrasound Center"
                     value={scanLocation}
                     onChange={(e) => setScanLocation(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                    Logged By (optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Mom, Dad, Caregiver"
-                    value={loggedByInput}
-                    onChange={(e) => setLoggedByInput(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
+                    className="w-full min-w-0 px-3 py-2 text-sm bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-stone-400"
                   />
                 </div>
               </div>
             </div>
           )}
 
-          {/* Notes */}
+          {/* Notes (own full-width row at the end) */}
           <div>
             <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
               Visit Notes & Observations

@@ -394,7 +394,7 @@ export interface MilkFormulaConfig {
 export const DEFAULT_MILK_FORMULA: MilkFormulaConfig = {
   minMlPerKg: 150,
   maxMlPerKg: 200,
-  feedsPerDay: 8,
+  feedsPerDay: 7,
   targetRangePct: 80,
 };
 
@@ -417,6 +417,39 @@ export interface RoutineInterpretation {
   lastFeedLabel: string | null;
   dailySeries: DailyRoutineBucket[];
   insights: string[];
+}
+
+export type RoutineChartGranularity = 'daily' | 'weekly' | 'monthly';
+export type DailySpanOption = 7 | 14 | 30 | 'all';
+export type WeeklySpanOption = 4 | 8 | 12 | 'all';
+export type MonthlySpanOption = 3 | 6 | 12 | 'all';
+
+export interface BoxPlotStats {
+  count: number;
+  min: number;
+  q1: number;
+  median: number;
+  q3: number;
+  max: number;
+  mean: number;
+  total: number;
+}
+
+export interface RoutinePeriodBoxPlotBucket {
+  key: string;
+  label: string;
+  rangeLabel: string;
+  daysWithFeeds: number;
+  daysWithDiapers: number;
+  milkStats: BoxPlotStats | null;
+  diaperStats: BoxPlotStats | null;
+  ebmTotalMl: number;
+  formulaTotalMl: number;
+  avgFeedsPerDay: number | null;
+  wetTotal: number;
+  mixedTotal: number;
+  dirtyTotal: number;
+  avgWetPerDay: number | null;
 }
 
 export function getRoutineRecordDate(record: RoutineRecord): string {
@@ -638,12 +671,22 @@ function emptyBucket(date: string): DailyRoutineBucket {
   };
 }
 
-export function interpretRoutineTable(
-  records: RoutineRecord[],
-  latestWeightKg: number | null,
-  formulaConfig: MilkFormulaConfig = DEFAULT_MILK_FORMULA
-): RoutineInterpretation {
-  const todayStr = new Date().toISOString().split('T')[0];
+function formatLocalDateYMD(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function parseLocalDateYMD(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map((n) => parseInt(n, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    return new Date();
+  }
+  return new Date(y, m - 1, d, 12, 0, 0, 0);
+}
+
+export function buildDailyRoutineBucketMap(records: RoutineRecord[]): Map<string, DailyRoutineBucket> {
   const bucketMap = new Map<string, DailyRoutineBucket>();
 
   for (const r of records) {
@@ -698,20 +741,318 @@ export function interpretRoutineTable(
         : null;
   }
 
+  return bucketMap;
+}
+
+function interpolateQuantile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  if (sorted.length === 1) return sorted[0];
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  const frac = idx - lo;
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * frac;
+}
+
+export function computeBoxPlotStats(values: number[]): BoxPlotStats | null {
+  const valid = values.filter((v) => Number.isFinite(v));
+  if (valid.length === 0) return null;
+  const sorted = [...valid].sort((a, b) => a - b);
+  const total = sorted.reduce((sum, v) => sum + v, 0);
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  return {
+    count: sorted.length,
+    min: round1(sorted[0]),
+    q1: round1(interpolateQuantile(sorted, 0.25)),
+    median: round1(interpolateQuantile(sorted, 0.5)),
+    q3: round1(interpolateQuantile(sorted, 0.75)),
+    max: round1(sorted[sorted.length - 1]),
+    mean: round1(total / sorted.length),
+    total: round1(total),
+  };
+}
+
+function resolveRoutineFocusDate(bucketMap: Map<string, DailyRoutineBucket>, explicitFocus?: string): string {
+  if (explicitFocus) return explicitFocus;
+  const todayStr = formatLocalDateYMD(new Date());
+  if (bucketMap.has(todayStr)) return todayStr;
+  const allDatesDesc = Array.from(bucketMap.keys()).sort((a, b) => b.localeCompare(a));
+  return allDatesDesc[0] ?? todayStr;
+}
+
+export function buildDailyRoutineSeries(
+  records: RoutineRecord[],
+  span: DailySpanOption = 7,
+  focusDate?: string
+): DailyRoutineBucket[] {
+  const bucketMap = buildDailyRoutineBucketMap(records);
+  const endDateStr = resolveRoutineFocusDate(bucketMap, focusDate);
+  const endDate = parseLocalDateYMD(endDateStr);
+
+  let totalDays: number;
+  if (span === 'all') {
+    const allDatesAsc = Array.from(bucketMap.keys()).sort((a, b) => a.localeCompare(b));
+    if (allDatesAsc.length === 0) {
+      totalDays = 7;
+    } else {
+      const startDate = parseLocalDateYMD(allDatesAsc[0]);
+      const diff = Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1;
+      totalDays = Math.max(7, Math.min(365, diff));
+    }
+  } else {
+    totalDays = Math.max(1, span);
+  }
+
+  const series: DailyRoutineBucket[] = [];
+  for (let i = totalDays - 1; i >= 0; i--) {
+    const d = new Date(endDate);
+    d.setDate(d.getDate() - i);
+    const key = formatLocalDateYMD(d);
+    series.push(bucketMap.get(key) ?? emptyBucket(key));
+  }
+  return series;
+}
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const FULL_MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+function getMondayOfWeek(date: Date): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
+  const day = d.getDay(); // 0 = Sun, 1 = Mon, ...
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diffToMonday);
+  return d;
+}
+
+export function buildWeeklyRoutineBoxPlots(
+  records: RoutineRecord[],
+  span: WeeklySpanOption = 4,
+  focusDate?: string
+): RoutinePeriodBoxPlotBucket[] {
+  const bucketMap = buildDailyRoutineBucketMap(records);
+  const endDateStr = resolveRoutineFocusDate(bucketMap, focusDate);
+  const endMonday = getMondayOfWeek(parseLocalDateYMD(endDateStr));
+
+  let weekCount: number;
+  if (span === 'all') {
+    const allDatesAsc = Array.from(bucketMap.keys()).sort((a, b) => a.localeCompare(b));
+    if (allDatesAsc.length === 0) {
+      weekCount = 4;
+    } else {
+      const startMonday = getMondayOfWeek(parseLocalDateYMD(allDatesAsc[0]));
+      const diffWeeks = Math.round((endMonday.getTime() - startMonday.getTime()) / (7 * 86_400_000)) + 1;
+      weekCount = Math.max(4, Math.min(52, diffWeeks));
+    }
+  } else {
+    weekCount = Math.max(1, span);
+  }
+
+  const periods: RoutinePeriodBoxPlotBucket[] = [];
+
+  for (let w = weekCount - 1; w >= 0; w--) {
+    const start = new Date(endMonday);
+    start.setDate(start.getDate() - w * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+
+    const milkDailyValues: number[] = [];
+    const diaperDailyValues: number[] = [];
+    const feedCounts: number[] = [];
+    const wetDailyValues: number[] = [];
+    let ebmTotalMl = 0;
+    let formulaTotalMl = 0;
+    let wetTotal = 0;
+    let mixedTotal = 0;
+    let dirtyTotal = 0;
+
+    for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + dayIdx);
+      const bucket = bucketMap.get(formatLocalDateYMD(d));
+      if (!bucket) continue;
+
+      if (bucket.totalMl > 0) {
+        milkDailyValues.push(bucket.totalMl);
+        ebmTotalMl += bucket.ebmMl;
+        formulaTotalMl += bucket.formulaMl;
+      }
+      if (bucket.feedCount > 0) {
+        feedCounts.push(bucket.feedCount);
+      }
+      if (bucket.totalDiapers > 0) {
+        diaperDailyValues.push(bucket.totalDiapers);
+        wetTotal += bucket.wetDiapers;
+        mixedTotal += bucket.mixedDiapers;
+        dirtyTotal += bucket.dirtyDiapers;
+        wetDailyValues.push(bucket.wetDiapers + bucket.mixedDiapers);
+      }
+    }
+
+    const startLabel = `${SHORT_MONTHS[start.getMonth()]} ${start.getDate()}`;
+    const endLabel = `${SHORT_MONTHS[end.getMonth()]} ${end.getDate()}, ${end.getFullYear()}`;
+    const key = formatLocalDateYMD(start);
+
+    periods.push({
+      key,
+      label: startLabel,
+      rangeLabel: `${startLabel} – ${endLabel}`,
+      daysWithFeeds: milkDailyValues.length,
+      daysWithDiapers: diaperDailyValues.length,
+      milkStats: computeBoxPlotStats(milkDailyValues),
+      diaperStats: computeBoxPlotStats(diaperDailyValues),
+      ebmTotalMl,
+      formulaTotalMl,
+      avgFeedsPerDay:
+        feedCounts.length > 0
+          ? Math.round((feedCounts.reduce((s, n) => s + n, 0) / feedCounts.length) * 10) / 10
+          : null,
+      wetTotal,
+      mixedTotal,
+      dirtyTotal,
+      avgWetPerDay:
+        wetDailyValues.length > 0
+          ? Math.round((wetDailyValues.reduce((s, n) => s + n, 0) / wetDailyValues.length) * 10) / 10
+          : null,
+    });
+  }
+
+  return periods;
+}
+
+export function buildMonthlyRoutineBoxPlots(
+  records: RoutineRecord[],
+  span: MonthlySpanOption = 6,
+  focusDate?: string
+): RoutinePeriodBoxPlotBucket[] {
+  const bucketMap = buildDailyRoutineBucketMap(records);
+  const endDateStr = resolveRoutineFocusDate(bucketMap, focusDate);
+  const endDate = parseLocalDateYMD(endDateStr);
+  const endYear = endDate.getFullYear();
+  const endMonth = endDate.getMonth();
+
+  let monthCount: number;
+  if (span === 'all') {
+    const allDatesAsc = Array.from(bucketMap.keys()).sort((a, b) => a.localeCompare(b));
+    if (allDatesAsc.length === 0) {
+      monthCount = 3;
+    } else {
+      const startDate = parseLocalDateYMD(allDatesAsc[0]);
+      const diffMonths =
+        (endYear - startDate.getFullYear()) * 12 + (endMonth - startDate.getMonth()) + 1;
+      monthCount = Math.max(3, Math.min(24, diffMonths));
+    }
+  } else {
+    monthCount = Math.max(1, span);
+  }
+
+  const bucketsByMonth = new Map<string, DailyRoutineBucket[]>();
+  for (const [dateKey, bucket] of bucketMap.entries()) {
+    const ym = dateKey.slice(0, 7);
+    const list = bucketsByMonth.get(ym) ?? [];
+    list.push(bucket);
+    bucketsByMonth.set(ym, list);
+  }
+
+  const startAnchor = new Date(endYear, endMonth - (monthCount - 1), 1, 12, 0, 0, 0);
+  const spansMultipleYears = startAnchor.getFullYear() !== endYear;
+
+  const periods: RoutinePeriodBoxPlotBucket[] = [];
+
+  for (let m = monthCount - 1; m >= 0; m--) {
+    const monthDate = new Date(endYear, endMonth - m, 1, 12, 0, 0, 0);
+    const y = monthDate.getFullYear();
+    const mo = monthDate.getMonth();
+    const key = `${y}-${String(mo + 1).padStart(2, '0')}`;
+    const monthBuckets = bucketsByMonth.get(key) ?? [];
+
+    const milkDailyValues: number[] = [];
+    const diaperDailyValues: number[] = [];
+    const feedCounts: number[] = [];
+    const wetDailyValues: number[] = [];
+    let ebmTotalMl = 0;
+    let formulaTotalMl = 0;
+    let wetTotal = 0;
+    let mixedTotal = 0;
+    let dirtyTotal = 0;
+
+    for (const bucket of monthBuckets) {
+      if (bucket.totalMl > 0) {
+        milkDailyValues.push(bucket.totalMl);
+        ebmTotalMl += bucket.ebmMl;
+        formulaTotalMl += bucket.formulaMl;
+      }
+      if (bucket.feedCount > 0) {
+        feedCounts.push(bucket.feedCount);
+      }
+      if (bucket.totalDiapers > 0) {
+        diaperDailyValues.push(bucket.totalDiapers);
+        wetTotal += bucket.wetDiapers;
+        mixedTotal += bucket.mixedDiapers;
+        dirtyTotal += bucket.dirtyDiapers;
+        wetDailyValues.push(bucket.wetDiapers + bucket.mixedDiapers);
+      }
+    }
+
+    const label = spansMultipleYears
+      ? `${SHORT_MONTHS[mo]} '${String(y).slice(-2)}`
+      : SHORT_MONTHS[mo];
+
+    periods.push({
+      key,
+      label,
+      rangeLabel: `${FULL_MONTHS[mo]} ${y}`,
+      daysWithFeeds: milkDailyValues.length,
+      daysWithDiapers: diaperDailyValues.length,
+      milkStats: computeBoxPlotStats(milkDailyValues),
+      diaperStats: computeBoxPlotStats(diaperDailyValues),
+      ebmTotalMl,
+      formulaTotalMl,
+      avgFeedsPerDay:
+        feedCounts.length > 0
+          ? Math.round((feedCounts.reduce((s, n) => s + n, 0) / feedCounts.length) * 10) / 10
+          : null,
+      wetTotal,
+      mixedTotal,
+      dirtyTotal,
+      avgWetPerDay:
+        wetDailyValues.length > 0
+          ? Math.round((wetDailyValues.reduce((s, n) => s + n, 0) / wetDailyValues.length) * 10) / 10
+          : null,
+    });
+  }
+
+  return periods;
+}
+
+export function interpretRoutineTable(
+  records: RoutineRecord[],
+  latestWeightKg: number | null,
+  formulaConfig: MilkFormulaConfig = DEFAULT_MILK_FORMULA
+): RoutineInterpretation {
+  const todayStr = formatLocalDateYMD(new Date());
+  const bucketMap = buildDailyRoutineBucketMap(records);
+
   const allDatesDesc = Array.from(bucketMap.keys()).sort((a, b) => b.localeCompare(a));
   const hasToday = bucketMap.has(todayStr);
   const focusDate = hasToday ? todayStr : allDatesDesc[0] ?? todayStr;
   const todayBucket = bucketMap.get(focusDate) ?? emptyBucket(focusDate);
 
-  // Build 7-day series ending on focusDate (or latest 7 recorded days if sparser)
-  const dailySeries: DailyRoutineBucket[] = [];
-  const endDate = new Date(`${focusDate}T12:00:00`);
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(endDate);
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().split('T')[0];
-    dailySeries.push(bucketMap.get(key) ?? emptyBucket(key));
-  }
+  // Build 7-day series ending on focusDate
+  const dailySeries = buildDailyRoutineSeries(records, 7, focusDate);
 
   const daysWithFeeds = dailySeries.filter((d) => d.totalMl > 0);
   const sevenDayAvgMl =

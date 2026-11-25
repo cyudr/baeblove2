@@ -62,7 +62,7 @@ import {
   Utensils,
   History,
   Pencil,
-  RefreshCw,
+  Droplets,
 } from 'lucide-react';
 import {
   CardDetailPopupModal,
@@ -76,7 +76,13 @@ import {
 } from '../../data/recipeData';
 import { InteractiveGrowthChart } from '../charts/InteractiveGrowthChart';
 import { FetalBiometricsChart } from '../charts/FetalBiometricsChart';
-import { mergeProfileGrowthMeasurements } from '../../utils/careInterpreter';
+import { RoutineSummaryAndChartsGrid } from '../charts/RoutineTrendCharts';
+import {
+  DEFAULT_MILK_FORMULA,
+  doesRecordMatchProfile,
+  interpretRoutineTable,
+  mergeProfileGrowthMeasurements,
+} from '../../utils/careInterpreter';
 import {
   DAYS_PER_MONTH,
   computeExactAgeFromBirth,
@@ -116,8 +122,6 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
     growthRecords,
     routineRecords,
     isEntriesLoading,
-    isCareTablesLoading,
-    refreshAllData,
     addKickSession,
     deleteKickSession,
     toggleMilestone,
@@ -350,6 +354,16 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
     isBaby && resolvedHcCm !== undefined
       ? calculatePercentile(resolvedHcCm, resolvedHcAgeMonths, 'headCircumference', activeProfile.gender)
       : null;
+
+  // Routine overview & feeding/diaper analytics for active profile
+  const profileRoutineRecords = routineRecords.filter((r) =>
+    doesRecordMatchProfile(r, activeProfile)
+  );
+  const routineInsights = interpretRoutineTable(
+    profileRoutineRecords,
+    resolvedWeightKg ?? null,
+    DEFAULT_MILK_FORMULA
+  );
 
   const daysToDueDate = !isBaby && gestationalAgeInfo
     ? Math.max(0, 280 - gestationalAgeInfo.totalDays)
@@ -589,44 +603,31 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
               </div>
 
               {/* Action Cluster */}
-              <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0 flex-wrap">
-                {!isBaby && (
-                  <button
-                    onClick={() => setIsGraduateModalOpen(true)}
-                    title="Celebrate baby birth and transition to baby profile"
-                    className="px-3.5 py-2 text-xs font-bold rounded-2xl bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white transition-all flex items-center gap-1.5 shadow-sm hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-                  >
-                    <Baby className="w-4 h-4" />
-                    <span>Graduate to Baby</span>
-                  </button>
-                )}
+              {(!isBaby || activeProfile.attachedFetalProfileId) && (
+                <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0 flex-wrap">
+                  {!isBaby && (
+                    <button
+                      onClick={() => setIsGraduateModalOpen(true)}
+                      title="Celebrate baby birth and transition to baby profile"
+                      className="px-3.5 py-2 text-xs font-bold rounded-2xl bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white transition-all flex items-center gap-1.5 shadow-sm hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                    >
+                      <Baby className="w-4 h-4" />
+                      <span>Graduate to Baby</span>
+                    </button>
+                  )}
 
-                {isBaby && activeProfile.attachedFetalProfileId && (
-                  <button
-                    onClick={() => setIsHistoryModalOpen(true)}
-                    title="Explore attached in-womb ultrasounds, kick logs, and prenatal notes"
-                    className="px-3.5 py-2 text-xs font-bold rounded-2xl bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/80 dark:hover:bg-amber-900 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 transition-all flex items-center gap-1.5 shadow-2xs hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-                  >
-                    <History className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-                    <span>In-Womb Journey</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => void refreshAllData()}
-                  disabled={isEntriesLoading || isCareTablesLoading}
-                  title="Refresh all profile, growth, and routine data from Supabase"
-                  className="px-3.5 py-2 text-xs font-semibold rounded-2xl border border-stone-200 dark:border-stone-700 bg-white/95 dark:bg-stone-800 hover:bg-stone-50 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 transition-all flex items-center gap-1.5 shadow-2xs hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${
-                      isEntriesLoading || isCareTablesLoading ? 'animate-spin' : ''
-                    }`}
-                  />
-                  <span>Refresh</span>
-                </button>
-              </div>
+                  {isBaby && activeProfile.attachedFetalProfileId && (
+                    <button
+                      onClick={() => setIsHistoryModalOpen(true)}
+                      title="Explore attached in-womb ultrasounds, kick logs, and prenatal notes"
+                      className="px-3.5 py-2 text-xs font-bold rounded-2xl bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/80 dark:hover:bg-amber-900 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 transition-all flex items-center gap-1.5 shadow-2xs hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                    >
+                      <History className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+                      <span>In-Womb Journey</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -778,101 +779,133 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* CARD 2: Length & Skeletal Stature */}
-              <div
-                onClick={() => openPopup('baby-length')}
-                className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs hover:border-teal-300 dark:hover:border-teal-700 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group"
-              >
-                <div>
-                  <div className="flex items-center justify-between text-stone-500 dark:text-stone-400 mb-2">
-                    <span className="flex items-center gap-2 font-bold text-stone-900 dark:text-white text-xs">
-                      <div className="w-8 h-8 rounded-xl bg-teal-100 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 flex items-center justify-center">
-                        <Ruler className="w-4 h-4" />
-                      </div>
-                      Length & Stature
-                    </span>
-                    <span className="text-[10px] font-bold text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 rounded-full uppercase">
-                      {lengthPct ? `WHO ${lengthPct.percentile}th Pct` : 'WHO Pct'}
-                    </span>
-                  </div>
-
-                  <div className="my-3">
-                    <div className="text-2xl sm:text-3xl font-black text-stone-900 dark:text-white">
-                      {resolvedLengthCm !== undefined
-                        ? UnitConverter.formatLength(resolvedLengthCm, unitSystem)
-                        : '—'}
-                    </div>
-                    {resolvedLengthDate && (
-                      <div className="text-[10px] text-stone-400 dark:text-stone-500 mt-0.5">
-                        {lengthIsFromBirth ? `Birth · ${resolvedLengthDate}` : resolvedLengthDate}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-1.5 text-[11px] text-teal-800 dark:text-teal-300 font-semibold mt-1">
-                      <TrendingUp className="w-3.5 h-3.5 shrink-0" />
-                      <span>{lengthIsFromBirth ? 'From birth length' : '~1.2 cm / mo skeletal velocity'}</span>
-                    </div>
-                  </div>
-
-                  <div className="w-full h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden mb-1.5">
-                    <div
-                      className="h-full bg-linear-to-r from-teal-500 to-sky-400 rounded-full"
-                      style={{ width: `${Math.min(100, Math.max(5, lengthPct?.percentile ?? 50))}%` }}
-                    />
+              {/* COMBINED CARD 2 (Spans 2 columns on md/lg): Length & Cranial Growth */}
+              <div className="md:col-span-2 bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden flex flex-col justify-between transition-all hover:border-stone-300 dark:hover:border-stone-700">
+                <div className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100 dark:border-stone-800 flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-stone-900 dark:text-white">
+                      Length &amp; Cranial Growth
+                    </h3>
+                    <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                      Skeletal stature &amp; head circumference WHO percentiles
+                    </p>
                   </div>
                 </div>
 
-                <div className="mt-4 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[10px] font-bold text-teal-800 dark:text-teal-300 flex items-center justify-between">
-                  <span>View Stature Protocols &rarr;</span>
-                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                </div>
-              </div>
-
-              {/* CARD 3: Head Circumference & Neurodevelopment */}
-              <div
-                onClick={() => openPopup('fontanelle-detail')}
-                className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 p-5 shadow-xs hover:border-amber-300 dark:hover:border-amber-700 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group"
-              >
-                <div>
-                  <div className="flex items-center justify-between text-stone-500 dark:text-stone-400 mb-2">
-                    <span className="flex items-center gap-2 font-bold text-stone-900 dark:text-white text-xs">
-                      <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 flex items-center justify-center">
-                        <Brain className="w-4 h-4" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-stone-100 dark:divide-stone-800 flex-1">
+                  {/* Left Half: Length & Skeletal Stature */}
+                  <div
+                    onClick={() => openPopup('baby-length')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openPopup('baby-length');
+                      }
+                    }}
+                    className="p-5 sm:px-6 flex flex-col justify-between cursor-pointer hover:bg-teal-50/40 dark:hover:bg-teal-950/20 transition-colors group focus-visible:outline-2 focus-visible:outline-teal-500"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="flex items-center gap-2 font-bold text-stone-900 dark:text-white text-xs">
+                          <div className="w-8 h-8 rounded-xl bg-teal-100 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 flex items-center justify-center shrink-0">
+                            <Ruler className="w-4 h-4" />
+                          </div>
+                          <span>Length &amp; Stature</span>
+                        </span>
+                        <span className="text-[11px] font-mono tabular-nums font-bold text-teal-800 dark:text-teal-300">
+                          {lengthPct ? `${lengthPct.percentile}th Pct` : 'WHO'}
+                        </span>
                       </div>
-                      Cranial & Brain
-                    </span>
-                    <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-full uppercase">
-                      {hcPct ? `WHO ${hcPct.percentile}th Pct` : 'WHO Pct'}
-                    </span>
-                  </div>
 
-                  <div className="my-3">
-                    <div className="text-2xl sm:text-3xl font-black text-stone-900 dark:text-white">
-                      {resolvedHcCm !== undefined
-                        ? UnitConverter.formatLength(resolvedHcCm, unitSystem)
-                        : '—'}
-                    </div>
-                    {resolvedHcDate && (
-                      <div className="text-[10px] text-stone-400 dark:text-stone-500 mt-0.5">
-                        {hcIsFromBirth ? `Birth · ${resolvedHcDate}` : resolvedHcDate}
+                      <div className="my-3">
+                        <div className="text-2xl sm:text-3xl font-black font-mono tabular-nums text-stone-900 dark:text-white">
+                          {resolvedLengthCm !== undefined
+                            ? UnitConverter.formatLength(resolvedLengthCm, unitSystem)
+                            : '—'}
+                        </div>
+                        {resolvedLengthDate && (
+                          <div className="text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500 mt-0.5">
+                            {lengthIsFromBirth ? `Birth · ${resolvedLengthDate}` : resolvedLengthDate}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1.5 text-[11px] text-teal-800 dark:text-teal-300 font-semibold mt-1.5">
+                          <TrendingUp className="w-3.5 h-3.5 shrink-0" />
+                          <span>{lengthIsFromBirth ? 'From birth length' : '~1.2 cm / mo skeletal velocity'}</span>
+                        </div>
                       </div>
-                    )}
-                    <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 mt-1 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Fontanelle: Soft & Flat</span>
+
+                      <div className="w-full h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-linear-to-r from-teal-500 to-sky-400 rounded-full"
+                          style={{ width: `${Math.min(100, Math.max(5, lengthPct?.percentile ?? 50))}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[11px] font-bold text-teal-800 dark:text-teal-300 flex items-center justify-between">
+                      <span>View Stature Protocols</span>
+                      <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                     </div>
                   </div>
 
-                  <div className="w-full h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden mb-1.5">
-                    <div
-                      className="h-full bg-linear-to-r from-amber-500 to-orange-400 rounded-full"
-                      style={{ width: `${Math.min(100, Math.max(5, hcPct?.percentile ?? 50))}%` }}
-                    />
-                  </div>
-                </div>
+                  {/* Right Half: Head Circumference & Neurodevelopment */}
+                  <div
+                    onClick={() => openPopup('fontanelle-detail')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openPopup('fontanelle-detail');
+                      }
+                    }}
+                    className="p-5 sm:px-6 flex flex-col justify-between cursor-pointer hover:bg-amber-50/40 dark:hover:bg-amber-950/20 transition-colors group focus-visible:outline-2 focus-visible:outline-amber-500"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="flex items-center gap-2 font-bold text-stone-900 dark:text-white text-xs">
+                          <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 flex items-center justify-center shrink-0">
+                            <Brain className="w-4 h-4" />
+                          </div>
+                          <span>Cranial &amp; Brain</span>
+                        </span>
+                        <span className="text-[11px] font-mono tabular-nums font-bold text-amber-800 dark:text-amber-300">
+                          {hcPct ? `${hcPct.percentile}th Pct` : 'WHO'}
+                        </span>
+                      </div>
 
-                <div className="mt-4 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[10px] font-bold text-amber-800 dark:text-amber-300 flex items-center justify-between">
-                  <span>View Cranial Guides &rarr;</span>
-                  <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                      <div className="my-3">
+                        <div className="text-2xl sm:text-3xl font-black font-mono tabular-nums text-stone-900 dark:text-white">
+                          {resolvedHcCm !== undefined
+                            ? UnitConverter.formatLength(resolvedHcCm, unitSystem)
+                            : '—'}
+                        </div>
+                        {resolvedHcDate && (
+                          <div className="text-[10px] font-mono tabular-nums text-stone-400 dark:text-stone-500 mt-0.5">
+                            {hcIsFromBirth ? `Birth · ${resolvedHcDate}` : resolvedHcDate}
+                          </div>
+                        )}
+                        <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 mt-1.5 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>Fontanelle: Soft &amp; Flat</span>
+                        </div>
+                      </div>
+
+                      <div className="w-full h-2 bg-stone-100 dark:bg-stone-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-linear-to-r from-amber-500 to-orange-400 rounded-full"
+                          style={{ width: `${Math.min(100, Math.max(5, hcPct?.percentile ?? 50))}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[11px] font-bold text-amber-800 dark:text-amber-300 flex items-center justify-between">
+                      <span>View Cranial Guides</span>
+                      <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1047,6 +1080,46 @@ export const GrowthDashboardView: React.FC<GrowthDashboardViewProps> = ({
             </div>
           )}
         </section>
+
+        {/* ============================================================== */}
+        {/* DAILY ROUTINE OVERVIEW: MILK INTAKE, FEEDING RHYTHM & DIAPERS  */}
+        {/* ============================================================== */}
+        {(isBaby || profileRoutineRecords.length > 0) && (
+          <section
+            id="card-routine-overview"
+            className="space-y-4 pt-4 border-t border-stone-200 dark:border-stone-800 scroll-mt-28"
+          >
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 flex items-center justify-center shadow-2xs shrink-0">
+                  <Droplets className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-stone-900 dark:text-white">
+                    Daily Routine Overview
+                  </h2>
+                  <p className="text-xs text-stone-500 dark:text-stone-400 font-medium">
+                    Milk intake, feeding rhythm, and diaper output trends
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onNavigateTab('routine')}
+                className="px-3.5 py-2 text-xs font-bold text-emerald-900 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <span>Open Routine Log</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <RoutineSummaryAndChartsGrid
+              records={profileRoutineRecords}
+              routineInsights={routineInsights}
+            />
+          </section>
+        )}
 
         {/* ============================================================== */}
         {/* CARD 02: DEVELOPMENTAL STAGE & BIOLOGICAL WONDER EXPLORER       */}

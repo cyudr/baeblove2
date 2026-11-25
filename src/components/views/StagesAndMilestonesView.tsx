@@ -12,7 +12,6 @@ import {
   HeartPulse,
   Plus,
   StickyNote,
-  RefreshCw,
   Pencil,
   Trash2,
   Check,
@@ -57,8 +56,6 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
     activeProfile,
     isEntriesLoading,
     noteRecords,
-    isCareTablesLoading,
-    refreshCareTables,
     addNoteRecord,
     editNoteRecord,
     removeNoteRecord,
@@ -212,17 +209,7 @@ export const StagesAndMilestonesView: React.FC<StagesAndMilestonesViewProps> = (
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-2 pt-1">
-        <button
-          type="button"
-          onClick={() => void refreshCareTables()}
-          disabled={isCareTablesLoading}
-          className="px-3 py-1.5 text-xs font-semibold text-stone-600 dark:text-stone-300 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isCareTablesLoading ? 'animate-spin' : ''}`} />
-          <span>Refresh</span>
-        </button>
-
+      <div className="flex items-center justify-end gap-2 pt-1">
         <button
           type="submit"
           disabled={isSavingNote}

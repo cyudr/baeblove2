@@ -20,6 +20,7 @@ import {
   Trash2,
   Droplets,
   Pencil,
+  RefreshCw,
 } from 'lucide-react';
 import { DeleteProfileModal } from '../modals/DeleteProfileModal';
 import { GraduateFetalModal } from '../modals/GraduateFetalModal';
@@ -55,7 +56,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     theme,
     toggleTheme,
     systemOrTimeTheme,
+    isEntriesLoading,
+    isCareTablesLoading,
+    refreshAllData,
   } = useApp();
+
+  const isRefreshing = isEntriesLoading || isCareTablesLoading;
 
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
@@ -275,6 +281,23 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right: Decluttered Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Global Refresh Button */}
+          <button
+            type="button"
+            onClick={() => void refreshAllData()}
+            disabled={isRefreshing}
+            title="Refresh all profile, growth, routine, and notes data from Supabase"
+            aria-label="Refresh all data"
+            className="flex items-center justify-center gap-1 w-8 lg:w-auto lg:px-2.5 h-8 text-xs font-semibold text-stone-700 dark:text-stone-200 hover:text-emerald-800 dark:hover:text-emerald-300 bg-stone-50 dark:bg-stone-800 hover:bg-emerald-50 dark:hover:bg-stone-700 rounded-xl border border-stone-200 dark:border-stone-700 transition-colors cursor-pointer shadow-2xs disabled:opacity-60"
+          >
+            <RefreshCw
+              className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${
+                isRefreshing ? 'animate-spin' : ''
+              }`}
+            />
+            <span className="text-[11px] hidden lg:inline">Refresh</span>
+          </button>
+
           {/* Light / Dark Mode Icon Toggle */}
           <button
             onClick={toggleTheme}
