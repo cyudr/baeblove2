@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { UnitConverter } from '../../data/growthStandards';
 import {
+  computeNextFeedRecommendation,
   DEFAULT_DIAPER_LOAD,
   DEFAULT_MILK_FORMULA,
   detectDefaultFeedingMethod,
@@ -45,6 +46,7 @@ import {
   SlidersHorizontal,
   ChevronDown,
   AlertTriangle,
+  Clock,
 } from 'lucide-react';
 
 const DIAPER_PRESETS = ['Wet', 'Dirty', 'Mixed'] as const;
@@ -119,6 +121,12 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   const [targetPctInput, setTargetPctInput] = useState<string>(
     String(DEFAULT_MILK_FORMULA.targetRangePct)
   );
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     setLoggerFilter('all');
@@ -321,6 +329,22 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         activeProfile?.type === 'baby' ? activeProfile.dateOfEvent : null
       ),
     [filteredRoutine, currentWeightKg, milkFormulaConfig, activeProfile]
+  );
+
+  const nextFeedRecommendation = useMemo(
+    () =>
+      computeNextFeedRecommendation(
+        profileRoutineRecords,
+        routineInsights.recommendedFeedMl,
+        milkFormulaConfig.feedsPerDay,
+        new Date(nowTick)
+      ),
+    [
+      profileRoutineRecords,
+      routineInsights.recommendedFeedMl,
+      milkFormulaConfig.feedsPerDay,
+      nowTick,
+    ]
   );
 
   // Detect potentially duplicated or conflicting routine entry strictly by Date & Time
@@ -587,7 +611,66 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
             </h2>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {(nextFeedRecommendation || routineInsights.recommendedFeedMl !== null) && (
+              <div
+                className="inline-flex items-center gap-1.5 text-xs select-none"
+                title={
+                  nextFeedRecommendation
+                    ? [
+                        `Last feed: ${nextFeedRecommendation.lastFeedDate} ${nextFeedRecommendation.lastFeedTime}`,
+                        `Rhythm: every ${nextFeedRecommendation.intervalLabel} (${
+                          nextFeedRecommendation.rhythmSource === 'time-of-day'
+                            ? `time-of-day pattern, ${nextFeedRecommendation.sampleCount} feeds`
+                            : nextFeedRecommendation.rhythmSource === 'recent-median'
+                              ? `recent median, ${nextFeedRecommendation.sampleCount} intervals`
+                              : `${milkFormulaConfig.feedsPerDay} feeds/day cadence`
+                        })`,
+                        nextFeedRecommendation.recommendedMl !== null
+                          ? `Target: ${nextFeedRecommendation.recommendedMl} mL/feed`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')
+                    : `Recommended target: ${routineInsights.recommendedFeedMl} mL/feed (log a feed to estimate next feed time)`
+                }
+              >
+                <Clock
+                  className={`w-3.5 h-3.5 shrink-0 ${
+                    nextFeedRecommendation?.isDue
+                      ? 'text-amber-600 dark:text-amber-300 [filter:drop-shadow(0_0_6px_rgba(245,158,11,0.7))] dark:[filter:drop-shadow(0_0_8px_rgba(251,191,36,0.9))]'
+                      : 'text-sky-600 dark:text-sky-300 [filter:drop-shadow(0_0_6px_rgba(14,165,233,0.65))] dark:[filter:drop-shadow(0_0_8px_rgba(56,189,248,0.85))]'
+                  }`}
+                />
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">
+                  Next Feed
+                </span>
+                {nextFeedRecommendation && (
+                  <span
+                    className={`font-mono font-bold whitespace-nowrap ${
+                      nextFeedRecommendation.isDue
+                        ? 'text-amber-700 dark:text-amber-300 [text-shadow:0_0_10px_rgba(245,158,11,0.65)] dark:[text-shadow:0_0_12px_rgba(251,191,36,0.9)]'
+                        : 'text-sky-700 dark:text-sky-300 [text-shadow:0_0_10px_rgba(14,165,233,0.6)] dark:[text-shadow:0_0_12px_rgba(56,189,248,0.85)]'
+                    }`}
+                  >
+                    {nextFeedRecommendation.isTomorrow
+                      ? `Tmr ${nextFeedRecommendation.recommendedTime}`
+                      : nextFeedRecommendation.isToday
+                        ? nextFeedRecommendation.recommendedTime
+                        : `${nextFeedRecommendation.recommendedDate.slice(5)} ${nextFeedRecommendation.recommendedTime}`}
+                  </span>
+                )}
+                {nextFeedRecommendation && routineInsights.recommendedFeedMl !== null && (
+                  <span className="text-stone-300 dark:text-stone-600 font-bold">·</span>
+                )}
+                {routineInsights.recommendedFeedMl !== null && (
+                  <span className="font-mono font-bold whitespace-nowrap text-emerald-700 dark:text-emerald-300 [text-shadow:0_0_10px_rgba(16,185,129,0.6)] dark:[text-shadow:0_0_12px_rgba(52,211,153,0.85)]">
+                    {routineInsights.recommendedFeedMl} mL
+                  </span>
+                )}
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => setIsAskGeminiOpen(true)}

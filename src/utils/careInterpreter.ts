@@ -1430,3 +1430,198 @@ export function interpretRoutineTable(
     insights,
   };
 }
+
+export interface NextFeedRecommendation {
+  recommendedTime: string;
+  recommendedDate: string;
+  isToday: boolean;
+  isTomorrow: boolean;
+  isDue: boolean;
+  intervalMin: number;
+  intervalLabel: string;
+  sampleCount: number;
+  rhythmSource: 'time-of-day' | 'recent-median' | 'formula-cadence';
+  lastFeedTime: string;
+  lastFeedDate: string;
+  recommendedMl: number | null;
+}
+
+function parseRoutineRecordLocalTimestamp(record: RoutineRecord): number | null {
+  const dateStr = getRoutineRecordDate(record);
+  const dateParts = dateStr.split('-').map((n) => parseInt(n, 10));
+  if (dateParts.length !== 3 || dateParts.some((n) => !Number.isFinite(n))) {
+    return null;
+  }
+  const [y, m, d] = dateParts;
+
+  let hhmm = normalizeRoutineTimeHHMM(record.time);
+  if (!hhmm && record.created_at) {
+    const createdDate = new Date(record.created_at);
+    if (!Number.isNaN(createdDate.getTime())) {
+      hhmm = `${String(createdDate.getHours()).padStart(2, '0')}:${String(
+        createdDate.getMinutes()
+      ).padStart(2, '0')}`;
+    } else {
+      hhmm = normalizeRoutineTimeHHMM(record.created_at.slice(11, 16));
+    }
+  }
+  if (!hhmm) return null;
+
+  const [hh, mm] = hhmm.split(':').map((n) => parseInt(n, 10));
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+
+  const dt = new Date(y, m - 1, d, hh, mm, 0, 0);
+  const ms = dt.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function formatDurationHm(totalMinutes: number): string {
+  const safe = Math.max(0, Math.round(totalMinutes));
+  const h = Math.floor(safe / 60);
+  const m = safe % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+function circularHourDistance(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 24;
+  return Math.min(diff, 24 - diff);
+}
+
+/**
+ * Predicts the next feeding time from the baby's past feeding rhythm and latest feed,
+ * paired with the existing calculated per-feed recommended milk volume (mL).
+ * - Clusters split/top-up logs within 45 min into a single feed session (start-to-start).
+ * - Uses valid inter-feed gaps (45 min to 10 hours) from recent history (14-day window, up to 30 gaps).
+ * - Prefers time-of-day matched rhythm (±3h around last feed's hour) blended 75/25 with overall recent median
+ *   when at least 3 time-of-day intervals exist; otherwise uses recent median or formula cadence fallback.
+ */
+export function computeNextFeedRecommendation(
+  records: RoutineRecord[],
+  recommendedFeedMl: number | null,
+  feedsPerDay: number = DEFAULT_MILK_FORMULA.feedsPerDay,
+  now: Date = new Date()
+): NextFeedRecommendation | null {
+  const feedTimestamps: number[] = [];
+
+  for (const r of records) {
+    const isFeed =
+      (r.emb_mL ?? 0) > 0 || (r.formula_mL ?? 0) > 0 || (r.feed_duration_min ?? 0) > 0;
+    if (!isFeed) continue;
+    const ts = parseRoutineRecordLocalTimestamp(r);
+    if (ts !== null) {
+      feedTimestamps.push(ts);
+    }
+  }
+
+  if (feedTimestamps.length === 0) return null;
+
+  feedTimestamps.sort((a, b) => a - b);
+
+  // Cluster feeds within 45 minutes into one session anchored at session start time
+  const CLUSTER_GAP_MS = 45 * 60_000;
+  const sessionStarts: number[] = [];
+  let prevRawTs = feedTimestamps[0];
+  sessionStarts.push(feedTimestamps[0]);
+
+  for (let i = 1; i < feedTimestamps.length; i++) {
+    const ts = feedTimestamps[i];
+    if (ts - prevRawTs >= CLUSTER_GAP_MS) {
+      sessionStarts.push(ts);
+    }
+    prevRawTs = ts;
+  }
+
+  const latestSessionMs = sessionStarts[sessionStarts.length - 1];
+  const latestSessionDate = new Date(latestSessionMs);
+
+  // Extract valid inter-feed intervals (45 min .. 10 hours)
+  const MIN_INTERVAL_MIN = 45;
+  const MAX_INTERVAL_MIN = 600;
+  const allIntervals: Array<{ startHour: number; diffMin: number; endMs: number }> = [];
+
+  for (let i = 1; i < sessionStarts.length; i++) {
+    const diffMin = (sessionStarts[i] - sessionStarts[i - 1]) / 60_000;
+    if (diffMin >= MIN_INTERVAL_MIN && diffMin <= MAX_INTERVAL_MIN) {
+      const startDate = new Date(sessionStarts[i - 1]);
+      const startHour = startDate.getHours() + startDate.getMinutes() / 60;
+      allIntervals.push({ startHour, diffMin, endMs: sessionStarts[i] });
+    }
+  }
+
+  const fourteenDaysMs = 14 * 86_400_000;
+  const recentWindow = allIntervals.filter((iv) => latestSessionMs - iv.endMs <= fourteenDaysMs);
+  const activePool = (recentWindow.length >= 3 ? recentWindow : allIntervals).slice(-30);
+
+  const safeFeedsPerDay =
+    Number.isFinite(feedsPerDay) && feedsPerDay > 0
+      ? feedsPerDay
+      : DEFAULT_MILK_FORMULA.feedsPerDay;
+
+  let rawIntervalMin: number;
+  let sampleCount: number;
+  let rhythmSource: NextFeedRecommendation['rhythmSource'];
+
+  if (activePool.length > 0) {
+    const allSorted = activePool.map((iv) => iv.diffMin).sort((a, b) => a - b);
+    const overallMedian = interpolateQuantile(allSorted, 0.5);
+
+    const lastHour = latestSessionDate.getHours() + latestSessionDate.getMinutes() / 60;
+    const sameWindow = activePool.filter(
+      (iv) => circularHourDistance(iv.startHour, lastHour) <= 3
+    );
+
+    if (sameWindow.length >= 3) {
+      const todSorted = sameWindow.map((iv) => iv.diffMin).sort((a, b) => a - b);
+      const todMedian = interpolateQuantile(todSorted, 0.5);
+      rawIntervalMin = todMedian * 0.75 + overallMedian * 0.25;
+      sampleCount = sameWindow.length;
+      rhythmSource = 'time-of-day';
+    } else {
+      rawIntervalMin = overallMedian;
+      sampleCount = activePool.length;
+      rhythmSource = 'recent-median';
+    }
+  } else {
+    rawIntervalMin = (24 / safeFeedsPerDay) * 60;
+    sampleCount = 0;
+    rhythmSource = 'formula-cadence';
+  }
+
+  const intervalMin = Math.max(MIN_INTERVAL_MIN, Math.round(rawIntervalMin / 5) * 5);
+  const nextFeedMs = latestSessionMs + intervalMin * 60_000;
+  const nextFeedDateObj = new Date(nextFeedMs);
+
+  const formatHHMM = (d: Date) =>
+    `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+  const recommendedDate = formatLocalDateYMD(nextFeedDateObj);
+  const recommendedTime = formatHHMM(nextFeedDateObj);
+  const lastFeedDate = formatLocalDateYMD(latestSessionDate);
+  const lastFeedTime = formatHHMM(latestSessionDate);
+
+  const todayStr = formatLocalDateYMD(now);
+  const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12, 0, 0, 0);
+  const tomorrowStr = formatLocalDateYMD(tomorrowDate);
+
+  const isToday = recommendedDate === todayStr;
+  const isTomorrow = recommendedDate === tomorrowStr;
+  const isDue = now.getTime() >= nextFeedMs && now.getTime() - latestSessionMs <= 24 * 3_600_000;
+
+  return {
+    recommendedTime,
+    recommendedDate,
+    isToday,
+    isTomorrow,
+    isDue,
+    intervalMin,
+    intervalLabel: formatDurationHm(intervalMin),
+    sampleCount,
+    rhythmSource,
+    lastFeedTime,
+    lastFeedDate,
+    recommendedMl: recommendedFeedMl,
+  };
+}
+
