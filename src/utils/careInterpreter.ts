@@ -409,7 +409,7 @@ export interface MilkFormulaConfig {
 export const DEFAULT_MILK_FORMULA: MilkFormulaConfig = {
   minMlPerKg: 150,
   maxMlPerKg: 200,
-  feedsPerDay: 7,
+  feedsPerDay: 6.5,
   targetRangePct: 80,
 };
 

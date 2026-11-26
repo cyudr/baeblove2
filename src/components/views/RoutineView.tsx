@@ -1325,9 +1325,9 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                   </div>
                   <input
                     type="number"
-                    min="1"
+                    min="0.5"
                     max="24"
-                    step="1"
+                    step="0.5"
                     value={feedsPerDayInput}
                     onChange={(e) => setFeedsPerDayInput(e.target.value)}
                     className="w-full px-3 py-2 text-xs font-mono bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500"
