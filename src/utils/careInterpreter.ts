@@ -659,33 +659,33 @@ export function formatDiaperLoad(count: number): string {
 export function getDiaperLoadBadgeClass(raw: unknown): string {
   const count = parseDiaperLoadCount(raw, 1);
   if (count <= 1) {
-    return 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border border-emerald-200/80 dark:border-emerald-800/60';
+    return 'text-emerald-700 dark:text-emerald-300 [text-shadow:0_0_10px_rgba(16,185,129,0.55)] dark:[text-shadow:0_0_12px_rgba(52,211,153,0.75)]';
   }
   if (count === 2) {
-    return 'bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200 border border-sky-300/80 dark:border-sky-800/70';
+    return 'text-sky-700 dark:text-sky-300 [text-shadow:0_0_10px_rgba(14,165,233,0.6)] dark:[text-shadow:0_0_12px_rgba(56,189,248,0.8)]';
   }
   if (count === 3) {
-    return 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300/80 dark:border-amber-800/70';
+    return 'text-amber-700 dark:text-amber-300 [text-shadow:0_0_10px_rgba(245,158,11,0.65)] dark:[text-shadow:0_0_12px_rgba(251,191,36,0.85)]';
   }
   if (count === 4) {
-    return 'bg-orange-100 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 border border-orange-300/80 dark:border-orange-800/70';
+    return 'text-orange-700 dark:text-orange-300 [text-shadow:0_0_10px_rgba(249,115,22,0.65)] dark:[text-shadow:0_0_12px_rgba(251,146,60,0.85)]';
   }
-  return 'bg-rose-100 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border border-rose-300/80 dark:border-rose-800/70';
+  return 'text-rose-700 dark:text-rose-300 [text-shadow:0_0_10px_rgba(244,63,94,0.65)] dark:[text-shadow:0_0_12px_rgba(251,113,133,0.85)]';
 }
 
 export function getFeedingMethodBadgeClass(raw: string | null | undefined): string {
   const normalized = normalizeFeedingMethod(raw);
   switch (normalized) {
     case 'bottle':
-      return 'bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200 border border-sky-300/80 dark:border-sky-800/70';
+      return 'text-sky-700 dark:text-sky-300 [text-shadow:0_0_10px_rgba(14,165,233,0.6)] dark:[text-shadow:0_0_12px_rgba(56,189,248,0.8)]';
     case 'latch':
-      return 'bg-rose-100 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border border-rose-300/80 dark:border-rose-800/70';
+      return 'text-rose-700 dark:text-rose-300 [text-shadow:0_0_10px_rgba(244,63,94,0.6)] dark:[text-shadow:0_0_12px_rgba(251,113,133,0.8)]';
     case 'cup':
-      return 'bg-violet-100 dark:bg-violet-950/60 text-violet-900 dark:text-violet-200 border border-violet-300/80 dark:border-violet-800/70';
+      return 'text-violet-700 dark:text-violet-300 [text-shadow:0_0_10px_rgba(139,92,246,0.6)] dark:[text-shadow:0_0_12px_rgba(167,139,250,0.85)]';
     case 'stringe':
-      return 'bg-teal-100 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 border border-teal-300/80 dark:border-teal-800/70';
+      return 'text-teal-700 dark:text-teal-300 [text-shadow:0_0_10px_rgba(20,184,166,0.6)] dark:[text-shadow:0_0_12px_rgba(45,212,191,0.8)]';
     default:
-      return 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 border border-indigo-300/80 dark:border-indigo-800/70';
+      return 'text-indigo-700 dark:text-indigo-300 [text-shadow:0_0_10px_rgba(99,102,241,0.6)] dark:[text-shadow:0_0_12px_rgba(129,140,248,0.8)]';
   }
 }
 
@@ -693,13 +693,13 @@ export function getDiaperBadgeClass(diaper: string | null | undefined): string {
   const kind = classifyDiaperValue(diaper ?? null);
   switch (kind) {
     case 'wet':
-      return 'bg-blue-100 dark:bg-blue-950/60 text-blue-900 dark:text-blue-200 border border-blue-300/80 dark:border-blue-800/70';
+      return 'text-blue-700 dark:text-blue-300 [text-shadow:0_0_10px_rgba(59,130,246,0.6)] dark:[text-shadow:0_0_12px_rgba(96,165,250,0.85)]';
     case 'dirty':
-      return 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300/80 dark:border-amber-800/70';
+      return 'text-amber-700 dark:text-amber-300 [text-shadow:0_0_10px_rgba(245,158,11,0.65)] dark:[text-shadow:0_0_12px_rgba(251,191,36,0.85)]';
     case 'mixed':
-      return 'bg-purple-100 dark:bg-purple-950/60 text-purple-900 dark:text-purple-200 border border-purple-300/80 dark:border-purple-800/70';
+      return 'text-purple-700 dark:text-purple-300 [text-shadow:0_0_10px_rgba(168,85,247,0.6)] dark:[text-shadow:0_0_12px_rgba(192,132,252,0.85)]';
     default:
-      return 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200 border border-stone-200 dark:border-stone-700';
+      return 'text-stone-600 dark:text-stone-300 [text-shadow:0_0_8px_rgba(120,113,108,0.35)] dark:[text-shadow:0_0_10px_rgba(168,162,158,0.45)]';
   }
 }
 
@@ -707,15 +707,15 @@ export function getStoolBadgeClass(raw: string | null | undefined): string {
   const parsed = parseStoolValue(raw);
   switch (parsed.type) {
     case 'M':
-      return 'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-400/80 dark:border-zinc-600';
+      return 'text-zinc-800 dark:text-zinc-200 [text-shadow:0_0_10px_rgba(63,63,70,0.55)] dark:[text-shadow:0_0_12px_rgba(212,212,216,0.65)]';
     case 'G':
-      return 'bg-green-100 dark:bg-green-950/60 text-green-900 dark:text-green-200 border border-green-300/80 dark:border-green-800/70';
+      return 'text-green-700 dark:text-green-300 [text-shadow:0_0_10px_rgba(34,197,94,0.6)] dark:[text-shadow:0_0_12px_rgba(74,222,128,0.8)]';
     case 'GY':
-      return 'bg-lime-100 dark:bg-lime-950/60 text-lime-900 dark:text-lime-200 border border-lime-300/80 dark:border-lime-800/70';
+      return 'text-lime-700 dark:text-lime-300 [text-shadow:0_0_10px_rgba(132,204,22,0.65)] dark:[text-shadow:0_0_12px_rgba(163,230,53,0.85)]';
     case 'Y':
-      return 'bg-yellow-100 dark:bg-yellow-950/60 text-yellow-900 dark:text-yellow-200 border border-yellow-300/80 dark:border-yellow-800/70';
+      return 'text-yellow-700 dark:text-yellow-300 [text-shadow:0_0_10px_rgba(234,179,8,0.7)] dark:[text-shadow:0_0_12px_rgba(250,204,21,0.85)]';
     default:
-      return 'bg-orange-100 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 border border-orange-300/80 dark:border-orange-800/70';
+      return 'text-orange-700 dark:text-orange-300 [text-shadow:0_0_10px_rgba(249,115,22,0.6)] dark:[text-shadow:0_0_12px_rgba(251,146,60,0.8)]';
   }
 }
 
@@ -1390,8 +1390,8 @@ export function interpretRoutineTable(
   if (todayBucket.totalDiapers > 0) {
     const hydrationNote =
       effectiveWetCount >= 6
-        ? 'Healthy hydration output (≥6 wet/mixed diapers).'
-        : 'Continue monitoring wet diaper output toward the typical ≥6/day hydration benchmark.';
+        ? `Healthy hydration output (${effectiveWetCount}/6 wet + mixed diapers).`
+        : `Hydration output is ${effectiveWetCount}/6 wet + mixed diapers — continue monitoring toward the ≥6 wet + mixed/day benchmark.`;
     insights.push(
       `${hasToday ? 'Today' : focusDate}: ${todayBucket.totalDiapers} diaper change${todayBucket.totalDiapers === 1 ? '' : 's'} logged (${todayBucket.wetDiapers} wet, ${todayBucket.dirtyDiapers} dirty, ${todayBucket.mixedDiapers} mixed). ${hydrationNote}`
     );

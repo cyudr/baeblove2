@@ -24,13 +24,7 @@ export const DiaperLoadControl: React.FC<DiaperLoadControlProps> = ({ value, onC
   };
 
   return (
-    <div
-      className={`flex items-center w-full min-w-0 rounded-xl border transition-colors overflow-hidden ${
-        count > 1
-          ? getDiaperLoadBadgeClass(count)
-          : 'bg-stone-50 dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white'
-      }`}
-    >
+    <div className="flex items-center w-full min-w-0 rounded-xl border transition-colors overflow-hidden bg-stone-50 dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white">
       <button
         type="button"
         onClick={handleDecrement}
@@ -42,7 +36,9 @@ export const DiaperLoadControl: React.FC<DiaperLoadControlProps> = ({ value, onC
         <Minus className="w-3.5 h-3.5" />
       </button>
 
-      <span className="flex-1 min-w-0 px-2 py-2 text-center text-xs font-mono font-bold select-none">
+      <span
+        className={`flex-1 min-w-0 px-2 py-2 text-center text-xs font-mono font-bold select-none ${getDiaperLoadBadgeClass(count)}`}
+      >
         {display}
       </span>
 

@@ -582,7 +582,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     <td className="py-3 px-4 whitespace-nowrap">
                       {methodLabel ? (
                         <span
-                          className={`px-2 py-0.5 rounded-lg font-semibold ${getFeedingMethodBadgeClass(row.feeding_method)}`}
+                          className={`inline-block font-semibold ${getFeedingMethodBadgeClass(row.feeding_method)}`}
                         >
                           {methodLabel}
                         </span>
@@ -593,7 +593,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     <td className="py-3 px-4 whitespace-nowrap">
                       {row.diaper ? (
                         <span
-                          className={`px-2 py-0.5 rounded-lg font-semibold ${getDiaperBadgeClass(row.diaper)}`}
+                          className={`inline-block font-semibold ${getDiaperBadgeClass(row.diaper)}`}
                         >
                           {row.diaper}
                         </span>
@@ -604,7 +604,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     <td className="py-3 px-4 whitespace-nowrap">
                       {row['diaper load'] !== null ? (
                         <span
-                          className={`px-2 py-0.5 rounded-lg font-mono font-semibold ${getDiaperLoadBadgeClass(row['diaper load'])}`}
+                          className={`inline-block font-mono font-bold ${getDiaperLoadBadgeClass(row['diaper load'])}`}
                         >
                           {formatDiaperLoad(row['diaper load'])}
                         </span>
@@ -615,7 +615,7 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     <td className="py-3 px-4 whitespace-nowrap">
                       {row.stool ? (
                         <span
-                          className={`px-2 py-0.5 rounded-lg font-mono font-semibold ${getStoolBadgeClass(row.stool)}`}
+                          className={`inline-block font-mono font-bold ${getStoolBadgeClass(row.stool)}`}
                         >
                           {row.stool}
                         </span>

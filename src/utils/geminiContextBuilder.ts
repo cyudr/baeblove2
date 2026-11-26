@@ -196,7 +196,7 @@ export function buildGeminiSystemInstruction(input: GeminiContextInput): string 
       `Latest Day (${tb.date}): totalMilk=${tb.totalMl}mL ` +
         `(EBM=${tb.ebmMl}mL, Formula=${tb.formulaMl}mL), ` +
         `feeds=${tb.feedCount}, avgDuration=${tb.avgDurationMin ?? 'n/a'}min, ` +
-        `diapers=${tb.totalDiapers} (wet=${tb.wetDiapers}, dirty=${tb.dirtyDiapers}, mixed=${tb.mixedDiapers})` +
+        `diapers=${tb.totalDiapers} (wet=${tb.wetDiapers}, mixed=${tb.mixedDiapers}, wetPlusMixed=${tb.wetDiapers + tb.mixedDiapers}/6 hydration benchmark, dirty=${tb.dirtyDiapers})` +
         `${routineSummary.targetMinMl !== null && routineSummary.targetMaxMl !== null ? `, estimatedDailyTarget=${routineSummary.targetMinMl}–${routineSummary.targetMaxMl}mL` : ''}` +
         `${routineSummary.estimatedTargetMl !== null ? ` (target=${routineSummary.estimatedTargetMl}mL)` : ''}`
     );
@@ -205,7 +205,7 @@ export function buildGeminiSystemInstruction(input: GeminiContextInput): string 
       lines.push('Recent daily totals:');
       for (const day of routineSummary.dailySeries) {
         lines.push(
-          `- ${day.date}: total=${day.totalMl}mL (EBM=${day.ebmMl}mL, Formula=${day.formulaMl}mL), feeds=${day.feedCount}, diapers=${day.totalDiapers} (wet=${day.wetDiapers}, dirty=${day.dirtyDiapers}, mixed=${day.mixedDiapers})`
+          `- ${day.date}: total=${day.totalMl}mL (EBM=${day.ebmMl}mL, Formula=${day.formulaMl}mL), feeds=${day.feedCount}, diapers=${day.totalDiapers} (wet=${day.wetDiapers}, mixed=${day.mixedDiapers}, wetPlusMixed=${day.wetDiapers + day.mixedDiapers}, dirty=${day.dirtyDiapers})`
         );
       }
     }

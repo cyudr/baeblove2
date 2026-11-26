@@ -1278,13 +1278,23 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
               <span className="font-semibold text-sky-700 dark:text-sky-400">
                 {hoveredDaily.totalDiapers} change{hoveredDaily.totalDiapers === 1 ? '' : 's'}
               </span>
+              <span>·</span>
+              <span
+                className={`font-semibold ${
+                  hoveredDaily.wetDiapers + hoveredDaily.mixedDiapers >= 6
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-amber-700 dark:text-amber-400'
+                }`}
+              >
+                {hoveredDaily.wetDiapers + hoveredDaily.mixedDiapers}/6 wet+mixed
+              </span>
               <span>
                 (Wet {hoveredDaily.wetDiapers}, Mixed {hoveredDaily.mixedDiapers}, Dirty{' '}
                 {hoveredDaily.dirtyDiapers})
               </span>
             </>
           ) : (
-            <span>Hover or tap a day for Wet / Mixed / Dirty counts</span>
+            <span>Hover or tap a day for Wet / Mixed / Dirty &amp; hydration counts</span>
           )
         ) : hoveredPeriod ? (
           hoveredPeriod.diaperStats ? (
@@ -1297,6 +1307,20 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
               <span className="font-semibold text-sky-700 dark:text-sky-400">
                 Med {formatNum(hoveredPeriod.diaperStats.median)}/d
               </span>
+              {hoveredPeriod.avgWetPerDay !== null && (
+                <>
+                  <span>·</span>
+                  <span
+                    className={`font-semibold ${
+                      hoveredPeriod.avgWetPerDay >= 6
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : 'text-amber-700 dark:text-amber-400'
+                    }`}
+                  >
+                    Avg {formatNum(hoveredPeriod.avgWetPerDay)} wet+mixed/d
+                  </span>
+                </>
+              )}
               <span>
                 IQR {formatNum(hoveredPeriod.diaperStats.q1)}–
                 {formatNum(hoveredPeriod.diaperStats.q3)}
@@ -1336,7 +1360,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
               style={{
                 top: `${16 + (1 - Math.min(1, 6 / dailyAxisMax)) * 96}px`,
               }}
-              title="Pediatric hydration benchmark: 6 wet diapers/day"
+              title="Pediatric hydration benchmark: ≥6 wet + mixed diapers/day"
             />
 
             {dailySeries.map((bucket) => {
@@ -1353,6 +1377,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
               const dayBadge = getDayIndexLabel(bucket.date, birthDate);
               const isSelected = hoveredKey === bucket.date;
               const showTopValue = dailySeries.length <= 14 || isSelected;
+              const effectiveWet = bucket.wetDiapers + bucket.mixedDiapers;
               return (
                 <div
                   key={bucket.date}
@@ -1364,7 +1389,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
                   className={`relative z-10 flex-1 min-w-[30px] flex flex-col items-center rounded-lg px-0.5 transition-colors cursor-pointer ${
                     isSelected ? 'bg-sky-50/70 dark:bg-sky-950/30' : ''
                   }`}
-                  title={`${bucket.date}${dayBadge ? ` (${dayBadge.full})` : ''}: ${bucket.totalDiapers} changes (Wet ${bucket.wetDiapers}, Mixed ${bucket.mixedDiapers}, Dirty ${bucket.dirtyDiapers})`}
+                  title={`${bucket.date}${dayBadge ? ` (${dayBadge.full})` : ''}: ${bucket.totalDiapers} changes (${effectiveWet}/6 wet+mixed — Wet ${bucket.wetDiapers}, Mixed ${bucket.mixedDiapers}, Dirty ${bucket.dirtyDiapers})`}
                 >
                   <span className="text-[9px] font-mono tabular-nums font-semibold text-stone-500 dark:text-stone-400 leading-none h-3 mb-1 flex items-end">
                     {showTopValue && bucket.totalDiapers > 0 ? bucket.totalDiapers : ''}
@@ -1472,7 +1497,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
             </span>
           </div>
         )}
-        <span>Benchmark: ≥6 wet/day</span>
+        <span>Benchmark: ≥6 wet + mixed/day</span>
       </div>
     </div>
   );
@@ -1751,8 +1776,9 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
                       ? 'text-emerald-700 dark:text-emerald-400'
                       : 'text-stone-500 dark:text-stone-400'
                   }`}
+                  title="Counts both Wet and Mixed diapers toward the ≥6/day hydration benchmark"
                 >
-                  {wetPlusMixed}/6 wet
+                  {wetPlusMixed}/6 wet+mixed
                 </span>
               </div>
               <div className="text-3xl font-black font-mono tabular-nums text-stone-900 dark:text-white mt-2">
@@ -1788,7 +1814,7 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
             </div>
 
             <div className="mt-4 pt-2.5 border-t border-stone-100 dark:border-stone-800 text-[10px] text-stone-500 dark:text-stone-400">
-              Pediatric hydration benchmark: ≥6 wet diapers/day
+              Pediatric hydration benchmark: ≥6 wet + mixed diapers/day
             </div>
           </div>
 
