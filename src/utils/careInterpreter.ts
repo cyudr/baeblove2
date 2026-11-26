@@ -673,6 +673,52 @@ export function getDiaperLoadBadgeClass(raw: unknown): string {
   return 'bg-rose-100 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border border-rose-300/80 dark:border-rose-800/70';
 }
 
+export function getFeedingMethodBadgeClass(raw: string | null | undefined): string {
+  const normalized = normalizeFeedingMethod(raw);
+  switch (normalized) {
+    case 'bottle':
+      return 'bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200 border border-sky-300/80 dark:border-sky-800/70';
+    case 'latch':
+      return 'bg-rose-100 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border border-rose-300/80 dark:border-rose-800/70';
+    case 'cup':
+      return 'bg-violet-100 dark:bg-violet-950/60 text-violet-900 dark:text-violet-200 border border-violet-300/80 dark:border-violet-800/70';
+    case 'stringe':
+      return 'bg-teal-100 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 border border-teal-300/80 dark:border-teal-800/70';
+    default:
+      return 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 border border-indigo-300/80 dark:border-indigo-800/70';
+  }
+}
+
+export function getDiaperBadgeClass(diaper: string | null | undefined): string {
+  const kind = classifyDiaperValue(diaper ?? null);
+  switch (kind) {
+    case 'wet':
+      return 'bg-blue-100 dark:bg-blue-950/60 text-blue-900 dark:text-blue-200 border border-blue-300/80 dark:border-blue-800/70';
+    case 'dirty':
+      return 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300/80 dark:border-amber-800/70';
+    case 'mixed':
+      return 'bg-purple-100 dark:bg-purple-950/60 text-purple-900 dark:text-purple-200 border border-purple-300/80 dark:border-purple-800/70';
+    default:
+      return 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200 border border-stone-200 dark:border-stone-700';
+  }
+}
+
+export function getStoolBadgeClass(raw: string | null | undefined): string {
+  const parsed = parseStoolValue(raw);
+  switch (parsed.type) {
+    case 'M':
+      return 'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-400/80 dark:border-zinc-600';
+    case 'G':
+      return 'bg-green-100 dark:bg-green-950/60 text-green-900 dark:text-green-200 border border-green-300/80 dark:border-green-800/70';
+    case 'GY':
+      return 'bg-lime-100 dark:bg-lime-950/60 text-lime-900 dark:text-lime-200 border border-lime-300/80 dark:border-lime-800/70';
+    case 'Y':
+      return 'bg-yellow-100 dark:bg-yellow-950/60 text-yellow-900 dark:text-yellow-200 border border-yellow-300/80 dark:border-yellow-800/70';
+    default:
+      return 'bg-orange-100 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 border border-orange-300/80 dark:border-orange-800/70';
+  }
+}
+
 export function normalizeDiaperLoad(raw: unknown, fallback = ''): string {
   if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
     return formatDiaperLoad(raw);

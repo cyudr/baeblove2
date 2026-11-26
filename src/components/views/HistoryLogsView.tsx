@@ -6,9 +6,12 @@ import {
   doesRecordMatchProfile,
   formatDiaperLoad,
   formatFeedingMethodLabel,
+  getDiaperBadgeClass,
   getDiaperLoadBadgeClass,
+  getFeedingMethodBadgeClass,
   getGrowthRecordDate,
   getRoutineRecordDate,
+  getStoolBadgeClass,
   normalizeRoutineTimeHHMM,
 } from '../../utils/careInterpreter';
 import {
@@ -578,7 +581,9 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       {methodLabel ? (
-                        <span className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200 font-semibold">
+                        <span
+                          className={`px-2 py-0.5 rounded-lg font-semibold ${getFeedingMethodBadgeClass(row.feeding_method)}`}
+                        >
                           {methodLabel}
                         </span>
                       ) : (
@@ -587,7 +592,9 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       {row.diaper ? (
-                        <span className="px-2 py-0.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200 font-semibold">
+                        <span
+                          className={`px-2 py-0.5 rounded-lg font-semibold ${getDiaperBadgeClass(row.diaper)}`}
+                        >
                           {row.diaper}
                         </span>
                       ) : (
@@ -607,7 +614,9 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       {row.stool ? (
-                        <span className="px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 font-mono font-semibold">
+                        <span
+                          className={`px-2 py-0.5 rounded-lg font-mono font-semibold ${getStoolBadgeClass(row.stool)}`}
+                        >
                           {row.stool}
                         </span>
                       ) : (

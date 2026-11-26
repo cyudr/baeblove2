@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   FEEDING_METHOD_OPTIONS,
+  getFeedingMethodBadgeClass,
   normalizeFeedingMethod,
 } from '../../utils/careInterpreter';
 
@@ -22,7 +23,11 @@ export const FeedingMethodSelect: React.FC<FeedingMethodSelectProps> = ({
       aria-label="Feeding method"
       value={normalized}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white rounded-xl focus:outline-hidden focus:border-emerald-500 cursor-pointer"
+      className={`w-full min-w-0 px-2.5 sm:px-3 py-2 text-xs rounded-xl focus:outline-hidden focus:border-emerald-500 cursor-pointer transition-colors ${
+        normalized
+          ? `font-semibold ${getFeedingMethodBadgeClass(normalized)}`
+          : 'bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white'
+      }`}
     >
       <option value="" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">
         None
