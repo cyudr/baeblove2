@@ -1,6 +1,10 @@
 import React from 'react';
 import { Minus, Plus } from 'lucide-react';
-import { formatDiaperLoad, parseDiaperLoadCount } from '../../utils/careInterpreter';
+import {
+  formatDiaperLoad,
+  getDiaperLoadBadgeClass,
+  parseDiaperLoadCount,
+} from '../../utils/careInterpreter';
 
 interface DiaperLoadControlProps {
   value: string;
@@ -23,7 +27,7 @@ export const DiaperLoadControl: React.FC<DiaperLoadControlProps> = ({ value, onC
     <div
       className={`flex items-center w-full min-w-0 rounded-xl border transition-colors overflow-hidden ${
         count > 1
-          ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+          ? getDiaperLoadBadgeClass(count)
           : 'bg-stone-50 dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white'
       }`}
     >

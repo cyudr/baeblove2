@@ -6,6 +6,7 @@ import {
   doesRecordMatchProfile,
   formatDiaperLoad,
   formatFeedingMethodLabel,
+  getDiaperLoadBadgeClass,
   getGrowthRecordDate,
   getRoutineRecordDate,
   normalizeRoutineTimeHHMM,
@@ -595,7 +596,9 @@ export const HistoryLogsView: React.FC<HistoryLogsViewProps> = ({
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       {row['diaper load'] !== null ? (
-                        <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 font-mono font-semibold">
+                        <span
+                          className={`px-2 py-0.5 rounded-lg font-mono font-semibold ${getDiaperLoadBadgeClass(row['diaper load'])}`}
+                        >
                           {formatDiaperLoad(row['diaper load'])}
                         </span>
                       ) : (

@@ -656,6 +656,23 @@ export function formatDiaperLoad(count: number): string {
   return `x${safe}`;
 }
 
+export function getDiaperLoadBadgeClass(raw: unknown): string {
+  const count = parseDiaperLoadCount(raw, 1);
+  if (count <= 1) {
+    return 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border border-emerald-200/80 dark:border-emerald-800/60';
+  }
+  if (count === 2) {
+    return 'bg-sky-100 dark:bg-sky-950/60 text-sky-900 dark:text-sky-200 border border-sky-300/80 dark:border-sky-800/70';
+  }
+  if (count === 3) {
+    return 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300/80 dark:border-amber-800/70';
+  }
+  if (count === 4) {
+    return 'bg-orange-100 dark:bg-orange-950/60 text-orange-900 dark:text-orange-200 border border-orange-300/80 dark:border-orange-800/70';
+  }
+  return 'bg-rose-100 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border border-rose-300/80 dark:border-rose-800/70';
+}
+
 export function normalizeDiaperLoad(raw: unknown, fallback = ''): string {
   if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
     return formatDiaperLoad(raw);
