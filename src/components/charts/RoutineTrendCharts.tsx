@@ -175,8 +175,10 @@ function computePeriodRecommendedMl(
   effectiveRateMlPerKg: number | null,
   resolveWeight: (dateStr: string) => ResolvedDailyWeight | null,
   focusDate?: string,
-  birthDate?: string | null
-): { targetMl: number; avgWeightKg: number } | null {
+  birthDate?: string | null,
+  minRateMlPerKg?: number | null,
+  maxRateMlPerKg?: number | null
+): { targetMl: number; minMl: number | null; maxMl: number | null; avgWeightKg: number } | null {
   if (!effectiveRateMlPerKg || effectiveRateMlPerKg <= 0) return null;
 
   const eligibleDates = getPeriodEligibleMilkDates(granularity, periodKey, focusDate, birthDate);
@@ -195,6 +197,10 @@ function computePeriodRecommendedMl(
     Math.round((weights.reduce((sum, w) => sum + w, 0) / weights.length) * 1000) / 1000;
   return {
     targetMl: Math.round(avgWeightKg * effectiveRateMlPerKg),
+    minMl:
+      minRateMlPerKg && minRateMlPerKg > 0 ? Math.round(avgWeightKg * minRateMlPerKg) : null,
+    maxMl:
+      maxRateMlPerKg && maxRateMlPerKg > 0 ? Math.round(avgWeightKg * maxRateMlPerKg) : null,
     avgWeightKg,
   };
 }
@@ -321,8 +327,12 @@ interface SvgBoxPlotProps {
   axisMax: number;
   unitLabel: string;
   accent: 'emerald' | 'sky';
-  referenceLine?: { value: number; label: string } | null;
+  referenceLine?: { value: number; label: string; color?: 'emerald' | 'pink' } | null;
   referencePoints?: (number | null)[];
+  minReferencePoints?: (number | null)[];
+  maxReferencePoints?: (number | null)[];
+  minReferenceLine?: number | null;
+  maxReferenceLine?: number | null;
   activeKey: string | null;
   onHoverKey: (key: string | null) => void;
 }
@@ -336,6 +346,10 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
   accent,
   referenceLine,
   referencePoints,
+  minReferencePoints,
+  maxReferencePoints,
+  minReferenceLine,
+  maxReferenceLine,
   activeKey,
   onHoverKey,
 }) => {
@@ -389,13 +403,13 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
       ? 'fill-emerald-700/80 dark:fill-emerald-400/80'
       : 'fill-sky-700/80 dark:fill-sky-400/80';
 
-  const referenceCoords = useMemo(() => {
-    if (!referencePoints || referencePoints.length === 0) return [];
-    const pts: { idx: number; cx: number; y: number; value: number }[] = [];
+  const buildRefSeries = (points?: (number | null)[]) => {
+    if (!points || points.length === 0) return { coords: [] as { idx: number; cx: number; y: number; value: number }[], pathD: '' };
+    const coords: { idx: number; cx: number; y: number; value: number }[] = [];
     for (let i = 0; i < periods.length; i++) {
-      const val = referencePoints[i];
+      const val = points[i];
       if (val !== null && val !== undefined && val > 0) {
-        pts.push({
+        coords.push({
           idx: i,
           cx: padLeft + i * colStep + colStep / 2,
           y: yOf(val),
@@ -403,20 +417,37 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
         });
       }
     }
-    return pts;
-  }, [referencePoints, periods.length, colStep, axisMax]);
-
-  const referencePathD = useMemo(() => {
-    if (referenceCoords.length === 0) return '';
-    if (referenceCoords.length === 1) {
-      const p = referenceCoords[0];
+    if (coords.length === 0) return { coords, pathD: '' };
+    if (coords.length === 1) {
+      const p = coords[0];
       const half = Math.max(12, colStep * 0.36);
-      return `M ${(p.cx - half).toFixed(1)} ${p.y.toFixed(1)} L ${(p.cx + half).toFixed(1)} ${p.y.toFixed(1)}`;
+      return {
+        coords,
+        pathD: `M ${(p.cx - half).toFixed(1)} ${p.y.toFixed(1)} L ${(p.cx + half).toFixed(1)} ${p.y.toFixed(1)}`,
+      };
     }
-    return referenceCoords
-      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.cx.toFixed(1)} ${p.y.toFixed(1)}`)
-      .join(' ');
-  }, [referenceCoords, colStep]);
+    return {
+      coords,
+      pathD: coords
+        .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.cx.toFixed(1)} ${p.y.toFixed(1)}`)
+        .join(' '),
+    };
+  };
+
+  const { coords: referenceCoords, pathD: referencePathD } = useMemo(
+    () => buildRefSeries(referencePoints),
+    [referencePoints, periods.length, colStep, axisMax]
+  );
+
+  const { coords: minRefCoords, pathD: minRefPathD } = useMemo(
+    () => buildRefSeries(minReferencePoints),
+    [minReferencePoints, periods.length, colStep, axisMax]
+  );
+
+  const { coords: maxRefCoords, pathD: maxRefPathD } = useMemo(
+    () => buildRefSeries(maxReferencePoints),
+    [maxReferencePoints, periods.length, colStep, axisMax]
+  );
 
   return (
     <div ref={scrollRef} className="w-full overflow-x-auto pb-1">
@@ -452,6 +483,38 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
           );
         })}
 
+        {/* Optional constant min/max pink dotted benchmark lines */}
+        {!minRefPathD &&
+          minReferenceLine &&
+          minReferenceLine > 0 &&
+          minReferenceLine <= axisMax && (
+            <line
+              x1={padLeft}
+              x2={minSvgWidth - padRight}
+              y1={yOf(minReferenceLine)}
+              y2={yOf(minReferenceLine)}
+              className="stroke-pink-500/80 dark:stroke-pink-400/80"
+              strokeWidth={1.35}
+              strokeDasharray="2 3"
+              strokeLinecap="round"
+            />
+          )}
+        {!maxRefPathD &&
+          maxReferenceLine &&
+          maxReferenceLine > 0 &&
+          maxReferenceLine <= axisMax && (
+            <line
+              x1={padLeft}
+              x2={minSvgWidth - padRight}
+              y1={yOf(maxReferenceLine)}
+              y2={yOf(maxReferenceLine)}
+              className="stroke-pink-500/80 dark:stroke-pink-400/80"
+              strokeWidth={1.35}
+              strokeDasharray="2 3"
+              strokeLinecap="round"
+            />
+          )}
+
         {/* Optional constant benchmark/target dashed line */}
         {!referencePathD &&
           referenceLine &&
@@ -463,8 +526,12 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
                 x2={minSvgWidth - padRight}
                 y1={yOf(referenceLine.value)}
                 y2={yOf(referenceLine.value)}
-                className="stroke-emerald-500/70 dark:stroke-emerald-400/60"
-                strokeWidth={1.25}
+                className={
+                  referenceLine.color === 'pink'
+                    ? 'stroke-pink-500/80 dark:stroke-pink-400/80'
+                    : 'stroke-emerald-500/70 dark:stroke-emerald-400/60'
+                }
+                strokeWidth={1.35}
                 strokeDasharray="4 3"
               />
             </g>
@@ -607,6 +674,60 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
           );
         })}
 
+        {/* Dynamic pink dotted min & max recommended lines across periods */}
+        {(minRefPathD || maxRefPathD) && (
+          <g className="pointer-events-none">
+            {minRefPathD && (
+              <path
+                d={minRefPathD}
+                fill="none"
+                className="stroke-pink-500/85 dark:stroke-pink-400/85"
+                strokeWidth={1.45}
+                strokeDasharray="2 3"
+                strokeLinecap="round"
+              />
+            )}
+            {maxRefPathD && (
+              <path
+                d={maxRefPathD}
+                fill="none"
+                className="stroke-pink-500/85 dark:stroke-pink-400/85"
+                strokeWidth={1.45}
+                strokeDasharray="2 3"
+                strokeLinecap="round"
+              />
+            )}
+            {minRefCoords.map((pt) => {
+              const period = periods[pt.idx];
+              const isHovered = period && activeKey === period.key;
+              return (
+                <circle
+                  key={`min-ref-${pt.idx}`}
+                  cx={pt.cx}
+                  cy={pt.y}
+                  r={isHovered ? 2.6 : 1.7}
+                  className="fill-pink-500 dark:fill-pink-400 stroke-white dark:stroke-stone-900"
+                  strokeWidth={0.9}
+                />
+              );
+            })}
+            {maxRefCoords.map((pt) => {
+              const period = periods[pt.idx];
+              const isHovered = period && activeKey === period.key;
+              return (
+                <circle
+                  key={`max-ref-${pt.idx}`}
+                  cx={pt.cx}
+                  cy={pt.y}
+                  r={isHovered ? 2.6 : 1.7}
+                  className="fill-pink-500 dark:fill-pink-400 stroke-white dark:stroke-stone-900"
+                  strokeWidth={0.9}
+                />
+              );
+            })}
+          </g>
+        )}
+
         {/* Dynamic green dotted recommended line across periods (based on daily weights) */}
         {referencePathD && (
           <g className="pointer-events-none">
@@ -641,6 +762,10 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
 interface FeedingVolumeTrendChartProps {
   records: RoutineRecord[];
   estimatedTargetMl?: number | null;
+  targetMinMl?: number | null;
+  targetMaxMl?: number | null;
+  minRateMlPerKg?: number | null;
+  maxRateMlPerKg?: number | null;
   effectiveTargetMlPerKg?: number | null;
   focusDate?: string;
   birthDate?: string | null;
@@ -650,6 +775,10 @@ interface FeedingVolumeTrendChartProps {
 export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = ({
   records,
   estimatedTargetMl = null,
+  targetMinMl = null,
+  targetMaxMl = null,
+  minRateMlPerKg = null,
+  maxRateMlPerKg = null,
   effectiveTargetMlPerKg = null,
   focusDate,
   birthDate = null,
@@ -703,17 +832,41 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
         if (resolved && resolved.weightKg > 0) {
           return {
             targetMl: Math.round(resolved.weightKg * effectiveTargetMlPerKg),
+            minMl:
+              minRateMlPerKg && minRateMlPerKg > 0
+                ? Math.round(resolved.weightKg * minRateMlPerKg)
+                : null,
+            maxMl:
+              maxRateMlPerKg && maxRateMlPerKg > 0
+                ? Math.round(resolved.weightKg * maxRateMlPerKg)
+                : null,
             weightKg: resolved.weightKg,
             isExactWeight: resolved.isExact,
           };
         }
       }
       if (estimatedTargetMl && estimatedTargetMl > 0) {
-        return { targetMl: estimatedTargetMl, weightKg: null, isExactWeight: false };
+        return {
+          targetMl: estimatedTargetMl,
+          minMl: targetMinMl && targetMinMl > 0 ? targetMinMl : null,
+          maxMl: targetMaxMl && targetMaxMl > 0 ? targetMaxMl : null,
+          weightKg: null,
+          isExactWeight: false,
+        };
       }
       return null;
     });
-  }, [dailySeries, birthDate, resolveWeightForDate, effectiveTargetMlPerKg, estimatedTargetMl]);
+  }, [
+    dailySeries,
+    birthDate,
+    resolveWeightForDate,
+    effectiveTargetMlPerKg,
+    minRateMlPerKg,
+    maxRateMlPerKg,
+    estimatedTargetMl,
+    targetMinMl,
+    targetMaxMl,
+  ]);
 
   const periodTargets = useMemo(() => {
     if (granularity === 'daily') return [];
@@ -734,12 +887,19 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
           effectiveTargetMlPerKg,
           resolveWeightForDate,
           focusDate,
-          birthDate
+          birthDate,
+          minRateMlPerKg,
+          maxRateMlPerKg
         );
         if (computed) return computed;
       }
       if (estimatedTargetMl && estimatedTargetMl > 0) {
-        return { targetMl: estimatedTargetMl, avgWeightKg: null as number | null };
+        return {
+          targetMl: estimatedTargetMl,
+          minMl: targetMinMl && targetMinMl > 0 ? targetMinMl : null,
+          maxMl: targetMaxMl && targetMaxMl > 0 ? targetMaxMl : null,
+          avgWeightKg: null as number | null,
+        };
       }
       return null;
     });
@@ -749,13 +909,20 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
     birthDate,
     resolveWeightForDate,
     effectiveTargetMlPerKg,
+    minRateMlPerKg,
+    maxRateMlPerKg,
     focusDate,
     estimatedTargetMl,
+    targetMinMl,
+    targetMaxMl,
   ]);
 
   const dailyAxisMax = useMemo(() => {
     const maxData = Math.max(0, ...dailySeries.map((d) => d.totalMl));
-    const maxTarget = Math.max(0, ...dailyTargets.map((t) => t?.targetMl ?? 0));
+    const maxTarget = Math.max(
+      0,
+      ...dailyTargets.map((t) => Math.max(t?.targetMl ?? 0, t?.maxMl ?? 0))
+    );
     return computeNiceAxisMax(Math.max(maxData, maxTarget), 200);
   }, [dailySeries, dailyTargets]);
 
@@ -763,19 +930,19 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
     const maxVal = Math.max(
       0,
       ...periodBuckets.map((p) => p.milkStats?.max ?? 0),
-      ...periodTargets.map((t) => t?.targetMl ?? 0),
-      !birthDate ? (estimatedTargetMl ?? 0) : 0
+      ...periodTargets.map((t) => Math.max(t?.targetMl ?? 0, t?.maxMl ?? 0)),
+      !birthDate ? Math.max(estimatedTargetMl ?? 0, targetMaxMl ?? 0) : 0
     );
     return computeNiceAxisMax(maxVal, 200);
-  }, [periodBuckets, periodTargets, estimatedTargetMl, birthDate]);
+  }, [periodBuckets, periodTargets, estimatedTargetMl, targetMaxMl, birthDate]);
 
-  const dailyRecommendedPath = useMemo(() => {
+  const buildDailyOverlayPath = (getValue: (idx: number) => number | null | undefined) => {
     const pts: { x: number; y: number; idx: number }[] = [];
     for (let i = 0; i < dailyTargets.length; i++) {
-      const t = dailyTargets[i];
-      if (!t || t.targetMl <= 0) continue;
+      const val = getValue(i);
+      if (val === null || val === undefined || val <= 0) continue;
       const x = (i + 0.5) * 100;
-      const clamped = Math.max(0, Math.min(dailyAxisMax, t.targetMl));
+      const clamped = Math.max(0, Math.min(dailyAxisMax, val));
       const y = 100 - (clamped / dailyAxisMax) * 100;
       pts.push({ x, y, idx: i });
     }
@@ -787,7 +954,31 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
     return pts
       .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(2)}`)
       .join(' ');
-  }, [dailyTargets, dailyAxisMax]);
+  };
+
+  const dailyRecommendedPath = useMemo(
+    () => buildDailyOverlayPath((i) => dailyTargets[i]?.targetMl),
+    [dailyTargets, dailyAxisMax]
+  );
+
+  const dailyMinPath = useMemo(
+    () => buildDailyOverlayPath((i) => dailyTargets[i]?.minMl),
+    [dailyTargets, dailyAxisMax]
+  );
+
+  const dailyMaxPath = useMemo(
+    () => buildDailyOverlayPath((i) => dailyTargets[i]?.maxMl),
+    [dailyTargets, dailyAxisMax]
+  );
+
+  const hasMinMaxBounds = useMemo(() => {
+    if (granularity === 'daily') {
+      return Boolean(dailyMinPath || dailyMaxPath);
+    }
+    return periodTargets.some(
+      (t) => (t?.minMl !== null && (t?.minMl ?? 0) > 0) || (t?.maxMl !== null && (t?.maxMl ?? 0) > 0)
+    );
+  }, [granularity, dailyMinPath, dailyMaxPath, periodTargets]);
 
   const legendTargetSummary = useMemo(() => {
     const vals =
@@ -899,6 +1090,11 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                       ? ` (${UnitConverter.formatKgValue(hoveredDailyTarget.weightKg)} kg)`
                       : ''}
                   </span>
+                  {hoveredDailyTarget.minMl !== null && hoveredDailyTarget.maxMl !== null && (
+                    <span className="text-pink-600 dark:text-pink-400">
+                      [{hoveredDailyTarget.minMl}–{hoveredDailyTarget.maxMl}]
+                    </span>
+                  )}
                 </>
               )}
             </>
@@ -933,6 +1129,11 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                       ? ` (${UnitConverter.formatKgValue(hoveredPeriodTarget.avgWeightKg)} kg)`
                       : ''}
                   </span>
+                  {hoveredPeriodTarget.minMl !== null && hoveredPeriodTarget.maxMl !== null && (
+                    <span className="text-pink-600 dark:text-pink-400">
+                      [{hoveredPeriodTarget.minMl}–{hoveredPeriodTarget.maxMl}]
+                    </span>
+                  )}
                 </>
               )}
             </>
@@ -949,6 +1150,11 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                   <span className="text-emerald-700 dark:text-emerald-400">
                     Rec. {hoveredPeriodTarget.targetMl} mL/d
                   </span>
+                  {hoveredPeriodTarget.minMl !== null && hoveredPeriodTarget.maxMl !== null && (
+                    <span className="text-pink-600 dark:text-pink-400">
+                      [{hoveredPeriodTarget.minMl}–{hoveredPeriodTarget.maxMl}]
+                    </span>
+                  )}
                 </>
               )}
             </>
@@ -967,22 +1173,46 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
               minWidth: dailySeries.length > 9 ? `${dailySeries.length * 38}px` : undefined,
             }}
           >
-            {/* Dynamic green dotted line for daily recommended feed amount based on daily weight */}
-            {dailyRecommendedPath && (
+            {/* Dynamic pink dotted min/max & green dotted recommended lines based on daily weight */}
+            {(dailyMinPath || dailyMaxPath || dailyRecommendedPath) && (
               <svg
                 viewBox={`0 0 ${Math.max(1, dailySeries.length) * 100} 100`}
                 preserveAspectRatio="none"
                 className="pointer-events-none absolute left-0 right-0 top-4 h-24 w-full z-20 overflow-visible"
                 aria-hidden="true"
               >
-                <path
-                  d={dailyRecommendedPath}
-                  fill="none"
-                  className="stroke-emerald-600 dark:stroke-emerald-400"
-                  strokeWidth={1.75}
-                  strokeDasharray="4 3"
-                  vectorEffect="non-scaling-stroke"
-                />
+                {dailyMinPath && (
+                  <path
+                    d={dailyMinPath}
+                    fill="none"
+                    className="stroke-pink-500/85 dark:stroke-pink-400/85"
+                    strokeWidth={1.5}
+                    strokeDasharray="2 3"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )}
+                {dailyMaxPath && (
+                  <path
+                    d={dailyMaxPath}
+                    fill="none"
+                    className="stroke-pink-500/85 dark:stroke-pink-400/85"
+                    strokeWidth={1.5}
+                    strokeDasharray="2 3"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )}
+                {dailyRecommendedPath && (
+                  <path
+                    d={dailyRecommendedPath}
+                    fill="none"
+                    className="stroke-emerald-600 dark:stroke-emerald-400"
+                    strokeWidth={1.75}
+                    strokeDasharray="4 3"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )}
               </svg>
             )}
 
@@ -1000,8 +1230,12 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
               const showTopValue = dailySeries.length <= 14 || isSelected;
               const tooltipRec = dayTarget
                 ? ` · Rec. ${dayTarget.targetMl} mL${
+                    dayTarget.minMl !== null && dayTarget.maxMl !== null
+                      ? ` (Min–Max ${dayTarget.minMl}–${dayTarget.maxMl} mL)`
+                      : ''
+                  }${
                     dayTarget.weightKg !== null
-                      ? ` (${UnitConverter.formatKgValue(dayTarget.weightKg)} kg)`
+                      ? ` · ${UnitConverter.formatKgValue(dayTarget.weightKg)} kg`
                       : ''
                   }`
                 : '';
@@ -1084,11 +1318,15 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
           unitLabel="mL per day"
           accent="emerald"
           referencePoints={periodTargets.map((t) => t?.targetMl ?? null)}
+          minReferencePoints={periodTargets.map((t) => t?.minMl ?? null)}
+          maxReferencePoints={periodTargets.map((t) => t?.maxMl ?? null)}
           referenceLine={
             !birthDate && estimatedTargetMl
               ? { value: estimatedTargetMl, label: `${estimatedTargetMl} mL` }
               : null
           }
+          minReferenceLine={!birthDate ? targetMinMl : null}
+          maxReferenceLine={!birthDate ? targetMaxMl : null}
           activeKey={hoveredKey}
           onHoverKey={setHoveredKey}
         />
@@ -1112,6 +1350,12 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                 Daily rec. (by wt)
               </span>
             )}
+            {hasMinMaxBounds && (
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3.5 border-t-[1.5px] border-dotted border-pink-500 dark:border-pink-400" />
+                Min–Max
+              </span>
+            )}
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
@@ -1131,6 +1375,12 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
               <span className="inline-flex items-center gap-1">
                 <span className="w-3.5 border-t-[1.5px] border-dashed border-emerald-600 dark:border-emerald-400" />
                 Rec. (by wt)
+              </span>
+            )}
+            {hasMinMaxBounds && (
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3.5 border-t-[1.5px] border-dotted border-pink-500 dark:border-pink-400" />
+                Min–Max
               </span>
             )}
           </div>
@@ -1356,7 +1606,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
           >
             {/* 6-diaper pediatric hydration reference line (pixel-aligned to h-24 plot zone) */}
             <div
-              className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-emerald-500/70 dark:border-emerald-500/60 z-20"
+              className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-pink-500/80 dark:border-pink-400/80 z-20"
               style={{
                 top: `${16 + (1 - Math.min(1, 6 / dailyAxisMax)) * 96}px`,
               }}
@@ -1458,7 +1708,7 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
           axisMax={boxAxisMax}
           unitLabel="diapers per day"
           accent="sky"
-          referenceLine={{ value: 6, label: '6/day' }}
+          referenceLine={{ value: 6, label: '6/day', color: 'pink' }}
           activeKey={hoveredKey}
           onHoverKey={setHoveredKey}
         />
@@ -1497,7 +1747,10 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
             </span>
           </div>
         )}
-        <span>Benchmark: ≥6 wet + mixed/day</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-3.5 border-t-[1.5px] border-dashed border-pink-500 dark:border-pink-400" />
+          <span>Benchmark: ≥6 wet + mixed/day</span>
+        </span>
       </div>
     </div>
   );
@@ -1752,6 +2005,10 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
         <FeedingVolumeTrendChart
           records={records}
           estimatedTargetMl={routineInsights.estimatedTargetMl}
+          targetMinMl={routineInsights.targetMinMl}
+          targetMaxMl={routineInsights.targetMaxMl}
+          minRateMlPerKg={routineInsights.minRateMlPerKg}
+          maxRateMlPerKg={routineInsights.maxRateMlPerKg}
           effectiveTargetMlPerKg={routineInsights.effectiveTargetMlPerKg}
           focusDate={focusDate}
           birthDate={birthDate}

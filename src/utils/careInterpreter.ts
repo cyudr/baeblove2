@@ -445,6 +445,8 @@ export interface RoutineInterpretation {
   avgMlPerFeed: number | null;
   milkTargetEligible: boolean;
   focusAgeDays: number | null;
+  minRateMlPerKg: number;
+  maxRateMlPerKg: number;
   effectiveTargetMlPerKg: number | null;
   estimatedTargetMl: number | null;
   targetMinMl: number | null;
@@ -1417,6 +1419,8 @@ export function interpretRoutineTable(
     avgMlPerFeed,
     milkTargetEligible,
     focusAgeDays,
+    minRateMlPerKg: lowRate,
+    maxRateMlPerKg: highRate,
     effectiveTargetMlPerKg,
     estimatedTargetMl,
     targetMinMl,
