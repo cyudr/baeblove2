@@ -493,9 +493,9 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
               x2={minSvgWidth - padRight}
               y1={yOf(minReferenceLine)}
               y2={yOf(minReferenceLine)}
-              className="stroke-pink-500/80 dark:stroke-pink-400/80"
-              strokeWidth={1.35}
-              strokeDasharray="2 3"
+              className="stroke-pink-500/75 dark:stroke-pink-400/75"
+              strokeWidth={0.9}
+              strokeDasharray="1.5 3"
               strokeLinecap="round"
             />
           )}
@@ -508,9 +508,9 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
               x2={minSvgWidth - padRight}
               y1={yOf(maxReferenceLine)}
               y2={yOf(maxReferenceLine)}
-              className="stroke-pink-500/80 dark:stroke-pink-400/80"
-              strokeWidth={1.35}
-              strokeDasharray="2 3"
+              className="stroke-pink-500/75 dark:stroke-pink-400/75"
+              strokeWidth={0.9}
+              strokeDasharray="1.5 3"
               strokeLinecap="round"
             />
           )}
@@ -681,9 +681,9 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
               <path
                 d={minRefPathD}
                 fill="none"
-                className="stroke-pink-500/85 dark:stroke-pink-400/85"
-                strokeWidth={1.45}
-                strokeDasharray="2 3"
+                className="stroke-pink-500/80 dark:stroke-pink-400/80"
+                strokeWidth={0.95}
+                strokeDasharray="1.5 3"
                 strokeLinecap="round"
               />
             )}
@@ -691,9 +691,9 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
               <path
                 d={maxRefPathD}
                 fill="none"
-                className="stroke-pink-500/85 dark:stroke-pink-400/85"
-                strokeWidth={1.45}
-                strokeDasharray="2 3"
+                className="stroke-pink-500/80 dark:stroke-pink-400/80"
+                strokeWidth={0.95}
+                strokeDasharray="1.5 3"
                 strokeLinecap="round"
               />
             )}
@@ -705,9 +705,9 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
                   key={`min-ref-${pt.idx}`}
                   cx={pt.cx}
                   cy={pt.y}
-                  r={isHovered ? 2.6 : 1.7}
+                  r={isHovered ? 2 : 1.2}
                   className="fill-pink-500 dark:fill-pink-400 stroke-white dark:stroke-stone-900"
-                  strokeWidth={0.9}
+                  strokeWidth={0.6}
                 />
               );
             })}
@@ -719,9 +719,9 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
                   key={`max-ref-${pt.idx}`}
                   cx={pt.cx}
                   cy={pt.y}
-                  r={isHovered ? 2.6 : 1.7}
+                  r={isHovered ? 2 : 1.2}
                   className="fill-pink-500 dark:fill-pink-400 stroke-white dark:stroke-stone-900"
-                  strokeWidth={0.9}
+                  strokeWidth={0.6}
                 />
               );
             })}
@@ -1185,9 +1185,9 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                   <path
                     d={dailyMinPath}
                     fill="none"
-                    className="stroke-pink-500/85 dark:stroke-pink-400/85"
-                    strokeWidth={1.5}
-                    strokeDasharray="2 3"
+                    className="stroke-pink-500/80 dark:stroke-pink-400/80"
+                    strokeWidth={0.95}
+                    strokeDasharray="1.5 3"
                     strokeLinecap="round"
                     vectorEffect="non-scaling-stroke"
                   />
@@ -1196,9 +1196,9 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                   <path
                     d={dailyMaxPath}
                     fill="none"
-                    className="stroke-pink-500/85 dark:stroke-pink-400/85"
-                    strokeWidth={1.5}
-                    strokeDasharray="2 3"
+                    className="stroke-pink-500/80 dark:stroke-pink-400/80"
+                    strokeWidth={0.95}
+                    strokeDasharray="1.5 3"
                     strokeLinecap="round"
                     vectorEffect="non-scaling-stroke"
                   />
@@ -1352,7 +1352,7 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
             )}
             {hasMinMaxBounds && (
               <span className="inline-flex items-center gap-1">
-                <span className="w-3.5 border-t-[1.5px] border-dotted border-pink-500 dark:border-pink-400" />
+                <span className="w-3.5 border-t border-dotted border-pink-500 dark:border-pink-400" />
                 Min–Max
               </span>
             )}
@@ -1379,7 +1379,7 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
             )}
             {hasMinMaxBounds && (
               <span className="inline-flex items-center gap-1">
-                <span className="w-3.5 border-t-[1.5px] border-dotted border-pink-500 dark:border-pink-400" />
+                <span className="w-3.5 border-t border-dotted border-pink-500 dark:border-pink-400" />
                 Min–Max
               </span>
             )}

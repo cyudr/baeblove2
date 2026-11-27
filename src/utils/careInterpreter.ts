@@ -814,25 +814,24 @@ export function buildDailyRoutineBucketMap(records: RoutineRecord[]): Map<string
 
     const diaperKind = classifyDiaperValue(r.diaper);
     const hasStool = Boolean(r.stool && r.stool.trim().length > 0);
-    const loadCount = parseDiaperLoadCount(r['diaper load'], 1);
     if (diaperKind === 'wet') {
       if (hasStool) {
-        bucket.mixedDiapers += loadCount;
+        bucket.mixedDiapers += 1;
       } else {
-        bucket.wetDiapers += loadCount;
+        bucket.wetDiapers += 1;
       }
-      bucket.totalDiapers += loadCount;
+      bucket.totalDiapers += 1;
     } else if (diaperKind === 'dirty') {
-      bucket.dirtyDiapers += loadCount;
-      bucket.totalDiapers += loadCount;
+      bucket.dirtyDiapers += 1;
+      bucket.totalDiapers += 1;
     } else if (diaperKind === 'mixed') {
-      bucket.mixedDiapers += loadCount;
-      bucket.totalDiapers += loadCount;
+      bucket.mixedDiapers += 1;
+      bucket.totalDiapers += 1;
     } else if (r.diaper && r.diaper.trim().length > 0 && r.diaper.trim().toLowerCase() !== 'dry') {
-      bucket.totalDiapers += loadCount;
+      bucket.totalDiapers += 1;
     } else if (hasStool) {
-      bucket.dirtyDiapers += loadCount;
-      bucket.totalDiapers += loadCount;
+      bucket.dirtyDiapers += 1;
+      bucket.totalDiapers += 1;
     }
 
     bucketMap.set(dateKey, bucket);
