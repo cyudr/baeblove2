@@ -1626,7 +1626,6 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
               const dayLabel = bucket.date.slice(5);
               const dayBadge = getDayIndexLabel(bucket.date, birthDate);
               const isSelected = hoveredKey === bucket.date;
-              const showTopValue = dailySeries.length <= 14 || isSelected;
               const effectiveWet = bucket.wetDiapers + bucket.mixedDiapers;
               return (
                 <div
@@ -1641,8 +1640,14 @@ export const DiaperOutputTrendChart: React.FC<DiaperOutputTrendChartProps> = ({
                   }`}
                   title={`${bucket.date}${dayBadge ? ` (${dayBadge.full})` : ''}: ${bucket.totalDiapers} changes (${effectiveWet}/6 wet+mixed — Wet ${bucket.wetDiapers}, Mixed ${bucket.mixedDiapers}, Dirty ${bucket.dirtyDiapers})`}
                 >
-                  <span className="text-[9px] font-mono tabular-nums font-semibold text-stone-500 dark:text-stone-400 leading-none h-3 mb-1 flex items-end">
-                    {showTopValue && bucket.totalDiapers > 0 ? bucket.totalDiapers : ''}
+                  <span
+                    className={`text-[9.5px] font-mono tabular-nums font-semibold leading-none h-3 mb-1 flex items-end ${
+                      isSelected
+                        ? 'text-stone-900 dark:text-white font-bold'
+                        : 'text-stone-600 dark:text-stone-300'
+                    }`}
+                  >
+                    {bucket.totalDiapers > 0 ? bucket.totalDiapers : ''}
                   </span>
                   <div className="w-full max-w-[22px] h-24 flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
                     {otherHeight > 0 && (
