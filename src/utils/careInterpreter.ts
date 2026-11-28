@@ -1826,4 +1826,350 @@ export function computeNextFeedRecommendation(
   };
 }
 
+export interface DailyRoutineIntervalBucket {
+  date: string;
+  feedIntervalsHours: number[];
+  diaperIntervalsHours: number[];
+  feedStats: BoxPlotStats | null;
+  diaperStats: BoxPlotStats | null;
+}
+
+export interface PeriodRoutineIntervalBucket {
+  key: string;
+  label: string;
+  rangeLabel: string;
+  daysWithFeedIntervals: number;
+  daysWithDiaperIntervals: number;
+  feedStats: BoxPlotStats | null;
+  diaperStats: BoxPlotStats | null;
+}
+
+export interface RoutineIntervalSummary {
+  dailyMap: Map<string, DailyRoutineIntervalBucket>;
+  latestFeedIntervalHours: number | null;
+  latestDiaperIntervalHours: number | null;
+}
+
+function isDiaperChangeRecord(r: RoutineRecord): boolean {
+  const diaperKind = classifyDiaperValue(r.diaper);
+  const hasStool = Boolean(r.stool && r.stool.trim().length > 0);
+  if (diaperKind === 'wet' || diaperKind === 'dirty' || diaperKind === 'mixed') {
+    return true;
+  }
+  if (r.diaper && r.diaper.trim().length > 0 && r.diaper.trim().toLowerCase() !== 'dry') {
+    return true;
+  }
+  return hasStool;
+}
+
+function emptyIntervalBucket(date: string): DailyRoutineIntervalBucket {
+  return {
+    date,
+    feedIntervalsHours: [],
+    diaperIntervalsHours: [],
+    feedStats: null,
+    diaperStats: null,
+  };
+}
+
+/**
+ * Extracts consecutive time intervals (in hours) between feeding sessions and between diaper
+ * changes, bucketed by the local calendar date on which each interval completes.
+ * - Feeding sessions cluster split/top-up entries within 45 min (matching next-feed rhythm)
+ *   and keep intervals between 45 min and 18 hours.
+ * - Diaper changes ignore sub-5-minute duplicate timestamps and keep intervals up to 24 hours.
+ */
+export function buildDailyRoutineIntervalSummary(records: RoutineRecord[]): RoutineIntervalSummary {
+  const feedTimestamps: number[] = [];
+  const diaperTimestamps: number[] = [];
+
+  for (const r of records) {
+    const ts = parseRoutineRecordLocalTimestamp(r);
+    if (ts === null) continue;
+
+    const isFeed =
+      (r.emb_mL ?? 0) > 0 || (r.formula_mL ?? 0) > 0 || (r.feed_duration_min ?? 0) > 0;
+    if (isFeed) {
+      feedTimestamps.push(ts);
+    }
+    if (isDiaperChangeRecord(r)) {
+      diaperTimestamps.push(ts);
+    }
+  }
+
+  feedTimestamps.sort((a, b) => a - b);
+  diaperTimestamps.sort((a, b) => a - b);
+
+  const dailyMap = new Map<string, DailyRoutineIntervalBucket>();
+  const ensureBucket = (dateKey: string): DailyRoutineIntervalBucket => {
+    let bucket = dailyMap.get(dateKey);
+    if (!bucket) {
+      bucket = emptyIntervalBucket(dateKey);
+      dailyMap.set(dateKey, bucket);
+    }
+    return bucket;
+  };
+
+  // Cluster feeds within 45 min into sessions anchored at session start
+  const FEED_CLUSTER_GAP_MS = 45 * 60_000;
+  const FEED_MIN_INTERVAL_MIN = 45;
+  const FEED_MAX_INTERVAL_MIN = 18 * 60;
+  let latestFeedIntervalHours: number | null = null;
+
+  if (feedTimestamps.length >= 2) {
+    const feedSessions: number[] = [feedTimestamps[0]];
+    let prevRawTs = feedTimestamps[0];
+    for (let i = 1; i < feedTimestamps.length; i++) {
+      const ts = feedTimestamps[i];
+      if (ts - prevRawTs >= FEED_CLUSTER_GAP_MS) {
+        feedSessions.push(ts);
+      }
+      prevRawTs = ts;
+    }
+
+    for (let i = 1; i < feedSessions.length; i++) {
+      const diffMin = (feedSessions[i] - feedSessions[i - 1]) / 60_000;
+      if (diffMin >= FEED_MIN_INTERVAL_MIN && diffMin <= FEED_MAX_INTERVAL_MIN) {
+        const hours = Math.round((diffMin / 60) * 100) / 100;
+        const dateKey = formatLocalDateYMD(new Date(feedSessions[i]));
+        ensureBucket(dateKey).feedIntervalsHours.push(hours);
+        latestFeedIntervalHours = hours;
+      }
+    }
+  }
+
+  // Diaper intervals: ignore near-duplicate (<5 min) timestamps, allow up to 24h
+  const DIAPER_CLUSTER_GAP_MS = 5 * 60_000;
+  const DIAPER_MIN_INTERVAL_MIN = 5;
+  const DIAPER_MAX_INTERVAL_MIN = 24 * 60;
+  let latestDiaperIntervalHours: number | null = null;
+
+  if (diaperTimestamps.length >= 2) {
+    const diaperSessions: number[] = [diaperTimestamps[0]];
+    let prevRawTs = diaperTimestamps[0];
+    for (let i = 1; i < diaperTimestamps.length; i++) {
+      const ts = diaperTimestamps[i];
+      if (ts - prevRawTs >= DIAPER_CLUSTER_GAP_MS) {
+        diaperSessions.push(ts);
+      }
+      prevRawTs = ts;
+    }
+
+    for (let i = 1; i < diaperSessions.length; i++) {
+      const diffMin = (diaperSessions[i] - diaperSessions[i - 1]) / 60_000;
+      if (diffMin >= DIAPER_MIN_INTERVAL_MIN && diffMin <= DIAPER_MAX_INTERVAL_MIN) {
+        const hours = Math.round((diffMin / 60) * 100) / 100;
+        const dateKey = formatLocalDateYMD(new Date(diaperSessions[i]));
+        ensureBucket(dateKey).diaperIntervalsHours.push(hours);
+        latestDiaperIntervalHours = hours;
+      }
+    }
+  }
+
+  for (const bucket of dailyMap.values()) {
+    bucket.feedStats = computeBoxPlotStats(bucket.feedIntervalsHours);
+    bucket.diaperStats = computeBoxPlotStats(bucket.diaperIntervalsHours);
+  }
+
+  return {
+    dailyMap,
+    latestFeedIntervalHours,
+    latestDiaperIntervalHours,
+  };
+}
+
+export function buildDailyRoutineIntervalSeries(
+  records: RoutineRecord[],
+  span: DailySpanOption = 7,
+  focusDate?: string
+): DailyRoutineIntervalBucket[] {
+  const routineBucketMap = buildDailyRoutineBucketMap(records);
+  const { dailyMap } = buildDailyRoutineIntervalSummary(records);
+  const endDateStr = resolveRoutineFocusDate(routineBucketMap, focusDate);
+  const endDate = parseLocalDateYMD(endDateStr);
+
+  let totalDays: number;
+  if (span === 'all') {
+    const allDatesAsc = Array.from(
+      new Set([...routineBucketMap.keys(), ...dailyMap.keys()])
+    ).sort((a, b) => a.localeCompare(b));
+    if (allDatesAsc.length === 0) {
+      totalDays = 7;
+    } else {
+      const startDate = parseLocalDateYMD(allDatesAsc[0]);
+      const diff = Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000) + 1;
+      totalDays = Math.max(7, Math.min(365, diff));
+    }
+  } else {
+    totalDays = Math.max(1, span);
+  }
+
+  const series: DailyRoutineIntervalBucket[] = [];
+  for (let i = totalDays - 1; i >= 0; i--) {
+    const d = new Date(endDate);
+    d.setDate(d.getDate() - i);
+    const key = formatLocalDateYMD(d);
+    series.push(dailyMap.get(key) ?? emptyIntervalBucket(key));
+  }
+  return series;
+}
+
+export function buildWeeklyRoutineIntervalBoxPlots(
+  records: RoutineRecord[],
+  span: WeeklySpanOption = 4,
+  focusDate?: string
+): PeriodRoutineIntervalBucket[] {
+  const routineBucketMap = buildDailyRoutineBucketMap(records);
+  const { dailyMap } = buildDailyRoutineIntervalSummary(records);
+  const endDateStr = resolveRoutineFocusDate(routineBucketMap, focusDate);
+  const endMonday = getMondayOfWeek(parseLocalDateYMD(endDateStr));
+
+  let weekCount: number;
+  if (span === 'all') {
+    const allDatesAsc = Array.from(
+      new Set([...routineBucketMap.keys(), ...dailyMap.keys()])
+    ).sort((a, b) => a.localeCompare(b));
+    if (allDatesAsc.length === 0) {
+      weekCount = 4;
+    } else {
+      const startMonday = getMondayOfWeek(parseLocalDateYMD(allDatesAsc[0]));
+      const diffWeeks =
+        Math.round((endMonday.getTime() - startMonday.getTime()) / (7 * 86_400_000)) + 1;
+      weekCount = Math.max(4, Math.min(52, diffWeeks));
+    }
+  } else {
+    weekCount = Math.max(1, span);
+  }
+
+  const periods: PeriodRoutineIntervalBucket[] = [];
+
+  for (let w = weekCount - 1; w >= 0; w--) {
+    const start = new Date(endMonday);
+    start.setDate(start.getDate() - w * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+
+    const feedVals: number[] = [];
+    const diaperVals: number[] = [];
+    let daysWithFeedIntervals = 0;
+    let daysWithDiaperIntervals = 0;
+
+    for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + dayIdx);
+      const bucket = dailyMap.get(formatLocalDateYMD(d));
+      if (!bucket) continue;
+
+      if (bucket.feedIntervalsHours.length > 0) {
+        feedVals.push(...bucket.feedIntervalsHours);
+        daysWithFeedIntervals += 1;
+      }
+      if (bucket.diaperIntervalsHours.length > 0) {
+        diaperVals.push(...bucket.diaperIntervalsHours);
+        daysWithDiaperIntervals += 1;
+      }
+    }
+
+    const startLabel = `${SHORT_MONTHS[start.getMonth()]} ${start.getDate()}`;
+    const endLabel = `${SHORT_MONTHS[end.getMonth()]} ${end.getDate()}, ${end.getFullYear()}`;
+    const key = formatLocalDateYMD(start);
+
+    periods.push({
+      key,
+      label: startLabel,
+      rangeLabel: `${startLabel} – ${endLabel}`,
+      daysWithFeedIntervals,
+      daysWithDiaperIntervals,
+      feedStats: computeBoxPlotStats(feedVals),
+      diaperStats: computeBoxPlotStats(diaperVals),
+    });
+  }
+
+  return periods;
+}
+
+export function buildMonthlyRoutineIntervalBoxPlots(
+  records: RoutineRecord[],
+  span: MonthlySpanOption = 6,
+  focusDate?: string
+): PeriodRoutineIntervalBucket[] {
+  const routineBucketMap = buildDailyRoutineBucketMap(records);
+  const { dailyMap } = buildDailyRoutineIntervalSummary(records);
+  const endDateStr = resolveRoutineFocusDate(routineBucketMap, focusDate);
+  const endDate = parseLocalDateYMD(endDateStr);
+  const endYear = endDate.getFullYear();
+  const endMonth = endDate.getMonth();
+
+  let monthCount: number;
+  if (span === 'all') {
+    const allDatesAsc = Array.from(
+      new Set([...routineBucketMap.keys(), ...dailyMap.keys()])
+    ).sort((a, b) => a.localeCompare(b));
+    if (allDatesAsc.length === 0) {
+      monthCount = 3;
+    } else {
+      const startDate = parseLocalDateYMD(allDatesAsc[0]);
+      const diffMonths =
+        (endYear - startDate.getFullYear()) * 12 + (endMonth - startDate.getMonth()) + 1;
+      monthCount = Math.max(3, Math.min(24, diffMonths));
+    }
+  } else {
+    monthCount = Math.max(1, span);
+  }
+
+  const bucketsByMonth = new Map<string, DailyRoutineIntervalBucket[]>();
+  for (const [dateKey, bucket] of dailyMap.entries()) {
+    const ym = dateKey.slice(0, 7);
+    const list = bucketsByMonth.get(ym) ?? [];
+    list.push(bucket);
+    bucketsByMonth.set(ym, list);
+  }
+
+  const startAnchor = new Date(endYear, endMonth - (monthCount - 1), 1, 12, 0, 0, 0);
+  const spansMultipleYears = startAnchor.getFullYear() !== endYear;
+
+  const periods: PeriodRoutineIntervalBucket[] = [];
+
+  for (let m = monthCount - 1; m >= 0; m--) {
+    const monthDate = new Date(endYear, endMonth - m, 1, 12, 0, 0, 0);
+    const y = monthDate.getFullYear();
+    const mo = monthDate.getMonth();
+    const key = `${y}-${String(mo + 1).padStart(2, '0')}`;
+    const monthBuckets = bucketsByMonth.get(key) ?? [];
+
+    const feedVals: number[] = [];
+    const diaperVals: number[] = [];
+    let daysWithFeedIntervals = 0;
+    let daysWithDiaperIntervals = 0;
+
+    for (const bucket of monthBuckets) {
+      if (bucket.feedIntervalsHours.length > 0) {
+        feedVals.push(...bucket.feedIntervalsHours);
+        daysWithFeedIntervals += 1;
+      }
+      if (bucket.diaperIntervalsHours.length > 0) {
+        diaperVals.push(...bucket.diaperIntervalsHours);
+        daysWithDiaperIntervals += 1;
+      }
+    }
+
+    const label = spansMultipleYears
+      ? `${SHORT_MONTHS[mo]} '${String(y).slice(-2)}`
+      : SHORT_MONTHS[mo];
+
+    periods.push({
+      key,
+      label,
+      rangeLabel: `${FULL_MONTHS[mo]} ${y}`,
+      daysWithFeedIntervals,
+      daysWithDiaperIntervals,
+      feedStats: computeBoxPlotStats(feedVals),
+      diaperStats: computeBoxPlotStats(diaperVals),
+    });
+  }
+
+  return periods;
+}
+
+
 

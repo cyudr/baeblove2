@@ -1194,6 +1194,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         profile={activeProfile}
         growthRecords={profileGrowthRecords}
         babyMeasurements={activeBabyMeasurements}
+        feedsPerDay={milkFormulaConfig.feedsPerDay}
       />
 
       {/* Recent Routine Entries Table */}
