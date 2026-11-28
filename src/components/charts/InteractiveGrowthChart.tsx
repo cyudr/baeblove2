@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   MetricType,
   WHODataPoint,
@@ -140,9 +140,18 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
   const isDark = theme === 'dark';
   const [metric, setMetric] = useState<MetricType>('weight');
   const [zoomMode, setZoomMode] = useState<GrowthZoomMode>('auto');
+  const [customXRange, setCustomXRange] = useState<[number, number] | null>(null);
   const [timeScaleMode, setTimeScaleMode] = useState<AgeAxisScaleMode>('auto');
   const [showBands, setShowBands] = useState<boolean>(true);
   const [showProjection, setShowProjection] = useState<boolean>(true);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const currentXRangeRef = useRef<[number, number]>([0, 12 * DAYS_PER_MONTH]);
+  const pinchStateRef = useRef<{
+    initialDist: number;
+    initialMidRatio: number;
+    initialRange: [number, number];
+  } | null>(null);
+  const suppressScrubUntilLiftRef = useRef<boolean>(false);
   const [hoveredPoint, setHoveredPoint] = useState<{
     id: string;
     exactDays: number;
@@ -213,8 +222,8 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     });
   }, [measurements, profile.dateOfEvent]);
 
-  // Compute visible X-axis range in exact days (Auto = 200% of current available data time range)
-  const [xMinDays, xMaxDays] = useMemo<[number, number]>(() => {
+  // Compute preset X-axis range in exact days (Auto = 200% of current available data time range)
+  const baseXRange = useMemo<[number, number]>(() => {
     if (zoomMode !== 'auto') {
       return [0, zoomMode * DAYS_PER_MONTH];
     }
@@ -240,6 +249,10 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
       singlePointFallbackSpan: 7,
     });
   }, [zoomMode, enrichedMeasurements, metric]);
+
+  const [xMinDays, xMaxDays] = customXRange ?? baseXRange;
+  currentXRangeRef.current = [xMinDays, xMaxDays];
+  const isCustomZoomed = customXRange !== null;
 
   const xSpanDays = Math.max(0.0001, xMaxDays - xMinDays);
 
@@ -733,25 +746,144 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
   const handleSvgMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const clientX = e.clientX - rect.left;
     const svgX = (clientX / rect.width) * width;
     updateScrubberBySvgX(svgX);
   };
 
   const handleSvgTouch = (e: React.TouchEvent<SVGSVGElement>) => {
-    if (e.touches.length === 0) return;
+    if (e.touches.length !== 1 || pinchStateRef.current || suppressScrubUntilLiftRef.current) {
+      return;
+    }
     setHoveredPoint(null);
     const touch = e.touches[0];
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const clientX = touch.clientX - rect.left;
     const svgX = (clientX / rect.width) * width;
     updateScrubberBySvgX(svgX);
   };
 
+  // Native non-passive two-finger pinch-to-zoom (+ pan) & trackpad pinch-zoom on the SVG chart
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const usableW = width - padding.left - padding.right;
+    const MIN_PINCH_SPAN_DAYS = 2;
+
+    const clientXToPlotRatio = (clientX: number): number => {
+      const rect = svg.getBoundingClientRect();
+      if (rect.width <= 0) return 0.5;
+      const svgX = ((clientX - rect.left) / rect.width) * width;
+      return Math.max(0, Math.min(1, (svgX - padding.left) / usableW));
+    };
+
+    const clampRange = (start: number, span: number): [number, number] => {
+      const clampedSpan = Math.max(MIN_PINCH_SPAN_DAYS, Math.min(DOMAIN_MAX_DAYS, span));
+      let nextMin = start;
+      let nextMax = nextMin + clampedSpan;
+      if (nextMin < 0) {
+        nextMin = 0;
+        nextMax = Math.min(DOMAIN_MAX_DAYS, clampedSpan);
+      }
+      if (nextMax > DOMAIN_MAX_DAYS) {
+        nextMax = DOMAIN_MAX_DAYS;
+        nextMin = Math.max(0, DOMAIN_MAX_DAYS - clampedSpan);
+      }
+      return [nextMin, nextMax];
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+        const midClientX = (t0.clientX + t1.clientX) / 2;
+        pinchStateRef.current = {
+          initialDist: Math.max(10, dist),
+          initialMidRatio: clientXToPlotRatio(midClientX),
+          initialRange: currentXRangeRef.current,
+        };
+        suppressScrubUntilLiftRef.current = true;
+        setScrubberState(null);
+        setHoveredPoint(null);
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchStateRef.current) {
+        e.preventDefault();
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const currentDist = Math.max(
+          10,
+          Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY)
+        );
+        const currentMidRatio = clientXToPlotRatio((t0.clientX + t1.clientX) / 2);
+        const { initialDist, initialMidRatio, initialRange } = pinchStateRef.current;
+        const [initMin, initMax] = initialRange;
+        const initSpan = Math.max(MIN_PINCH_SPAN_DAYS, initMax - initMin);
+
+        // Spread fingers apart -> zoom in (smaller span); pinch together -> zoom out (larger span)
+        const scale = initialDist / currentDist;
+        const nextSpan = Math.max(MIN_PINCH_SPAN_DAYS, Math.min(DOMAIN_MAX_DAYS, initSpan * scale));
+        const anchorDay = initMin + initialMidRatio * initSpan;
+        const nextRange = clampRange(anchorDay - currentMidRatio * nextSpan, nextSpan);
+
+        setCustomXRange(nextRange);
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        pinchStateRef.current = null;
+      }
+      if (e.touches.length === 0) {
+        suppressScrubUntilLiftRef.current = false;
+      }
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const [curMin, curMax] = currentXRangeRef.current;
+      const curSpan = Math.max(MIN_PINCH_SPAN_DAYS, curMax - curMin);
+      const zoomFactor = Math.exp(e.deltaY * 0.008);
+      const nextSpan = Math.max(
+        MIN_PINCH_SPAN_DAYS,
+        Math.min(DOMAIN_MAX_DAYS, curSpan * zoomFactor)
+      );
+      const focusRatio = clientXToPlotRatio(e.clientX);
+      const anchorDay = curMin + focusRatio * curSpan;
+      const nextRange = clampRange(anchorDay - focusRatio * nextSpan, nextSpan);
+      setScrubberState(null);
+      setHoveredPoint(null);
+      setCustomXRange(nextRange);
+    };
+
+    svg.addEventListener('touchstart', onTouchStart, { passive: false });
+    svg.addEventListener('touchmove', onTouchMove, { passive: false });
+    svg.addEventListener('touchend', onTouchEnd);
+    svg.addEventListener('touchcancel', onTouchEnd);
+    svg.addEventListener('wheel', onWheel, { passive: false });
+
+    return () => {
+      svg.removeEventListener('touchstart', onTouchStart);
+      svg.removeEventListener('touchmove', onTouchMove);
+      svg.removeEventListener('touchend', onTouchEnd);
+      svg.removeEventListener('touchcancel', onTouchEnd);
+      svg.removeEventListener('wheel', onWheel);
+    };
+  }, [width, padding.left, padding.right]);
+
   useEffect(() => {
     setScrubberState(null);
     setHoveredPoint(null);
+    setCustomXRange(null);
   }, [metric, zoomMode, timeScaleMode, profile.id]);
 
   const rangeSummaryLabel = useMemo(() => {
@@ -779,7 +911,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             </h3>
             <span className="text-xs text-stone-500 dark:text-stone-400">
               {profile.gender === 'boy' ? 'Boys' : 'Girls'} · {rangeSummaryLabel}
-              {zoomMode === 'auto' ? ' · Auto' : ''}
+              {isCustomZoomed ? ' · Zoomed' : zoomMode === 'auto' ? ' · Auto' : ''}
             </span>
             <span className="text-xs text-emerald-900 dark:text-emerald-300 font-semibold bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-lg border border-emerald-200/60 dark:border-emerald-800/60">
               WHO LMS Standard (2006)
@@ -859,10 +991,13 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
           {/* Age range filter */}
           <div className="inline-flex p-1 bg-stone-100 dark:bg-stone-800 rounded-xl border border-stone-200/60 dark:border-stone-700/60">
             <button
-              onClick={() => setZoomMode('auto')}
+              onClick={() => {
+                setZoomMode('auto');
+                setCustomXRange(null);
+              }}
               title="Auto-zoom to 200% of current available data time range"
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
-                zoomMode === 'auto'
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                !isCustomZoomed && zoomMode === 'auto'
                   ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
                   : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
               }`}
@@ -870,9 +1005,12 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               Auto
             </button>
             <button
-              onClick={() => setZoomMode(12)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
-                zoomMode === 12
+              onClick={() => {
+                setZoomMode(12);
+                setCustomXRange(null);
+              }}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                !isCustomZoomed && zoomMode === 12
                   ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
                   : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
               }`}
@@ -880,9 +1018,12 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               1 Year
             </button>
             <button
-              onClick={() => setZoomMode(24)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
-                zoomMode === 24
+              onClick={() => {
+                setZoomMode(24);
+                setCustomXRange(null);
+              }}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                !isCustomZoomed && zoomMode === 24
                   ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
                   : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
               }`}
@@ -890,9 +1031,12 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               2 Years
             </button>
             <button
-              onClick={() => setZoomMode(36)}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
-                zoomMode === 36
+              onClick={() => {
+                setZoomMode(36);
+                setCustomXRange(null);
+              }}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                !isCustomZoomed && zoomMode === 36
                   ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
                   : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
               }`}
@@ -900,6 +1044,17 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               3 Years
             </button>
           </div>
+
+          {isCustomZoomed && (
+            <button
+              type="button"
+              onClick={() => setCustomXRange(null)}
+              title="Reset pinch zoom back to selected range"
+              className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors cursor-pointer shadow-2xs"
+            >
+              Reset Zoom
+            </button>
+          )}
 
           {/* Toggle percentile bands */}
           <button
@@ -949,12 +1104,54 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
       {/* Static-Height 3-Row Scrubber / Latest measurement summary strip (zero layout shift) */}
       <div
         className={`mt-3 h-[76px] px-3.5 py-2 rounded-xl flex flex-col justify-between border text-xs overflow-hidden transition-colors ${
-          scrubberState
+          hoveredPoint || scrubberState
             ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-stone-800 dark:text-stone-200'
             : 'bg-stone-50 dark:bg-stone-800/60 border-stone-200/60 dark:border-stone-700/60 text-stone-700 dark:text-stone-300'
         }`}
       >
-        {scrubberState ? (
+        {hoveredPoint ? (
+          <>
+            {/* Row 1: Selected Point Age + Latest reset */}
+            <div className="h-[18px] flex items-center justify-between gap-2 min-w-0 leading-none">
+              <span className="font-bold text-emerald-950 dark:text-emerald-200 truncate">
+                Measured Age: {hoveredPoint.ageLabel}
+              </span>
+              {latest && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScrubberState(null);
+                    setHoveredPoint(null);
+                  }}
+                  className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 hover:underline cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  Latest
+                </button>
+              )}
+            </div>
+
+            {/* Row 2: Logged value & Date */}
+            <div className="h-[18px] flex items-center justify-between gap-2 min-w-0 leading-none">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px] font-mono tabular-nums whitespace-nowrap truncate">
+                Logged: {displayValue(hoveredPoint.value)} ({hoveredPoint.percentile}%)
+              </span>
+              <span className="text-[10px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0 whitespace-nowrap">
+                {hoveredPoint.date}
+              </span>
+            </div>
+
+            {/* Row 3: Percentile & Z-score */}
+            <div className="h-[18px] flex items-center gap-2 min-w-0 text-[11px] leading-none font-mono tabular-nums text-stone-600 dark:text-stone-400">
+              <span className="shrink-0">
+                {hoveredPoint.percentile}th %ile
+              </span>
+              <span aria-hidden="true" className="text-stone-300 dark:text-stone-600 shrink-0">|</span>
+              <span className="shrink-0">
+                Z-score: {hoveredPoint.zScore > 0 ? `+${hoveredPoint.zScore}` : hoveredPoint.zScore}
+              </span>
+            </div>
+          </>
+        ) : scrubberState ? (
           <>
             {/* Row 1: Inspecting Age + Latest reset */}
             <div className="h-[18px] flex items-center justify-between gap-2 min-w-0 leading-none">
@@ -1026,7 +1223,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 </span>
               </div>
               <span className="hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 shrink-0 whitespace-nowrap">
-                Hover or touch chart to inspect
+                Pinch to zoom · Hover or touch to inspect
               </span>
             </div>
 
@@ -1059,7 +1256,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               No measurements logged yet
             </div>
             <div className="h-[18px] flex items-center text-[11px] text-stone-500 dark:text-stone-400 leading-none truncate">
-              Hover or touch along the chart to inspect median and band values
+              Pinch to zoom · Hover or touch along the chart to inspect median and band values
             </div>
           </>
         )}
@@ -1068,6 +1265,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
       {/* SVG Interactive Canvas */}
       <div className="relative mt-4 w-full overflow-hidden select-none">
         <svg
+          ref={svgRef}
           viewBox={`0 0 ${width} ${height}`}
           className="w-full h-auto cursor-crosshair touch-pan-y"
           style={{ maxHeight: '420px' }}
@@ -1397,7 +1595,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             );
           })}
 
-          {/* Real-time Vertical Guideline and Interactive Tooltip when scrubbing */}
+          {/* Real-time Vertical Guideline when scrubbing (details shown in top strip) */}
           {scrubberState && !hoveredPoint && (
             <g className="pointer-events-none">
               <line
@@ -1409,135 +1607,6 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 strokeWidth="1.5"
                 strokeDasharray="4 3"
               />
-
-              {/* Floating Rich Tooltip */}
-              <g
-                transform={`translate(${
-                  scrubberState.svgX > width - 195
-                    ? scrubberState.svgX - 188
-                    : scrubberState.svgX + 12
-                }, ${
-                  scaleY(scrubberState.p50) < 110
-                    ? Math.min(height - padding.bottom - 85, scaleY(scrubberState.p50) + 12)
-                    : Math.max(padding.top + 4, scaleY(scrubberState.p50) - 80)
-                })`}
-                className="drop-shadow-lg"
-              >
-                <rect
-                  width="178"
-                  height={
-                    scrubberState.nearestMeasurement || scrubberState.projected ? 78 : 60
-                  }
-                  rx="10"
-                  fill="#18181b"
-                  opacity="0.96"
-                  stroke="#3f3f46"
-                  strokeWidth="0.75"
-                />
-                <text
-                  x="10"
-                  y="16"
-                  className="text-[10px] font-bold fill-emerald-400 font-sans tracking-wide uppercase"
-                >
-                  Age: {scrubberAgeLabel}
-                </text>
-                <text
-                  x="10"
-                  y="30"
-                  className="text-[11px] font-extrabold fill-white font-sans"
-                >
-                  Median (50th): {displayValue(scrubberState.p50)}
-                </text>
-                <text
-                  x="10"
-                  y="44"
-                  className="text-[9px] fill-stone-300 font-sans"
-                >
-                  Normal Range: {displayValue(scrubberState.p3)} – {displayValue(scrubberState.p97)}
-                </text>
-                {scrubberState.nearestMeasurement ? (
-                  <>
-                    <line x1="8" y1="50" x2="170" y2="50" stroke="#3f3f46" strokeWidth="0.75" />
-                    <text
-                      x="10"
-                      y="62"
-                      className="text-[10px] font-bold fill-teal-300 font-sans"
-                    >
-                      Measured: {displayValue(scrubberState.nearestMeasurement.val)} ({scrubberState.nearestMeasurement.percentile}th %)
-                    </text>
-                    <text
-                      x="10"
-                      y="73"
-                      className="text-[8px] fill-stone-400 font-sans"
-                    >
-                      {scrubberState.nearestMeasurement.date} · {scrubberState.nearestMeasurement.ageLabel} · Z: {scrubberState.nearestMeasurement.zScore}
-                    </text>
-                  </>
-                ) : scrubberState.projected ? (
-                  <>
-                    <line x1="8" y1="50" x2="170" y2="50" stroke="#3f3f46" strokeWidth="0.75" />
-                    <text
-                      x="10"
-                      y="62"
-                      className="text-[10px] font-bold fill-indigo-300 font-sans"
-                    >
-                      Projected: {displayValue(scrubberState.projected.val)} ({scrubberState.projected.percentile}th %)
-                    </text>
-                    <text
-                      x="10"
-                      y="73"
-                      className="text-[8px] fill-stone-400 font-sans"
-                    >
-                      ±1 SE: {displayValue(scrubberState.projected.low)} – {displayValue(scrubberState.projected.high)}
-                    </text>
-                  </>
-                ) : null}
-              </g>
-            </g>
-          )}
-
-          {/* Active Hover / Tap Tooltip in SVG */}
-          {hoveredPoint && (
-            <g
-              transform={`translate(${
-                hoveredPoint.x > width - 175
-                  ? hoveredPoint.x - 168
-                  : hoveredPoint.x + 12
-              }, ${
-                hoveredPoint.y < 85 ? hoveredPoint.y + 10 : hoveredPoint.y - 72
-              })`}
-              className="pointer-events-none drop-shadow-md"
-            >
-              <rect
-                width="160"
-                height="64"
-                rx="8"
-                fill="#1c1917"
-                opacity="0.95"
-                stroke="#3f3f46"
-                strokeWidth="0.75"
-              />
-              <text
-                x="10"
-                y="18"
-                className="text-[11px] font-semibold fill-white font-sans"
-              >
-                {displayValue(hoveredPoint.value)}
-              </text>
-              <text
-                x="10"
-                y="34"
-                className="text-[10px] fill-stone-300 font-sans"
-              >
-                {hoveredPoint.percentile}th Percentile (Z: {hoveredPoint.zScore})
-              </text>
-              <text
-                x="10"
-                y="50"
-                className="text-[9px] fill-emerald-300 font-sans"
-              >
-                {hoveredPoint.date} · {hoveredPoint.ageLabel}
-              </text>
             </g>
           )}
 
@@ -1592,7 +1661,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
 
         <div className="flex items-center gap-1 text-[11px] text-stone-400 dark:text-stone-500">
           <Info className="w-3.5 h-3.5" />
-          <span>Tap any data point for exact percentile</span>
+          <span>Pinch to zoom · Drag or tap to inspect</span>
         </div>
       </div>
     </div>

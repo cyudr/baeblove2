@@ -168,9 +168,7 @@ export interface TempClassification {
 }
 
 export function classifyTemperature(tempC: number): TempClassification {
-  const fahrenheit = Math.round((tempC * 9) / 5 + 32 * 10) / 10;
   const f = Math.round(((tempC * 9) / 5 + 32) * 10) / 10;
-  void fahrenheit;
 
   if (tempC < 36.0) {
     return {
@@ -385,12 +383,21 @@ export function interpretGrowthTable(
   };
 }
 
+export interface DailyFeedEntry {
+  sortKey: string;
+  time: string;
+  ebmMl: number;
+  formulaMl: number;
+  totalMl: number;
+}
+
 export interface DailyRoutineBucket {
   date: string;
   ebmMl: number;
   formulaMl: number;
   totalMl: number;
   feedCount: number;
+  feedEntries: DailyFeedEntry[];
   totalDurationMin: number;
   avgDurationMin: number | null;
   wetDiapers: number;
@@ -766,6 +773,7 @@ function emptyBucket(date: string): DailyRoutineBucket {
     formulaMl: 0,
     totalMl: 0,
     feedCount: 0,
+    feedEntries: [],
     totalDurationMin: 0,
     avgDurationMin: null,
     wetDiapers: 0,
@@ -801,12 +809,25 @@ export function buildDailyRoutineBucketMap(records: RoutineRecord[]): Map<string
     const formula = Math.max(0, r.formula_mL ?? 0);
     const duration = Math.max(0, r.feed_duration_min ?? 0);
 
+    const feedTotal = ebm + formula;
     bucket.ebmMl += ebm;
     bucket.formulaMl += formula;
-    bucket.totalMl += ebm + formula;
+    bucket.totalMl += feedTotal;
 
-    if (ebm > 0 || formula > 0 || duration > 0) {
+    if (feedTotal > 0 || duration > 0) {
       bucket.feedCount += 1;
+    }
+    if (feedTotal > 0) {
+      const normalizedTime = normalizeRoutineTimeHHMM(r.time);
+      const fallbackTime = r.created_at ? r.created_at.slice(11, 16) : '';
+      const timeLabel = normalizedTime || fallbackTime;
+      bucket.feedEntries.push({
+        sortKey: `${timeLabel || '99:99'}|${r.created_at || ''}|${String(r.id).padStart(10, '0')}`,
+        time: timeLabel,
+        ebmMl: ebm,
+        formulaMl: formula,
+        totalMl: feedTotal,
+      });
     }
     if (duration > 0) {
       bucket.totalDurationMin += duration;
@@ -838,6 +859,7 @@ export function buildDailyRoutineBucketMap(records: RoutineRecord[]): Map<string
   }
 
   for (const bucket of bucketMap.values()) {
+    bucket.feedEntries.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
     bucket.avgDurationMin =
       bucket.feedCount > 0 && bucket.totalDurationMin > 0
         ? Math.round(bucket.totalDurationMin / bucket.feedCount)

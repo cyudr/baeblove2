@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   FETAL_BIOMETRIC_STANDARDS,
   FetalBiometricRef,
@@ -43,6 +43,16 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
   const isDark = theme === 'dark';
   const [selectedMetric, setSelectedMetric] = useState<FetalMetricKey>('efw');
   const [zoomMode, setZoomMode] = useState<FetalZoomMode>('auto');
+  const [customWeekRange, setCustomWeekRange] = useState<[number, number] | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const currentWeekRangeRef = useRef<[number, number]>([12, 40]);
+  const pinchStateRef = useRef<{
+    initialDistance: number;
+    initialMidRatio: number;
+    initialMinWeek: number;
+    initialMaxWeek: number;
+  } | null>(null);
+  const suppressScrubUntilLiftRef = useRef(false);
   const [hoveredPoint, setHoveredPoint] = useState<{
     id: string;
     weekLabel: string;
@@ -163,8 +173,8 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
     });
   }, [measurements, profile.dateOfEvent]);
 
-  // Compute visible gestational week range (Auto = 200% of current available data time range)
-  const [minWeek, maxWeek] = useMemo<[number, number]>(() => {
+  // Compute preset gestational week range (Auto = 200% of current available data time range)
+  const [presetMinWeek, presetMaxWeek] = useMemo<[number, number]>(() => {
     if (zoomMode === 'full') {
       return [domainMinWeek, domainMaxWeek];
     }
@@ -189,7 +199,143 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
     });
   }, [zoomMode, enrichedMeasurements, currentCfg]);
 
+  const [minWeek, maxWeek] = customWeekRange ?? [presetMinWeek, presetMaxWeek];
+  currentWeekRangeRef.current = [minWeek, maxWeek];
+
   const weekSpan = Math.max(0.0001, maxWeek - minWeek);
+  const MIN_PINCH_SPAN_WEEKS = 2;
+
+  const clampWeekRange = useCallback(
+    (startW: number, endW: number): [number, number] => {
+      const fullSpan = domainMaxWeek - domainMinWeek;
+      const span = Math.max(MIN_PINCH_SPAN_WEEKS, Math.min(fullSpan, endW - startW));
+      let minW = startW;
+      let maxW = startW + span;
+      if (minW < domainMinWeek) {
+        minW = domainMinWeek;
+        maxW = domainMinWeek + span;
+      }
+      if (maxW > domainMaxWeek) {
+        maxW = domainMaxWeek;
+        minW = Math.max(domainMinWeek, domainMaxWeek - span);
+      }
+      return [Number(minW.toFixed(3)), Number(maxW.toFixed(3))];
+    },
+    []
+  );
+
+  // Native non-passive touch & trackpad pinch-zoom listeners on the SVG
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const getPlotRatioFromClientX = (clientX: number): number => {
+      const rect = svg.getBoundingClientRect();
+      if (rect.width <= 0) return 0.5;
+      const svgX = ((clientX - rect.left) / rect.width) * width;
+      const usableW = width - padding.left - padding.right;
+      return Math.max(0, Math.min(1, (svgX - padding.left) / usableW));
+    };
+
+    const getTouchMetrics = (touches: TouchList) => {
+      const t0 = touches[0];
+      const t1 = touches[1];
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      const midClientX = (t0.clientX + t1.clientX) / 2;
+      return { dist, midRatio: getPlotRatioFromClientX(midClientX) };
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const { dist, midRatio } = getTouchMetrics(e.touches);
+        const [curMin, curMax] = currentWeekRangeRef.current;
+        pinchStateRef.current = {
+          initialDistance: Math.max(10, dist),
+          initialMidRatio: midRatio,
+          initialMinWeek: curMin,
+          initialMaxWeek: curMax,
+        };
+        suppressScrubUntilLiftRef.current = true;
+        setScrubberState(null);
+        setHoveredPoint(null);
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        if (!pinchStateRef.current) {
+          const { dist, midRatio } = getTouchMetrics(e.touches);
+          const [curMin, curMax] = currentWeekRangeRef.current;
+          pinchStateRef.current = {
+            initialDistance: Math.max(10, dist),
+            initialMidRatio: midRatio,
+            initialMinWeek: curMin,
+            initialMaxWeek: curMax,
+          };
+          suppressScrubUntilLiftRef.current = true;
+          setScrubberState(null);
+          setHoveredPoint(null);
+          return;
+        }
+        const { dist, midRatio } = getTouchMetrics(e.touches);
+        const { initialDistance, initialMidRatio, initialMinWeek, initialMaxWeek } =
+          pinchStateRef.current;
+        const scale = Math.max(0.15, Math.min(8, dist / initialDistance));
+        const initialSpan = Math.max(MIN_PINCH_SPAN_WEEKS, initialMaxWeek - initialMinWeek);
+        const fullSpan = domainMaxWeek - domainMinWeek;
+        const newSpan = Math.max(
+          MIN_PINCH_SPAN_WEEKS,
+          Math.min(fullSpan, initialSpan / scale)
+        );
+        const anchorWeek = initialMinWeek + initialMidRatio * initialSpan;
+        const newMin = anchorWeek - midRatio * newSpan;
+        const newMax = newMin + newSpan;
+        setCustomWeekRange(clampWeekRange(newMin, newMax));
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        pinchStateRef.current = null;
+      }
+      if (e.touches.length === 0) {
+        suppressScrubUntilLiftRef.current = false;
+      }
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const [curMin, curMax] = currentWeekRangeRef.current;
+      const curSpan = Math.max(MIN_PINCH_SPAN_WEEKS, curMax - curMin);
+      const ratio = getPlotRatioFromClientX(e.clientX);
+      const zoomFactor = Math.exp(e.deltaY * 0.006);
+      const fullSpan = domainMaxWeek - domainMinWeek;
+      const newSpan = Math.max(
+        MIN_PINCH_SPAN_WEEKS,
+        Math.min(fullSpan, curSpan * zoomFactor)
+      );
+      const anchorWeek = curMin + ratio * curSpan;
+      const newMin = anchorWeek - ratio * newSpan;
+      setCustomWeekRange(clampWeekRange(newMin, newMin + newSpan));
+    };
+
+    svg.addEventListener('touchstart', onTouchStart, { passive: false });
+    svg.addEventListener('touchmove', onTouchMove, { passive: false });
+    svg.addEventListener('touchend', onTouchEnd);
+    svg.addEventListener('touchcancel', onTouchEnd);
+    svg.addEventListener('wheel', onWheel, { passive: false });
+
+    return () => {
+      svg.removeEventListener('touchstart', onTouchStart);
+      svg.removeEventListener('touchmove', onTouchMove);
+      svg.removeEventListener('touchend', onTouchEnd);
+      svg.removeEventListener('touchcancel', onTouchEnd);
+      svg.removeEventListener('wheel', onWheel);
+    };
+  }, [clampWeekRange, padding.left, padding.right, width]);
 
   // Smooth interpolated reference curve across [minWeek, maxWeek]
   const refCurve = useMemo<FetalBiometricRef[]>(() => {
@@ -356,16 +502,20 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
   const handleSvgMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const clientX = e.clientX - rect.left;
     const svgX = (clientX / rect.width) * width;
     updateScrubberBySvgX(svgX);
   };
 
   const handleSvgTouchMove = (e: React.TouchEvent<SVGSVGElement>) => {
-    if (e.touches.length === 0) return;
+    if (e.touches.length !== 1 || pinchStateRef.current || suppressScrubUntilLiftRef.current) {
+      return;
+    }
     const touch = e.touches[0];
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const clientX = touch.clientX - rect.left;
     const svgX = (clientX / rect.width) * width;
     updateScrubberBySvgX(svgX);
@@ -437,7 +587,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             </h3>
             <span className="text-xs text-stone-500 dark:text-stone-400">
               {formatCompactNumber(minWeek, 1)}–{formatCompactNumber(maxWeek, 1)}w
-              {zoomMode === 'auto' ? ' · Auto' : ''}
+              {customWeekRange ? ' · Pinched' : zoomMode === 'auto' ? ' · Auto' : ''}
             </span>
             <span className="text-xs text-amber-900 dark:text-amber-300 font-semibold bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded-lg border border-amber-200/60 dark:border-amber-800/60">
               Formula: {formulaSettings.fetalEfwFormula.toUpperCase()}
@@ -505,10 +655,13 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
 
           <div className="inline-flex p-1 bg-stone-100 dark:bg-stone-800 rounded-xl border border-stone-200/60 dark:border-stone-700/60">
             <button
-              onClick={() => setZoomMode('auto')}
+              onClick={() => {
+                setZoomMode('auto');
+                setCustomWeekRange(null);
+              }}
               title="Auto-zoom to 200% of current available data time range"
               className={`px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                zoomMode === 'auto'
+                !customWeekRange && zoomMode === 'auto'
                   ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
                   : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
               }`}
@@ -516,9 +669,12 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
               Auto
             </button>
             <button
-              onClick={() => setZoomMode('full')}
+              onClick={() => {
+                setZoomMode('full');
+                setCustomWeekRange(null);
+              }}
               className={`px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                zoomMode === 'full'
+                !customWeekRange && zoomMode === 'full'
                   ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-2xs font-bold'
                   : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
               }`}
@@ -526,6 +682,16 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
               Full
             </button>
           </div>
+
+          {customWeekRange && (
+            <button
+              type="button"
+              onClick={() => setCustomWeekRange(null)}
+              className="px-2.5 py-1.5 rounded-xl border border-amber-200 dark:border-amber-800/70 bg-amber-50 dark:bg-amber-950/50 text-xs font-semibold text-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors cursor-pointer"
+            >
+              Reset Zoom
+            </button>
+          )}
 
           {onOpenFormulaModal && (
             <button
@@ -544,12 +710,56 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
       {/* Static-Height 3-Row Scrubber / Latest measurement summary strip (zero layout shift) */}
       <div
         className={`mt-3 h-[76px] px-3.5 py-2 rounded-xl flex flex-col justify-between border text-xs overflow-hidden transition-colors ${
-          scrubberState
+          hoveredPoint || scrubberState
             ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-stone-800 dark:text-stone-200'
             : 'bg-stone-50 dark:bg-stone-800/60 border-stone-200/60 dark:border-stone-700/60 text-stone-700 dark:text-stone-300'
         }`}
       >
-        {scrubberState ? (
+        {hoveredPoint ? (
+          <>
+            {/* Row 1: Selected scan + Latest reset */}
+            <div className="h-[18px] flex items-center justify-between gap-2 min-w-0 leading-none">
+              <span className="font-bold text-amber-950 dark:text-amber-200 truncate">
+                Scan: <strong>{hoveredPoint.weekLabel}</strong>
+              </span>
+              {latest && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScrubberState(null);
+                    setHoveredPoint(null);
+                  }}
+                  className="text-[10px] font-semibold text-amber-900 dark:text-amber-300 hover:underline cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  Latest
+                </button>
+              )}
+            </div>
+
+            {/* Row 2: Logged value + Date */}
+            <div className="h-[18px] flex items-center justify-between gap-2 min-w-0 leading-none">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-amber-700 text-white font-bold text-[10px] font-mono tabular-nums whitespace-nowrap truncate">
+                Logged: {currentCfg.formatVal(hoveredPoint.value)}
+              </span>
+              <span className="text-[10px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0 whitespace-nowrap">
+                {hoveredPoint.date}
+              </span>
+            </div>
+
+            {/* Row 3: Median & Band */}
+            <div className="h-[18px] flex items-center gap-2 min-w-0 text-[11px] leading-none font-mono tabular-nums">
+              <span className="shrink-0">
+                <span className="font-sans text-stone-600 dark:text-stone-400">Median: </span>
+                <strong className="text-stone-900 dark:text-white">{currentCfg.formatVal(hoveredPoint.ref50)}</strong>
+              </span>
+              <span aria-hidden="true" className="text-stone-300 dark:text-stone-600 shrink-0">|</span>
+              <span className="text-stone-600 dark:text-stone-400 truncate">
+                <span className="font-sans">Band: </span>
+                {currentCfg.formatVal(hoveredPoint.ref5)}–{currentCfg.formatVal(hoveredPoint.ref95)}
+              </span>
+            </div>
+          </>
+        ) : scrubberState ? (
           <>
             {/* Row 1: Inspecting week + Latest reset */}
             <div className="h-[18px] flex items-center justify-between gap-2 min-w-0 leading-none">
@@ -612,7 +822,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 </span>
               </div>
               <span className="hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 shrink-0 whitespace-nowrap">
-                Hover or touch chart to inspect
+                Pinch to zoom · Drag or tap to inspect
               </span>
             </div>
 
@@ -641,7 +851,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
               No ultrasound scans logged yet
             </div>
             <div className="h-[18px] flex items-center text-[11px] text-stone-500 dark:text-stone-400 leading-none truncate">
-              Hover or touch along the chart to inspect median and band values
+              Pinch to zoom · Drag or touch along the chart to inspect median and band values
             </div>
           </>
         )}
@@ -650,6 +860,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
       {/* SVG Canvas */}
       <div className="relative mt-4 w-full overflow-hidden select-none">
         <svg
+          ref={svgRef}
           viewBox={`0 0 ${width} ${height}`}
           className="w-full h-auto cursor-crosshair touch-pan-y"
           style={{ maxHeight: '420px' }}
@@ -658,10 +869,12 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             setHoveredPoint(null);
           }}
           onTouchStart={(e) => {
+            if (e.touches.length !== 1) return;
             setHoveredPoint(null);
             handleSvgTouchMove(e);
           }}
           onTouchMove={(e) => {
+            if (e.touches.length !== 1) return;
             setHoveredPoint(null);
             handleSvgTouchMove(e);
           }}
@@ -912,7 +1125,7 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
             );
           })}
 
-          {/* Real-time Vertical Guideline and Interactive Tooltip when scrubbing */}
+          {/* Real-time Vertical Guideline when scrubbing */}
           {scrubberState && !hoveredPoint && (
             <g className="pointer-events-none">
               <line
@@ -924,115 +1137,6 @@ export const FetalBiometricsChart: React.FC<FetalBiometricsChartProps> = ({
                 strokeWidth="1.5"
                 strokeDasharray="4 3"
               />
-
-              {/* Floating Rich Tooltip */}
-              <g
-                transform={`translate(${
-                  scrubberState.svgX > width - 190
-                    ? scrubberState.svgX - 185
-                    : scrubberState.svgX + 12
-                }, ${
-                  scaleY(scrubberState.ref50) < 110
-                    ? Math.min(height - padding.bottom - 85, scaleY(scrubberState.ref50) + 12)
-                    : Math.max(padding.top + 4, scaleY(scrubberState.ref50) - 80)
-                })`}
-                className="drop-shadow-lg"
-              >
-                <rect
-                  width="174"
-                  height={scrubberState.nearestMeasurement ? 76 : 60}
-                  rx="10"
-                  fill="#18181b"
-                  opacity="0.96"
-                  stroke="#3f3f46"
-                  strokeWidth="0.75"
-                />
-                <text
-                  x="10"
-                  y="16"
-                  className="text-[10px] font-bold fill-amber-400 font-sans tracking-wide uppercase"
-                >
-                  Gestational {formatGestationalWeeksLabel(scrubberState.week)}
-                </text>
-                <text
-                  x="10"
-                  y="30"
-                  className="text-[11px] font-extrabold fill-white font-sans"
-                >
-                  Hadlock 50th: {currentCfg.formatVal(scrubberState.ref50)}
-                </text>
-                <text
-                  x="10"
-                  y="44"
-                  className="text-[9px] fill-stone-300 font-sans"
-                >
-                  Normal 5th–95th: {currentCfg.formatVal(scrubberState.ref5)} – {currentCfg.formatVal(scrubberState.ref95)}
-                </text>
-                {scrubberState.nearestMeasurement && (
-                  <>
-                    <line x1="8" y1="50" x2="166" y2="50" stroke="#3f3f46" strokeWidth="0.75" />
-                    <text
-                      x="10"
-                      y="62"
-                      className="text-[10px] font-bold fill-amber-300 font-sans"
-                    >
-                      Measured: {currentCfg.formatVal(scrubberState.nearestMeasurement.val)}
-                    </text>
-                    <text
-                      x="10"
-                      y="72"
-                      className="text-[8px] fill-stone-400 font-sans"
-                    >
-                      Scan: {scrubberState.nearestMeasurement.date} · {scrubberState.nearestMeasurement.weekLabel}
-                    </text>
-                  </>
-                )}
-              </g>
-            </g>
-          )}
-
-          {/* Tooltip */}
-          {hoveredPoint && (
-            <g
-              transform={`translate(${
-                hoveredPoint.x > width - 175
-                  ? hoveredPoint.x - 168
-                  : hoveredPoint.x + 12
-              }, ${
-                hoveredPoint.y < 85 ? hoveredPoint.y + 10 : hoveredPoint.y - 72
-              })`}
-              className="pointer-events-none drop-shadow-md"
-            >
-              <rect
-                width="162"
-                height="65"
-                rx="8"
-                fill="#1c1917"
-                opacity="0.95"
-                stroke="#3f3f46"
-                strokeWidth="0.75"
-              />
-              <text
-                x="10"
-                y="18"
-                className="text-[11px] font-semibold fill-white font-sans"
-              >
-                {currentCfg.formatVal(hoveredPoint.value)}
-              </text>
-              <text
-                x="10"
-                y="34"
-                className="text-[10px] fill-amber-200 font-sans"
-              >
-                Normal: {currentCfg.formatVal(hoveredPoint.ref5)} – {currentCfg.formatVal(hoveredPoint.ref95)}
-              </text>
-              <text
-                x="10"
-                y="50"
-                className="text-[9px] fill-stone-400 font-sans"
-              >
-                {hoveredPoint.weekLabel} · {hoveredPoint.date}
-              </text>
             </g>
           )}
 

@@ -61,6 +61,61 @@ function formatNum(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function computeLoggedFeedBoundariesMl(
+  feedEntries: DailyRoutineBucket['feedEntries'] | undefined,
+  totalMl: number
+): number[] {
+  if (!feedEntries || feedEntries.length < 2 || totalMl <= 0) return [];
+  const boundaries: number[] = [];
+  let cumulative = 0;
+  for (let i = 0; i < feedEntries.length - 1; i++) {
+    const vol = Math.max(0, feedEntries[i].totalMl);
+    if (vol <= 0) continue;
+    cumulative += vol;
+    if (cumulative > 0 && cumulative < totalMl - 0.5) {
+      boundaries.push(cumulative);
+    }
+  }
+  return boundaries;
+}
+
+function computeProjectedFeedPlan(
+  currentTotalMl: number,
+  targetMl: number | null,
+  recommendedFeedMl: number | null
+): { projectedEndMl: number; boundariesMl: number[]; projectedFeedCount: number } {
+  if (
+    targetMl === null ||
+    !Number.isFinite(targetMl) ||
+    targetMl <= currentTotalMl + 1 ||
+    recommendedFeedMl === null ||
+    !Number.isFinite(recommendedFeedMl) ||
+    recommendedFeedMl <= 0
+  ) {
+    return { projectedEndMl: currentTotalMl, boundariesMl: [], projectedFeedCount: 0 };
+  }
+
+  const step = Math.max(10, recommendedFeedMl);
+  const boundariesMl: number[] = [];
+  let cursor = Math.max(0, currentTotalMl);
+  let count = 0;
+
+  while (cursor < targetMl - 0.5 && count < 24) {
+    const remaining = targetMl - cursor;
+    // Absorb a small final remainder (<= 20% over one feed) so projected dividers stay clean
+    if (remaining <= step * 1.2) {
+      cursor = targetMl;
+      count += 1;
+      break;
+    }
+    cursor += step;
+    boundariesMl.push(cursor);
+    count += 1;
+  }
+
+  return { projectedEndMl: targetMl, boundariesMl, projectedFeedCount: count };
+}
+
 interface PeriodIndexBadge {
   short: string;
   full: string;
@@ -762,6 +817,7 @@ const SvgBoxPlot: React.FC<SvgBoxPlotProps> = ({
 interface FeedingVolumeTrendChartProps {
   records: RoutineRecord[];
   estimatedTargetMl?: number | null;
+  recommendedFeedMl?: number | null;
   targetMinMl?: number | null;
   targetMaxMl?: number | null;
   minRateMlPerKg?: number | null;
@@ -775,6 +831,7 @@ interface FeedingVolumeTrendChartProps {
 export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = ({
   records,
   estimatedTargetMl = null,
+  recommendedFeedMl = null,
   targetMinMl = null,
   targetMaxMl = null,
   minRateMlPerKg = null,
@@ -1001,6 +1058,28 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
     hoveredDailyIndex >= 0 ? dailySeries[hoveredDailyIndex] : null;
   const hoveredDailyTarget = hoveredDailyIndex >= 0 ? dailyTargets[hoveredDailyIndex] : null;
   const hoveredDailyBadge = hoveredDaily ? getDayIndexLabel(hoveredDaily.date, birthDate) : null;
+  const hoveredDailyProjection = useMemo(() => {
+    if (!hoveredDaily || !hoveredDailyTarget || hoveredDaily.date !== focusDate) {
+      return null;
+    }
+    const plan = computeProjectedFeedPlan(
+      hoveredDaily.totalMl,
+      hoveredDailyTarget.targetMl,
+      recommendedFeedMl
+    );
+    return plan.projectedFeedCount > 0 ? plan : null;
+  }, [hoveredDaily, hoveredDailyTarget, focusDate, recommendedFeedMl]);
+
+  const hasDailyProjectedBar = useMemo(() => {
+    if (granularity !== 'daily' || !focusDate || !recommendedFeedMl || recommendedFeedMl <= 0) {
+      return false;
+    }
+    const focusIdx = dailySeries.findIndex((d) => d.date === focusDate);
+    if (focusIdx < 0) return false;
+    const focusBucket = dailySeries[focusIdx];
+    const focusTarget = dailyTargets[focusIdx];
+    return Boolean(focusTarget && focusTarget.targetMl > focusBucket.totalMl + 1);
+  }, [granularity, focusDate, recommendedFeedMl, dailySeries, dailyTargets]);
 
   const hoveredPeriodIndex = useMemo(() => {
     if (granularity === 'daily' || !hoveredKey) return -1;
@@ -1080,6 +1159,9 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
               <span>·</span>
               <span>
                 {hoveredDaily.feedCount} feed{hoveredDaily.feedCount === 1 ? '' : 's'}
+                {hoveredDailyProjection
+                  ? ` (+${hoveredDailyProjection.projectedFeedCount} proj.)`
+                  : ''}
               </span>
               {hoveredDailyTarget && (
                 <>
@@ -1217,14 +1299,35 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
             )}
 
             {dailySeries.map((bucket, idx) => {
-              const ebmHeight = Math.round((bucket.ebmMl / dailyAxisMax) * 100);
-              const formulaHeight = Math.round((bucket.formulaMl / dailyAxisMax) * 100);
+              const safeAxisMax = Math.max(1, dailyAxisMax);
+              const ebmHeightPct = Math.min(100, Math.max(0, (bucket.ebmMl / safeAxisMax) * 100));
+              const formulaHeightPct = Math.min(
+                Math.max(0, 100 - ebmHeightPct),
+                Math.max(0, (bucket.formulaMl / safeAxisMax) * 100)
+              );
+              const totalLoggedPct = Math.min(100, ebmHeightPct + formulaHeightPct);
+              const loggedDividerBoundaries = computeLoggedFeedBoundariesMl(
+                bucket.feedEntries,
+                bucket.totalMl
+              );
+
               const dayLabel = bucket.date.slice(5);
               const dayBadge = getDayIndexLabel(bucket.date, birthDate);
               const dayTarget = dailyTargets[idx];
+              const isFocusDay = Boolean(focusDate && bucket.date === focusDate);
+              const projectedPlan =
+                isFocusDay && dayTarget
+                  ? computeProjectedFeedPlan(bucket.totalMl, dayTarget.targetMl, recommendedFeedMl)
+                  : { projectedEndMl: bucket.totalMl, boundariesMl: [], projectedFeedCount: 0 };
+              const projectedTopPct =
+                projectedPlan.projectedFeedCount > 0
+                  ? Math.min(100, (projectedPlan.projectedEndMl / safeAxisMax) * 100)
+                  : totalLoggedPct;
+              const projectedHeightPct = Math.max(0, projectedTopPct - totalLoggedPct);
+
               const targetBottomPct =
                 dayTarget && dayTarget.targetMl > 0
-                  ? Math.min(100, Math.max(0, (dayTarget.targetMl / dailyAxisMax) * 100))
+                  ? Math.min(100, Math.max(0, (dayTarget.targetMl / safeAxisMax) * 100))
                   : null;
               const isSelected = hoveredKey === bucket.date;
               const showTopValue = dailySeries.length <= 14 || isSelected;
@@ -1236,6 +1339,12 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                   }${
                     dayTarget.weightKg !== null
                       ? ` · ${UnitConverter.formatKgValue(dayTarget.weightKg)} kg`
+                      : ''
+                  }${
+                    projectedPlan.projectedFeedCount > 0
+                      ? ` · +${projectedPlan.projectedFeedCount} proj. feed${
+                          projectedPlan.projectedFeedCount === 1 ? '' : 's'
+                        }`
                       : ''
                   }`
                 : '';
@@ -1256,19 +1365,54 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
                     {showTopValue && bucket.totalMl > 0 ? bucket.totalMl : ''}
                   </span>
                   <div className="relative w-full max-w-[22px] h-24">
-                    <div className="w-full h-full flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
-                      {formulaHeight > 0 && (
+                    <div className="relative w-full h-full flex flex-col justify-end bg-stone-100 dark:bg-stone-800 rounded-lg overflow-hidden">
+                      {/* Projected remaining feeds bar segment on active day */}
+                      {projectedHeightPct > 0.4 && (
+                        <div
+                          className="pointer-events-none absolute inset-x-0 bg-emerald-500/12 dark:bg-emerald-400/12 border-t border-x border-dashed border-emerald-500/40 dark:border-emerald-400/40 rounded-t-[4px]"
+                          style={{
+                            bottom: `${totalLoggedPct}%`,
+                            height: `${projectedHeightPct}%`,
+                          }}
+                        />
+                      )}
+
+                      {formulaHeightPct > 0 && (
                         <div
                           className="w-full bg-amber-400 dark:bg-amber-500 transition-all"
-                          style={{ height: `${formulaHeight}%` }}
+                          style={{ height: `${formulaHeightPct}%` }}
                         />
                       )}
-                      {ebmHeight > 0 && (
+                      {ebmHeightPct > 0 && (
                         <div
                           className="w-full bg-emerald-500 dark:bg-emerald-400 transition-all"
-                          style={{ height: `${ebmHeight}%` }}
+                          style={{ height: `${ebmHeightPct}%` }}
                         />
                       )}
+
+                      {/* Subtle horizontal dividers separating individual logged feeds */}
+                      {loggedDividerBoundaries.map((cumMl, dIdx) => {
+                        const bottomPct = Math.min(99.5, (cumMl / safeAxisMax) * 100);
+                        return (
+                          <div
+                            key={`logged-div-${dIdx}`}
+                            className="pointer-events-none absolute inset-x-0 h-[1px] bg-white/55 dark:bg-stone-950/45 z-10"
+                            style={{ bottom: `${bottomPct}%` }}
+                          />
+                        );
+                      })}
+
+                      {/* Subtle horizontal dashed dividers separating projected remaining feeds */}
+                      {projectedPlan.boundariesMl.map((cumMl, pIdx) => {
+                        const bottomPct = Math.min(99.5, (cumMl / safeAxisMax) * 100);
+                        return (
+                          <div
+                            key={`proj-div-${pIdx}`}
+                            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-emerald-600/35 dark:border-emerald-300/35 z-10"
+                            style={{ bottom: `${bottomPct}%` }}
+                          />
+                        );
+                      })}
                     </div>
                     {targetBottomPct !== null && (
                       <span
@@ -1344,6 +1488,12 @@ export const FeedingVolumeTrendChart: React.FC<FeedingVolumeTrendChartProps> = (
               <span className="w-2 h-2 rounded-xs bg-amber-400 dark:bg-amber-500" />
               Formula
             </span>
+            {hasDailyProjectedBar && (
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2 h-2 rounded-xs bg-emerald-500/15 border border-dashed border-emerald-500/60 dark:border-emerald-400/60" />
+                Projected
+              </span>
+            )}
             {legendTargetSummary && (
               <span className="inline-flex items-center gap-1">
                 <span className="w-3.5 border-t-[1.5px] border-dashed border-emerald-600 dark:border-emerald-400" />
@@ -1806,6 +1956,22 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
       ? Math.round((targetMl / progressScaleMax) * 100)
       : null;
 
+  const loggedBarBoundariesMl = useMemo(
+    () => computeLoggedFeedBoundariesMl(routineInsights.todayBucket.feedEntries, totalMl),
+    [routineInsights.todayBucket.feedEntries, totalMl]
+  );
+
+  const projectedBarPlan = useMemo(
+    () => computeProjectedFeedPlan(totalMl, targetMl, routineInsights.recommendedFeedMl),
+    [totalMl, targetMl, routineInsights.recommendedFeedMl]
+  );
+
+  const loggedFillTotalPct = Math.min(100, ebmBarPct + formulaBarPct);
+  const projectedBarWidthPct =
+    projectedBarPlan.projectedFeedCount > 0 && targetMl !== null && targetMl > 0
+      ? Math.max(0, Math.min(100, (projectedBarPlan.projectedEndMl / progressScaleMax) * 100) - loggedFillTotalPct)
+      : 0;
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
       {/* Milk Intake Summary Card */}
@@ -1917,10 +2083,45 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
               </>
             )}
 
+            {/* Subtle projected remaining feeds region */}
+            {projectedBarWidthPct > 0 && (
+              <div
+                className="h-full bg-emerald-500/10 dark:bg-emerald-400/12 transition-all"
+                style={{ width: `${projectedBarWidthPct}%` }}
+                title={`Projected: ~${projectedBarPlan.projectedFeedCount} remaining feed${
+                  projectedBarPlan.projectedFeedCount === 1 ? '' : 's'
+                } (${gapMl} mL to target)`}
+              />
+            )}
+
+            {/* Subtle vertical dividers separating individual logged feeds */}
+            {loggedBarBoundariesMl.map((cumMl, idx) => {
+              const leftPct = Math.min(99.5, (cumMl / progressScaleMax) * 100);
+              return (
+                <div
+                  key={`bar-logged-div-${idx}`}
+                  className="pointer-events-none absolute inset-y-0 w-[1px] bg-white/60 dark:bg-stone-950/50 z-10"
+                  style={{ left: `${leftPct}%` }}
+                />
+              );
+            })}
+
+            {/* Subtle vertical dashed dividers separating projected remaining feeds */}
+            {projectedBarPlan.boundariesMl.map((cumMl, idx) => {
+              const leftPct = Math.min(99.5, (cumMl / progressScaleMax) * 100);
+              return (
+                <div
+                  key={`bar-proj-div-${idx}`}
+                  className="pointer-events-none absolute inset-y-0 border-l border-dashed border-emerald-600/35 dark:border-emerald-300/35 z-10"
+                  style={{ left: `${leftPct}%` }}
+                />
+              );
+            })}
+
             {/* Recommended target reference line when current intake exceeds target */}
             {targetMarkerPct !== null && (
               <div
-                className="pointer-events-none absolute inset-y-0 w-0.5 bg-stone-900/75 dark:bg-white/85"
+                className="pointer-events-none absolute inset-y-0 w-0.5 bg-stone-900/75 dark:bg-white/85 z-20"
                 style={{ left: `${targetMarkerPct}%` }}
                 title={`Recommended target: ${targetMl} mL`}
               />
@@ -1928,7 +2129,7 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono tabular-nums text-stone-500 dark:text-stone-400">
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <span className="inline-flex items-center gap-1">
                 <span className="w-2 h-2 rounded-xs bg-emerald-500 dark:bg-emerald-400" />
                 EBM {routineInsights.ebmSharePct}%
@@ -1939,8 +2140,11 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
               </span>
               {gapMl !== null && gapMl > 0 && (
                 <span className="inline-flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-xs bg-stone-200 dark:bg-stone-700" />
+                  <span className="w-2 h-2 rounded-xs bg-emerald-500/15 border border-dashed border-emerald-500/60 dark:border-emerald-400/60" />
                   Gap {gapMl} mL
+                  {projectedBarPlan.projectedFeedCount > 0
+                    ? ` (~${projectedBarPlan.projectedFeedCount} proj.)`
+                    : ''}
                 </span>
               )}
             </div>
@@ -2010,6 +2214,7 @@ export const RoutineSummaryAndChartsGrid: React.FC<RoutineSummaryAndChartsGridPr
         <FeedingVolumeTrendChart
           records={records}
           estimatedTargetMl={routineInsights.estimatedTargetMl}
+          recommendedFeedMl={routineInsights.recommendedFeedMl}
           targetMinMl={routineInsights.targetMinMl}
           targetMaxMl={routineInsights.targetMaxMl}
           minRateMlPerKg={routineInsights.minRateMlPerKg}
