@@ -845,6 +845,29 @@ export const FormulaSourceModal: React.FC<FormulaSourceModalProps> = ({
                   </ul>
                 </div>
 
+                <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/25 rounded-2xl border border-indigo-200/70 dark:border-indigo-900/40 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-bold text-indigo-950 dark:text-indigo-200">
+                      Conditional Weight Projection &amp; ±1 SE Zone (Cole, 1995)
+                    </h4>
+                    <span className="text-[11px] font-medium text-indigo-800 dark:text-indigo-300">
+                      Arch Dis Child 1995;73(1):8–16
+                    </span>
+                  </div>
+                  <p>
+                    Weight projections on the WHO chart use Cole&apos;s conditional Z-score model coupled with the inverse WHO 2006 LMS Box-Cox curve rather than linear extrapolation, capturing natural non-linear infant growth deceleration and asymmetric prediction uncertainty.
+                  </p>
+                  <div className="font-mono text-[11px] p-2.5 bg-white dark:bg-stone-800 rounded-xl border border-indigo-200/70 dark:border-stone-700 text-indigo-950 dark:text-indigo-200 space-y-1">
+                    <div>r(t₁, t₂) = [ (t₁ + 1) / (t₂ + 1) ]^0.42  (age t in months)</div>
+                    <div>ẑ(t₂ | t₁) = μ_channel + r(t₁, t₂) · (z₁ − μ_channel)</div>
+                    <div>SE_z(t₂ | t₁) = √(1 − r(t₁, t₂)²)</div>
+                    <div>Ŵ(t) = M(t) · [ 1 + L(t) · S(t) · ẑ(t) ]^(1 / L(t))</div>
+                  </div>
+                  <p className="text-stone-600 dark:text-stone-400">
+                    The shaded ±1 SE band maps ẑ(t) ± SE_z(t) back into kg/lb through the WHO LMS inverse function, starting at zero width at the latest measurement and widening smoothly with forecast horizon.
+                  </p>
+                </div>
+
                 <div className="p-4 bg-stone-50 dark:bg-stone-800/60 rounded-2xl border border-stone-200 dark:border-stone-700 space-y-2">
                   <h5 className="font-bold text-stone-900 dark:text-white">
                     Why WHO Standards vs. CDC 2000 Reference?

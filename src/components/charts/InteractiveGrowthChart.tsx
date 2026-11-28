@@ -79,19 +79,46 @@ function weightFromWHOLMS(pt: WHODataPoint, zScore: number): number {
   return M * Math.pow(base, 1 / L);
 }
 
+function zScoreFromWHOLMS(pt: WHODataPoint, weightKg: number): number {
+  const { L, M, S } = pt;
+  if (!Number.isFinite(M) || M <= 0 || !Number.isFinite(S) || S <= 0 || weightKg <= 0) return 0;
+  if (Math.abs(L) < 1e-4) {
+    return Math.log(weightKg / M) / S;
+  }
+  return (Math.pow(weightKg / M, L) - 1) / (L * S);
+}
+
+// Cole (1995) / Argyle (2003) log-age weight Z-score autocorrelation kernel for infants & toddlers:
+// r(t1, t2) = [(t1 + t0) / (t2 + t0)]^k, where t1 <= t2 in months, t0 = 1.0 mo, k = 0.42.
+// Matches Cole TJ, Arch Dis Child 1995;73(1):8-16 empirical infant weight correlations.
+const COLE_LOG_AGE_OFFSET_MONTHS = 1.0;
+const COLE_AUTOCORR_DECAY_K = 0.42;
+
+function coleWeightCorrelation(t1Months: number, t2Months: number): number {
+  const a = Math.max(0, Math.min(t1Months, t2Months));
+  const b = Math.max(0, Math.max(t1Months, t2Months));
+  if (b <= a + 1e-9) return 1;
+  return Math.pow(
+    (a + COLE_LOG_AGE_OFFSET_MONTHS) / (b + COLE_LOG_AGE_OFFSET_MONTHS),
+    COLE_AUTOCORR_DECAY_K
+  );
+}
+
 interface WeightProjectionPoint {
   day: number;
   val: number;
   low: number;
   high: number;
   se: number;
+  zHat: number;
+  seZ: number;
 }
 
 interface WeightProjectionResult {
   startDay: number;
   endDay: number;
   slopeGramsPerDay: number;
-  residualSeKg: number;
+  channelZ: number;
   points: WeightProjectionPoint[];
   evaluateAtDay: (day: number) => WeightProjectionPoint | null;
 }
@@ -271,11 +298,12 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     return unitSystem === 'imperial' ? 'in' : 'cm';
   }, [metric, unitSystem]);
 
-  // Compute weight projection line and ±1 SE standard error zone when viewing weight
+  // Compute literature-based weight projection line & ±1 SE standard error zone
+  // using the Cole (1995) Conditional WHO 2006 LMS Growth Model (Arch Dis Child 73:8-16).
   const weightProjection = useMemo<WeightProjectionResult | null>(() => {
     if (metric !== 'weight' || rawCurve.length === 0) return null;
 
-    // Group weights by day bucket (0.25d precision) so same-day duplicates don't skew regression
+    // Group weights by day bucket (0.25d precision) to avoid same-day duplicate bias
     const byDay = new Map<number, { day: number; sum: number; count: number }>();
     for (const m of enrichedMeasurements) {
       if (typeof m.weightKg !== 'number' || !Number.isFinite(m.weightKg) || m.weightKg <= 0) {
@@ -292,102 +320,75 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     }
 
     const obs = Array.from(byDay.values())
-      .map((b) => ({ day: b.day, weightKg: b.sum / b.count }))
+      .map((b) => {
+        const day = b.day;
+        const weightKg = b.sum / b.count;
+        const month = day / DAYS_PER_MONTH;
+        const whoPt = interpolateWHOPoint(rawCurve, month);
+        const zScore = zScoreFromWHOLMS(whoPt, weightKg);
+        return { day, month, weightKg, zScore };
+      })
       .sort((a, b) => a.day - b.day);
 
-    if (obs.length < 2) return null;
+    if (obs.length === 0) return null;
 
     const lastObs = obs[obs.length - 1];
     const totalObsSpan = lastObs.day - obs[0].day;
-    if (totalObsSpan < 0.5) return null;
-
-    // Use recent 90-day window when >= 3 points exist in it, otherwise full history
-    const recentObs = obs.filter((p) => lastObs.day - p.day <= 90);
-    const fitObs = recentObs.length >= 3 ? recentObs : obs;
-    const n = fitObs.length;
-    const fitSpan = Math.max(0.5, fitObs[n - 1].day - fitObs[0].day);
-
-    // Recency-weighted linear regression (WLS)
-    const tauWeight = Math.max(14, fitSpan * 0.45);
-    const weights = fitObs.map((p) => Math.exp(-(lastObs.day - p.day) / tauWeight));
-    const sumW = weights.reduce((s, w) => s + w, 0);
-    const meanD = fitObs.reduce((s, p, i) => s + weights[i] * p.day, 0) / sumW;
-    const meanY = fitObs.reduce((s, p, i) => s + weights[i] * p.weightKg, 0) / sumW;
-
-    let sddW = 0;
-    let sdyW = 0;
-    for (let i = 0; i < n; i++) {
-      const dd = fitObs[i].day - meanD;
-      sddW += weights[i] * dd * dd;
-      sdyW += weights[i] * dd * (fitObs[i].weightKg - meanY);
-    }
-
-    if (sddW <= 1e-6) return null;
-    const beta1 = sdyW / sddW; // kg/day
-    const beta0 = meanY - beta1 * meanD;
-
-    // Empirical residual standard error
-    let residualSeKg: number;
-    if (n >= 3) {
-      let rssW = 0;
-      for (let i = 0; i < n; i++) {
-        const pred = beta0 + beta1 * fitObs[i].day;
-        const err = fitObs[i].weightKg - pred;
-        rssW += weights[i] * err * err;
-      }
-      const rawSe = Math.sqrt((rssW / sumW) * (n / (n - 2)));
-      const minFloor = Math.max(0.035, 0.012 * lastObs.weightKg);
-      const maxCap = Math.max(0.35, 0.12 * lastObs.weightKg);
-      residualSeKg = Math.max(minFloor, Math.min(maxCap, rawSe));
-    } else {
-      residualSeKg = Math.max(0.05, 0.015 * lastObs.weightKg);
-    }
-
-    // Unweighted Sxx for forecast leverage SE cone
-    const meanDUnw = fitObs.reduce((s, p) => s + p.day, 0) / n;
-    const sxxUnw = fitObs.reduce((s, p) => s + (p.day - meanDUnw) * (p.day - meanDUnw), 0);
-
     const startDay = lastObs.day;
+    const startMonth = lastObs.month;
     const startWeight = lastObs.weightKg;
-    const maxForwardDays = Math.max(14, Math.min(180, Math.max(totalObsSpan * 1.5, 35)));
+    const z1 = lastObs.zScore;
+
+    // Project forward within the visible domain (up to 6 months ahead, minimum 3 weeks)
+    const maxForwardDays = Math.max(21, Math.min(180, Math.max(totalObsSpan * 1.5, 45)));
     const endDay = Math.min(xMaxDays, DOMAIN_MAX_DAYS, startDay + maxForwardDays);
     if (endDay <= startDay + 0.5) return null;
 
-    // Anchor to baby's current WHO LMS Z-score channel so multi-month projections curve realistically
-    const startZ = calculatePercentile(
-      startWeight,
-      startDay / DAYS_PER_MONTH,
-      'weight',
-      profile.gender
-    ).zScore;
-    const whoStartPt = interpolateWHOPoint(rawCurve, startDay / DAYS_PER_MONTH);
-    const whoNextPt = interpolateWHOPoint(rawCurve, (startDay + 1) / DAYS_PER_MONTH);
-    const whoAtStart = weightFromWHOLMS(whoStartPt, startZ);
-    const whoSlopeStart = Math.max(0, weightFromWHOLMS(whoNextPt, startZ) - whoAtStart);
-
-    // Guard local slope against extreme outliers while preserving actual child velocity
-    const clampedSlope = Math.max(whoSlopeStart * 0.2, Math.min(0.085, beta1));
-    const excessSlope = clampedSlope - whoSlopeStart;
-    const decayTau = 45; // days over which excess velocity blends smoothly back to WHO channel
+    // Estimate child's individual tracking channel (Empirical Bayes shrinkage toward WHO population mean 0).
+    // With 1 observation, channelZ = 0 reproduces exact single-point Cole (1995): z_hat(t2) = r(t1, t2) * z1.
+    // With >= 2 longitudinal observations, channelZ smoothly reflects the child's established percentile channel.
+    let channelZ = 0;
+    if (obs.length >= 2) {
+      const recentObs = obs.filter((p) => startDay - p.day <= 180);
+      const pool = recentObs.length >= 2 ? recentObs : obs;
+      let weightedZ = 0;
+      let sumW = 0;
+      for (const p of pool) {
+        // Weight earlier longitudinal points by their Cole autocorrelation to current age
+        const w = coleWeightCorrelation(p.month, startMonth);
+        weightedZ += w * p.zScore;
+        sumW += w;
+      }
+      const meanRecentZ = sumW > 0 ? weightedZ / sumW : z1;
+      const shrinkage = sumW / (sumW + 2.0);
+      channelZ = shrinkage * meanRecentZ;
+    }
 
     const evaluateAtDay = (day: number): WeightProjectionPoint | null => {
       if (day < startDay - 1e-6 || day > endDay + 1e-6) return null;
-      const deltaD = Math.max(0, day - startDay);
-      const whoPt = interpolateWHOPoint(rawCurve, day / DAYS_PER_MONTH);
-      const whoDelta = weightFromWHOLMS(whoPt, startZ) - whoAtStart;
-      const excessDelta = excessSlope * decayTau * (1 - Math.exp(-deltaD / decayTau));
-      const val = Math.max(0.2, startWeight + whoDelta + excessDelta);
+      const clampedDay = Math.max(startDay, day);
+      const targetMonth = clampedDay / DAYS_PER_MONTH;
 
-      const leverageTerm = (deltaD * deltaD) / Math.max(sxxUnw, 16);
-      const processTerm = deltaD / Math.max(14, fitSpan);
-      const se = deltaD <= 1e-6 ? 0 : residualSeKg * Math.sqrt(leverageTerm + processTerm);
+      // Cole (1995) conditional expectation and conditional standard error in WHO LMS Z-space:
+      // z_hat(t2 | t1) = channelZ + r(t1, t2) * (z1 - channelZ)
+      // SE_z(t2 | t1)  = sqrt(1 - r(t1, t2)^2)
+      const r = coleWeightCorrelation(startMonth, targetMonth);
+      const zHat = channelZ + r * (z1 - channelZ);
+      const seZ = clampedDay <= startDay + 1e-6 ? 0 : Math.sqrt(Math.max(0, 1 - r * r));
+
+      const whoPt = interpolateWHOPoint(rawCurve, targetMonth);
+      const val = Math.max(0.2, weightFromWHOLMS(whoPt, zHat));
+      const low = Math.max(0.2, weightFromWHOLMS(whoPt, zHat - seZ));
+      const high = Math.max(val, weightFromWHOLMS(whoPt, zHat + seZ));
 
       return {
-        day,
+        day: clampedDay,
         val,
-        low: Math.max(0.2, val - se),
-        high: val + se,
-        se,
+        low,
+        high,
+        se: (high - low) / 2,
+        zHat,
+        seZ,
       };
     };
 
@@ -399,15 +400,19 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
       if (pt) points.push(pt);
     }
 
+    const endPt = points[points.length - 1];
+    const avgSlopeKgPerDay =
+      endPt && endDay > startDay ? (endPt.val - startWeight) / (endDay - startDay) : 0;
+
     return {
       startDay,
       endDay,
-      slopeGramsPerDay: Math.round(clampedSlope * 1000),
-      residualSeKg,
+      slopeGramsPerDay: Math.round(avgSlopeKgPerDay * 1000),
+      channelZ: Number(channelZ.toFixed(2)),
       points,
       evaluateAtDay,
     };
-  }, [metric, rawCurve, enrichedMeasurements, xMaxDays, profile.gender]);
+  }, [metric, rawCurve, enrichedMeasurements, xMaxDays]);
 
   // Compute exact, round Y-axis scale in display units so gridlines & tick labels match 100%
   const yScale = useMemo(() => {
@@ -915,7 +920,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             <button
               type="button"
               onClick={() => setShowProjection((prev) => !prev)}
-              title={`Toggle weight projection line & ±1 SE standard error zone (~${weightProjection.slopeGramsPerDay >= 0 ? '+' : ''}${weightProjection.slopeGramsPerDay} g/day)`}
+              title={`Toggle Cole (1995) Conditional WHO LMS weight projection & ±1 SE zone (~${weightProjection.slopeGramsPerDay >= 0 ? '+' : ''}${weightProjection.slopeGramsPerDay} g/day expected)`}
               className={`p-1.5 text-xs rounded-xl border flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs ${
                 showProjection
                   ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-300 dark:border-indigo-800 text-indigo-900 dark:text-indigo-300 font-semibold'
@@ -1573,11 +1578,11 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
           </div>
           {projectionPaths && (
             <>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5" title="Cole (1995) Conditional WHO LMS Weight Projection (Arch Dis Child 73:8–16)">
                 <span className="w-3.5 border-t-2 border-dashed border-indigo-600 dark:border-indigo-400"></span>
-                <span className="text-stone-600 dark:text-stone-300">Weight Projection</span>
+                <span className="text-stone-600 dark:text-stone-300">Weight Projection (Cole LMS)</span>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5" title="Conditional ±1 Standard Error zone: SE_z = √(1 − r²)">
                 <span className="w-3 h-2 bg-indigo-500/20 rounded-xs border border-dotted border-indigo-500/70 dark:border-indigo-400/70"></span>
                 <span className="text-stone-600 dark:text-stone-300">±1 SE Zone</span>
               </div>

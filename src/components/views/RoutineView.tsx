@@ -629,31 +629,39 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                               ? ` (${nextFeedRecommendation.lastFeedDurationMin} min)`
                               : ''
                         }`,
-                        `Rhythm: every ${nextFeedRecommendation.rhythmIntervalLabel} (${
-                          nextFeedRecommendation.rhythmSource === 'time-of-day'
-                            ? `time-of-day pattern, ${nextFeedRecommendation.sampleCount} feeds`
-                            : nextFeedRecommendation.rhythmSource === 'recent-median'
-                              ? `recent median, ${nextFeedRecommendation.sampleCount} intervals`
-                              : `${milkFormulaConfig.feedsPerDay} feeds/day cadence`
-                        })`,
-                        nextFeedRecommendation.gapAdjustmentMin !== 0
-                          ? `Target gap adj: ${
-                              nextFeedRecommendation.gapAdjustmentMin > 0 ? '+' : ''
-                            }${nextFeedRecommendation.gapAdjustmentMin}m${
-                              nextFeedRecommendation.dailyGapMl !== null
-                                ? nextFeedRecommendation.dailyGapMl > 0
-                                  ? ` (${nextFeedRecommendation.dailyGapMl} mL left today)`
-                                  : ` (daily target met)`
+                        nextFeedRecommendation.rhythmSource === 'formula-cadence'
+                          ? `Target cadence: every ${nextFeedRecommendation.cadenceIntervalLabel} (${nextFeedRecommendation.feedsPerDayUsed} feeds/day)`
+                          : `Rhythm: ${nextFeedRecommendation.rhythmIntervalLabel} (${
+                              nextFeedRecommendation.rhythmSource === 'time-of-day'
+                                ? `time-of-day, ${nextFeedRecommendation.sampleCount} feeds`
+                                : `recent median, ${nextFeedRecommendation.sampleCount} intervals`
+                            }) + ${nextFeedRecommendation.feedsPerDayUsed}/d cadence (${nextFeedRecommendation.cadenceIntervalLabel}) → ${nextFeedRecommendation.baselineIntervalLabel}`,
+                        nextFeedRecommendation.lastFeedIsToday
+                          ? `Today: ${nextFeedRecommendation.todayFeedCount}/${nextFeedRecommendation.feedsPerDayUsed} feeds${
+                              nextFeedRecommendation.gapAdjustmentMin !== 0
+                                ? ` · Gap adj: ${
+                                    nextFeedRecommendation.gapAdjustmentMin > 0 ? '+' : ''
+                                  }${nextFeedRecommendation.gapAdjustmentMin}m${
+                                    nextFeedRecommendation.dailyGapMl !== null
+                                      ? nextFeedRecommendation.dailyGapMl > 0
+                                        ? ` (${nextFeedRecommendation.dailyGapMl} mL left)`
+                                        : ' (target met)'
+                                      : ''
+                                  } → ${nextFeedRecommendation.intervalLabel}`
                                 : ''
-                            } → ${nextFeedRecommendation.intervalLabel}`
-                          : null,
+                            }`
+                          : nextFeedRecommendation.gapAdjustmentMin !== 0
+                            ? `Gap adj: ${
+                                nextFeedRecommendation.gapAdjustmentMin > 0 ? '+' : ''
+                              }${nextFeedRecommendation.gapAdjustmentMin}m → ${nextFeedRecommendation.intervalLabel}`
+                            : null,
                         nextFeedRecommendation.recommendedMl !== null
-                          ? `Target: ${nextFeedRecommendation.recommendedMl} mL/feed`
+                          ? `Target: ${nextFeedRecommendation.recommendedMl} mL/feed (${nextFeedRecommendation.feedsPerDayUsed}/day)`
                           : null,
                       ]
                         .filter(Boolean)
                         .join(' · ')
-                    : `Recommended target: ${routineInsights.recommendedFeedMl} mL/feed (log a feed to estimate next feed time)`
+                    : `Recommended target: ${routineInsights.recommendedFeedMl} mL/feed (${milkFormulaConfig.feedsPerDay}/day — log a feed to estimate next feed time)`
                 }
               >
                 {/* Row 1: Next Feed Recommendation */}
