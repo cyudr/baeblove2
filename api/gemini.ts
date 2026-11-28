@@ -1,5 +1,12 @@
-import { GoogleGenAI, ThinkingLevel, type Schema } from '@google/genai';
+import { ThinkingLevel, type Schema } from '@google/genai';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import {
+  executeWithGeminiKeyFallback,
+  extractReadableErrorMessage,
+  getConfiguredGeminiKeys,
+  getErrorStatus,
+  isGeminiLimitError,
+} from './_geminiKeys.ts';
 
 export const config = {
   api: {
@@ -125,46 +132,6 @@ async function readJsonBody<T = Record<string, unknown>>(req: ApiRequest): Promi
   });
 }
 
-function getGeminiApiKey(): string {
-  return (process.env.VITE_GEMINI_KEY || process.env.GEMINI_API_KEY || '').trim();
-}
-
-function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) return null;
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-}
-
-function getErrorStatus(err: unknown): number {
-  return typeof err === 'object' && err !== null && 'status' in err
-    ? Number((err as { status?: unknown }).status)
-    : 0;
-}
-
-function extractReadableErrorMessage(err: unknown): string {
-  const raw =
-    err instanceof Error
-      ? err.message
-      : typeof err === 'object' && err !== null && 'message' in err
-        ? String((err as { message?: unknown }).message)
-        : String(err);
-
-  try {
-    const parsed = JSON.parse(raw) as { error?: { message?: string } };
-    if (parsed?.error?.message) return parsed.error.message;
-  } catch {
-    // Not a JSON-encoded error message
-  }
-  return raw;
-}
-
 function mapGeminiError(err: unknown, modelName: string): { status: number; message: string } {
   const rawMessage = extractReadableErrorMessage(err);
   const status = getErrorStatus(err) || 500;
@@ -179,7 +146,7 @@ function mapGeminiError(err: unknown, modelName: string): { status: number; mess
     return {
       status: 403,
       message:
-        'Gemini API key was rejected (invalid or missing permissions). Please verify VITE_GEMINI_KEY in your environment variables or Settings > Secrets panel.',
+        'Gemini API key was rejected (invalid or missing permissions). Please verify VITE_GEMINI_KEY_FREE / VITE_GEMINI_KEY in your environment variables or Settings > Secrets panel.',
     };
   }
 
@@ -211,7 +178,11 @@ function mapGeminiError(err: unknown, modelName: string): { status: number; mess
   };
 }
 
-async function generateWithRetry<T>(fn: () => Promise<T>, maxRetries = 1): Promise<T> {
+async function generateWithRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 1,
+  failFastOnLimit = false
+): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -220,6 +191,9 @@ async function generateWithRetry<T>(fn: () => Promise<T>, maxRetries = 1): Promi
       lastErr = err;
       const status = getErrorStatus(err);
       if (status === 400 || status === 401 || status === 403 || status === 404) {
+        throw err;
+      }
+      if (failFastOnLimit && isGeminiLimitError(err)) {
         throw err;
       }
       if (attempt < maxRetries) {
@@ -265,11 +239,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
       return;
     }
 
-    const ai = getGeminiClient();
-    if (!ai) {
+    if (getConfiguredGeminiKeys().length === 0) {
       sendJson(res, 500, {
         error:
-          'Gemini API key is not configured. Please set VITE_GEMINI_KEY in your environment variables or Settings > Secrets panel.',
+          'Gemini API key is not configured. Please set VITE_GEMINI_KEY_FREE or VITE_GEMINI_KEY in your environment variables or Settings > Secrets panel.',
       });
       return;
     }
@@ -397,46 +370,52 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     const thinkingLevel = resolveThinkingLevel(body.thinkingLevel);
 
     const runModel = (modelName: string) =>
-      generateWithRetry(async () => {
-        if (chatMessages.length > 0 && parts.length === 0) {
-          const lastMsg = chatMessages[chatMessages.length - 1];
-          const history = chatMessages.slice(0, -1).map((m) => ({
-            role: m.role,
-            parts: [{ text: m.text }],
-          }));
+      executeWithGeminiKeyFallback((ai, _candidate, hasFallbackKey) =>
+        generateWithRetry(
+          async () => {
+            if (chatMessages.length > 0 && parts.length === 0) {
+              const lastMsg = chatMessages[chatMessages.length - 1];
+              const history = chatMessages.slice(0, -1).map((m) => ({
+                role: m.role,
+                parts: [{ text: m.text }],
+              }));
 
-          const chat = ai.chats.create({
-            model: modelName,
-            history,
-            config: {
-              ...(systemInstruction ? { systemInstruction } : {}),
-              ...(responseMimeType ? { responseMimeType } : {}),
-              ...(responseSchema ? { responseSchema } : {}),
-              thinkingConfig: { thinkingLevel },
-            },
-          });
+              const chat = ai.chats.create({
+                model: modelName,
+                history,
+                config: {
+                  ...(systemInstruction ? { systemInstruction } : {}),
+                  ...(responseMimeType ? { responseMimeType } : {}),
+                  ...(responseSchema ? { responseSchema } : {}),
+                  thinkingConfig: { thinkingLevel },
+                },
+              });
 
-          return chat.sendMessage({ message: lastMsg.text });
-        }
+              return chat.sendMessage({ message: lastMsg.text });
+            }
 
-        return ai.models.generateContent({
-          model: modelName,
-          contents: { parts },
-          config: {
-            ...(systemInstruction ? { systemInstruction } : {}),
-            ...(responseMimeType ? { responseMimeType } : {}),
-            ...(responseSchema ? { responseSchema } : {}),
-            thinkingConfig: { thinkingLevel },
+            return ai.models.generateContent({
+              model: modelName,
+              contents: { parts },
+              config: {
+                ...(systemInstruction ? { systemInstruction } : {}),
+                ...(responseMimeType ? { responseMimeType } : {}),
+                ...(responseSchema ? { responseSchema } : {}),
+                thinkingConfig: { thinkingLevel },
+              },
+            });
           },
-        });
-      });
+          1,
+          hasFallbackKey
+        )
+      );
 
     let usedModel = primaryModel;
-    let response;
+    let execution;
 
     try {
       try {
-        response = await runModel(primaryModel);
+        execution = await runModel(primaryModel);
       } catch (primaryErr) {
         const primaryStatus = getErrorStatus(primaryErr);
         const primaryMsg = extractReadableErrorMessage(primaryErr);
@@ -452,10 +431,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
           throw primaryErr;
         }
         usedModel = FALLBACK_GEMINI_MODEL;
-        response = await runModel(FALLBACK_GEMINI_MODEL);
+        execution = await runModel(FALLBACK_GEMINI_MODEL);
       }
 
-      const rawText = (response.text ?? '').trim();
+      const rawText = (execution.result.text ?? '').trim();
       if (!rawText) {
         sendJson(res, 502, {
           error: 'Gemini returned an empty response. Please try again with clearer input.',
@@ -469,6 +448,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
           const parsed = JSON.parse(cleanJson) as unknown;
           sendJson(res, 200, {
             model: usedModel,
+            keySource: execution.keySource,
             text: cleanJson,
             parsed,
           });
@@ -483,6 +463,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
 
       sendJson(res, 200, {
         model: usedModel,
+        keySource: execution.keySource,
         text: rawText,
       });
     } catch (err) {

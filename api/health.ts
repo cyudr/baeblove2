@@ -1,5 +1,11 @@
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { ThinkingLevel } from '@google/genai';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import {
+  executeWithGeminiKeyFallback,
+  extractReadableErrorMessage,
+  getConfiguredGeminiKeys,
+  getFreeKeyCooldownRemainingMs,
+} from './_geminiKeys.ts';
 
 interface ApiRequest extends IncomingMessage {
   body?: unknown;
@@ -26,14 +32,6 @@ function sendJson(res: ApiResponse, statusCode: number, payload: unknown): void 
   res.end(JSON.stringify(payload));
 }
 
-function getKeyInfo(): { apiKey: string; source: 'VITE_GEMINI_KEY' | 'GEMINI_API_KEY' | 'none' } {
-  const viteKey = (process.env.VITE_GEMINI_KEY || '').trim();
-  if (viteKey) return { apiKey: viteKey, source: 'VITE_GEMINI_KEY' };
-  const geminiKey = (process.env.GEMINI_API_KEY || '').trim();
-  if (geminiKey) return { apiKey: geminiKey, source: 'GEMINI_API_KEY' };
-  return { apiKey: '', source: 'none' };
-}
-
 export default async function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
   const startedAt = Date.now();
 
@@ -54,30 +52,22 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
       return;
     }
 
-    const { apiKey, source } = getKeyInfo();
-    if (!apiKey) {
+    const configuredKeys = getConfiguredGeminiKeys();
+    if (configuredKeys.length === 0) {
       sendJson(res, 503, {
         status: 'error',
         api: 'unhealthy',
         gemini: 'missing_key',
-        keySource: source,
+        keySource: 'none',
+        configuredKeys: [],
         model: GEMINI_MODEL,
         latencyMs: Date.now() - startedAt,
         error:
-          'Gemini API key is not configured. Set VITE_GEMINI_KEY (or GEMINI_API_KEY) in your deployment environment variables.',
+          'Gemini API key is not configured. Set VITE_GEMINI_KEY_FREE and/or VITE_GEMINI_KEY (or GEMINI_API_KEY) in your deployment environment variables.',
         timestamp: new Date().toISOString(),
       });
       return;
     }
-
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
 
     const candidateModels =
       GEMINI_MODEL === 'gemini-3.1-flash-lite'
@@ -87,57 +77,52 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     let lastErr: unknown = null;
     for (const model of candidateModels) {
       try {
-        await ai.models.get({ model });
+        const execution = await executeWithGeminiKeyFallback(async (ai) => {
+          try {
+            await ai.models.get({ model });
+            return true;
+          } catch (getErr) {
+            const ping = await ai.models.generateContent({
+              model,
+              contents: 'Reply with OK',
+              config: {
+                thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+              },
+            });
+            if (typeof ping.text === 'string' && ping.text.trim().length > 0) {
+              return true;
+            }
+            throw getErr;
+          }
+        });
+
         sendJson(res, 200, {
           status: 'ok',
           api: 'healthy',
           gemini: 'connected',
-          keySource: source,
+          keySource: execution.keySource,
+          usedFallback: execution.usedFallback,
+          configuredKeys: configuredKeys.map((k) => k.source),
+          freeKeyCooldownRemainingSec: Math.ceil(getFreeKeyCooldownRemainingMs() / 1000),
           model,
           latencyMs: Date.now() - startedAt,
           timestamp: new Date().toISOString(),
         });
         return;
-      } catch (getErr) {
-        try {
-          const ping = await ai.models.generateContent({
-            model,
-            contents: 'Reply with OK',
-            config: {
-              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-            },
-          });
-          if (typeof ping.text === 'string' && ping.text.trim().length > 0) {
-            sendJson(res, 200, {
-              status: 'ok',
-              api: 'healthy',
-              gemini: 'connected',
-              keySource: source,
-              model,
-              latencyMs: Date.now() - startedAt,
-              timestamp: new Date().toISOString(),
-            });
-            return;
-          }
-          lastErr = getErr;
-        } catch (pingErr) {
-          lastErr = pingErr;
-        }
+      } catch (err) {
+        lastErr = err;
       }
     }
 
-    const rawMessage =
-      lastErr instanceof Error
-        ? lastErr.message
-        : typeof lastErr === 'object' && lastErr !== null && 'message' in lastErr
-          ? String((lastErr as { message?: unknown }).message)
-          : String(lastErr);
+    const rawMessage = extractReadableErrorMessage(lastErr);
 
     sendJson(res, 503, {
       status: 'error',
       api: 'unhealthy',
       gemini: 'disconnected',
-      keySource: source,
+      keySource: configuredKeys[0]?.source ?? 'none',
+      configuredKeys: configuredKeys.map((k) => k.source),
+      freeKeyCooldownRemainingSec: Math.ceil(getFreeKeyCooldownRemainingMs() / 1000),
       model: GEMINI_MODEL,
       latencyMs: Date.now() - startedAt,
       error: rawMessage || 'Gemini API health check failed.',
