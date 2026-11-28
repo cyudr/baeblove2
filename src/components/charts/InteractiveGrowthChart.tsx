@@ -69,6 +69,33 @@ function interpolateWHOPoint(rawCurve: WHODataPoint[], month: number): WHODataPo
   };
 }
 
+function weightFromWHOLMS(pt: WHODataPoint, zScore: number): number {
+  const { L, M, S } = pt;
+  if (!Number.isFinite(M) || M <= 0) return 0;
+  if (Math.abs(L) < 1e-4) {
+    return M * Math.exp(S * zScore);
+  }
+  const base = Math.max(0.05, 1 + L * S * zScore);
+  return M * Math.pow(base, 1 / L);
+}
+
+interface WeightProjectionPoint {
+  day: number;
+  val: number;
+  low: number;
+  high: number;
+  se: number;
+}
+
+interface WeightProjectionResult {
+  startDay: number;
+  endDay: number;
+  slopeGramsPerDay: number;
+  residualSeKg: number;
+  points: WeightProjectionPoint[];
+  evaluateAtDay: (day: number) => WeightProjectionPoint | null;
+}
+
 interface InteractiveGrowthChartProps {
   profile: ChildProfile;
   measurements: BabyMeasurement[];
@@ -88,6 +115,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
   const [zoomMode, setZoomMode] = useState<GrowthZoomMode>('auto');
   const [timeScaleMode, setTimeScaleMode] = useState<AgeAxisScaleMode>('auto');
   const [showBands, setShowBands] = useState<boolean>(true);
+  const [showProjection, setShowProjection] = useState<boolean>(true);
   const [hoveredPoint, setHoveredPoint] = useState<{
     id: string;
     exactDays: number;
@@ -121,6 +149,13 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
       notes?: string;
       x: number;
       y: number;
+    };
+    projected?: {
+      val: number;
+      low: number;
+      high: number;
+      se: number;
+      percentile: number;
     };
   } | null>(null);
 
@@ -236,6 +271,144 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     return unitSystem === 'imperial' ? 'in' : 'cm';
   }, [metric, unitSystem]);
 
+  // Compute weight projection line and ±1 SE standard error zone when viewing weight
+  const weightProjection = useMemo<WeightProjectionResult | null>(() => {
+    if (metric !== 'weight' || rawCurve.length === 0) return null;
+
+    // Group weights by day bucket (0.25d precision) so same-day duplicates don't skew regression
+    const byDay = new Map<number, { day: number; sum: number; count: number }>();
+    for (const m of enrichedMeasurements) {
+      if (typeof m.weightKg !== 'number' || !Number.isFinite(m.weightKg) || m.weightKg <= 0) {
+        continue;
+      }
+      const key = Math.round(m.exactDays * 4) / 4;
+      const existing = byDay.get(key);
+      if (existing) {
+        existing.sum += m.weightKg;
+        existing.count += 1;
+      } else {
+        byDay.set(key, { day: m.exactDays, sum: m.weightKg, count: 1 });
+      }
+    }
+
+    const obs = Array.from(byDay.values())
+      .map((b) => ({ day: b.day, weightKg: b.sum / b.count }))
+      .sort((a, b) => a.day - b.day);
+
+    if (obs.length < 2) return null;
+
+    const lastObs = obs[obs.length - 1];
+    const totalObsSpan = lastObs.day - obs[0].day;
+    if (totalObsSpan < 0.5) return null;
+
+    // Use recent 90-day window when >= 3 points exist in it, otherwise full history
+    const recentObs = obs.filter((p) => lastObs.day - p.day <= 90);
+    const fitObs = recentObs.length >= 3 ? recentObs : obs;
+    const n = fitObs.length;
+    const fitSpan = Math.max(0.5, fitObs[n - 1].day - fitObs[0].day);
+
+    // Recency-weighted linear regression (WLS)
+    const tauWeight = Math.max(14, fitSpan * 0.45);
+    const weights = fitObs.map((p) => Math.exp(-(lastObs.day - p.day) / tauWeight));
+    const sumW = weights.reduce((s, w) => s + w, 0);
+    const meanD = fitObs.reduce((s, p, i) => s + weights[i] * p.day, 0) / sumW;
+    const meanY = fitObs.reduce((s, p, i) => s + weights[i] * p.weightKg, 0) / sumW;
+
+    let sddW = 0;
+    let sdyW = 0;
+    for (let i = 0; i < n; i++) {
+      const dd = fitObs[i].day - meanD;
+      sddW += weights[i] * dd * dd;
+      sdyW += weights[i] * dd * (fitObs[i].weightKg - meanY);
+    }
+
+    if (sddW <= 1e-6) return null;
+    const beta1 = sdyW / sddW; // kg/day
+    const beta0 = meanY - beta1 * meanD;
+
+    // Empirical residual standard error
+    let residualSeKg: number;
+    if (n >= 3) {
+      let rssW = 0;
+      for (let i = 0; i < n; i++) {
+        const pred = beta0 + beta1 * fitObs[i].day;
+        const err = fitObs[i].weightKg - pred;
+        rssW += weights[i] * err * err;
+      }
+      const rawSe = Math.sqrt((rssW / sumW) * (n / (n - 2)));
+      const minFloor = Math.max(0.035, 0.012 * lastObs.weightKg);
+      const maxCap = Math.max(0.35, 0.12 * lastObs.weightKg);
+      residualSeKg = Math.max(minFloor, Math.min(maxCap, rawSe));
+    } else {
+      residualSeKg = Math.max(0.05, 0.015 * lastObs.weightKg);
+    }
+
+    // Unweighted Sxx for forecast leverage SE cone
+    const meanDUnw = fitObs.reduce((s, p) => s + p.day, 0) / n;
+    const sxxUnw = fitObs.reduce((s, p) => s + (p.day - meanDUnw) * (p.day - meanDUnw), 0);
+
+    const startDay = lastObs.day;
+    const startWeight = lastObs.weightKg;
+    const maxForwardDays = Math.max(14, Math.min(180, Math.max(totalObsSpan * 1.5, 35)));
+    const endDay = Math.min(xMaxDays, DOMAIN_MAX_DAYS, startDay + maxForwardDays);
+    if (endDay <= startDay + 0.5) return null;
+
+    // Anchor to baby's current WHO LMS Z-score channel so multi-month projections curve realistically
+    const startZ = calculatePercentile(
+      startWeight,
+      startDay / DAYS_PER_MONTH,
+      'weight',
+      profile.gender
+    ).zScore;
+    const whoStartPt = interpolateWHOPoint(rawCurve, startDay / DAYS_PER_MONTH);
+    const whoNextPt = interpolateWHOPoint(rawCurve, (startDay + 1) / DAYS_PER_MONTH);
+    const whoAtStart = weightFromWHOLMS(whoStartPt, startZ);
+    const whoSlopeStart = Math.max(0, weightFromWHOLMS(whoNextPt, startZ) - whoAtStart);
+
+    // Guard local slope against extreme outliers while preserving actual child velocity
+    const clampedSlope = Math.max(whoSlopeStart * 0.2, Math.min(0.085, beta1));
+    const excessSlope = clampedSlope - whoSlopeStart;
+    const decayTau = 45; // days over which excess velocity blends smoothly back to WHO channel
+
+    const evaluateAtDay = (day: number): WeightProjectionPoint | null => {
+      if (day < startDay - 1e-6 || day > endDay + 1e-6) return null;
+      const deltaD = Math.max(0, day - startDay);
+      const whoPt = interpolateWHOPoint(rawCurve, day / DAYS_PER_MONTH);
+      const whoDelta = weightFromWHOLMS(whoPt, startZ) - whoAtStart;
+      const excessDelta = excessSlope * decayTau * (1 - Math.exp(-deltaD / decayTau));
+      const val = Math.max(0.2, startWeight + whoDelta + excessDelta);
+
+      const leverageTerm = (deltaD * deltaD) / Math.max(sxxUnw, 16);
+      const processTerm = deltaD / Math.max(14, fitSpan);
+      const se = deltaD <= 1e-6 ? 0 : residualSeKg * Math.sqrt(leverageTerm + processTerm);
+
+      return {
+        day,
+        val,
+        low: Math.max(0.2, val - se),
+        high: val + se,
+        se,
+      };
+    };
+
+    const steps = 28;
+    const points: WeightProjectionPoint[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const d = startDay + ((endDay - startDay) * i) / steps;
+      const pt = evaluateAtDay(d);
+      if (pt) points.push(pt);
+    }
+
+    return {
+      startDay,
+      endDay,
+      slopeGramsPerDay: Math.round(clampedSlope * 1000),
+      residualSeKg,
+      points,
+      evaluateAtDay,
+    };
+  }, [metric, rawCurve, enrichedMeasurements, xMaxDays, profile.gender]);
+
   // Compute exact, round Y-axis scale in display units so gridlines & tick labels match 100%
   const yScale = useMemo(() => {
     const visibleDisplayValues: number[] = [];
@@ -243,6 +416,14 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
     if (showBands) {
       curve.forEach((d) => {
         visibleDisplayValues.push(toDisplayY(d.p3), toDisplayY(d.p97));
+      });
+    }
+
+    if (metric === 'weight' && showProjection && weightProjection) {
+      weightProjection.points.forEach((pt) => {
+        if (pt.day >= xMinDays - 1e-6 && pt.day <= xMaxDays + 1e-6) {
+          visibleDisplayValues.push(toDisplayY(pt.low), toDisplayY(pt.high));
+        }
       });
     }
 
@@ -287,7 +468,18 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
       clampMinZero: true,
       minSpan,
     });
-  }, [curve, enrichedMeasurements, metric, xMinDays, xMaxDays, showBands, toDisplayY, unitSystem]);
+  }, [
+    curve,
+    enrichedMeasurements,
+    metric,
+    xMinDays,
+    xMaxDays,
+    showBands,
+    showProjection,
+    weightProjection,
+    toDisplayY,
+    unitSystem,
+  ]);
 
   const scaleX = useCallback(
     (day: number) => {
@@ -388,6 +580,40 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
       .join(' ');
   }, [validMeasurements]);
 
+  // SVG paths for weight projection center line and ±1 SE standard error zone
+  const projectionPaths = useMemo(() => {
+    if (metric !== 'weight' || !showProjection || !weightProjection) return null;
+    const pts = weightProjection.points;
+    if (pts.length < 2) return null;
+
+    const centerPath = pts
+      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${scaleX(p.day).toFixed(2)} ${scaleY(p.val).toFixed(2)}`)
+      .join(' ');
+    const upperPath = pts
+      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${scaleX(p.day).toFixed(2)} ${scaleY(p.high).toFixed(2)}`)
+      .join(' ');
+    const lowerPath = pts
+      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${scaleX(p.day).toFixed(2)} ${scaleY(p.low).toFixed(2)}`)
+      .join(' ');
+
+    const upperCoords = pts.map((p) => `${scaleX(p.day).toFixed(2)},${scaleY(p.high).toFixed(2)}`);
+    const lowerCoords = [...pts]
+      .reverse()
+      .map((p) => `${scaleX(p.day).toFixed(2)},${scaleY(p.low).toFixed(2)}`);
+    const seZonePath = `M ${upperCoords.join(' L ')} L ${lowerCoords.join(' L ')} Z`;
+
+    const lastPt = pts[pts.length - 1];
+    return {
+      centerPath,
+      upperPath,
+      lowerPath,
+      seZonePath,
+      endX: scaleX(lastPt.day),
+      endY: scaleY(lastPt.val),
+      endVal: lastPt.val,
+    };
+  }, [metric, showProjection, weightProjection, scaleX, scaleY]);
+
   // Latest measurement stats
   const latest = validMeasurements[validMeasurements.length - 1];
 
@@ -439,6 +665,40 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
       }
     }
 
+    let projected:
+      | {
+          val: number;
+          low: number;
+          high: number;
+          se: number;
+          percentile: number;
+        }
+      | undefined;
+    if (
+      metric === 'weight' &&
+      showProjection &&
+      weightProjection &&
+      scrubbedDays > weightProjection.startDay + 1e-4 &&
+      scrubbedDays <= weightProjection.endDay + 1e-4
+    ) {
+      const projPt = weightProjection.evaluateAtDay(scrubbedDays);
+      if (projPt) {
+        const { percentile } = calculatePercentile(
+          projPt.val,
+          scrubbedDays / DAYS_PER_MONTH,
+          'weight',
+          profile.gender
+        );
+        projected = {
+          val: projPt.val,
+          low: projPt.low,
+          high: projPt.high,
+          se: projPt.se,
+          percentile,
+        };
+      }
+    }
+
     setScrubberState({
       days: scrubbedDays,
       svgX: scaleX(scrubbedDays),
@@ -461,6 +721,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             y: nearest.y,
           }
         : undefined,
+      projected,
     });
   };
 
@@ -649,6 +910,23 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             <span className="hidden sm:inline">Bands</span>
           </button>
 
+          {/* Toggle weight projection & ±1 SE zone */}
+          {metric === 'weight' && weightProjection && (
+            <button
+              type="button"
+              onClick={() => setShowProjection((prev) => !prev)}
+              title={`Toggle weight projection line & ±1 SE standard error zone (~${weightProjection.slopeGramsPerDay >= 0 ? '+' : ''}${weightProjection.slopeGramsPerDay} g/day)`}
+              className={`p-1.5 text-xs rounded-xl border flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs ${
+                showProjection
+                  ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-300 dark:border-indigo-800 text-indigo-900 dark:text-indigo-300 font-semibold'
+                  : 'bg-white dark:bg-stone-900 border-stone-200 dark:border-stone-700 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Projection</span>
+            </button>
+          )}
+
           {onOpenFormulaModal && (
             <button
               type="button"
@@ -692,7 +970,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               )}
             </div>
 
-            {/* Row 2: Logged measurement */}
+            {/* Row 2: Logged measurement or Weight Projection */}
             <div className="h-[18px] flex items-center justify-between gap-2 min-w-0 leading-none">
               {scrubberState.nearestMeasurement ? (
                 <>
@@ -701,6 +979,15 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                   </span>
                   <span className="text-[10px] font-mono tabular-nums text-stone-500 dark:text-stone-400 shrink-0 whitespace-nowrap">
                     {scrubberState.nearestMeasurement.date}
+                  </span>
+                </>
+              ) : scrubberState.projected ? (
+                <>
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-indigo-600 text-white font-bold text-[10px] font-mono tabular-nums whitespace-nowrap truncate">
+                    Projected: {displayValue(scrubberState.projected.val)} ({scrubberState.projected.percentile}%)
+                  </span>
+                  <span className="text-[10px] font-mono tabular-nums text-indigo-700 dark:text-indigo-300 shrink-0 whitespace-nowrap">
+                    ±SE: {displayValue(scrubberState.projected.low)}–{displayValue(scrubberState.projected.high)}
                   </span>
                 </>
               ) : (
@@ -796,6 +1083,11 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             <linearGradient id="bandOuterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" stopColor={isDark ? '#292524' : '#f4f4f5'} stopOpacity={isDark ? '0.75' : '0.8'} />
               <stop offset="100%" stopColor={isDark ? '#292524' : '#f4f4f5'} stopOpacity={isDark ? '0.35' : '0.4'} />
+            </linearGradient>
+            {/* Soft gradient for ±1 SE weight projection standard error zone */}
+            <linearGradient id="projSeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor={isDark ? '#818cf8' : '#6366f1'} stopOpacity={isDark ? '0.26' : '0.22'} />
+              <stop offset="100%" stopColor={isDark ? '#818cf8' : '#6366f1'} stopOpacity={isDark ? '0.12' : '0.10'} />
             </linearGradient>
             <clipPath id="whoPlotAreaClip">
               <rect
@@ -965,6 +1257,45 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             </>
           )}
 
+          {/* Weight Projection Line & ±1 SE Standard Error Zone */}
+          {projectionPaths && (
+            <g clipPath="url(#whoPlotAreaClip)" className="pointer-events-none">
+              <path d={projectionPaths.seZonePath} fill="url(#projSeGrad)" />
+              <path
+                d={projectionPaths.upperPath}
+                fill="none"
+                stroke={isDark ? '#818cf8' : '#6366f1'}
+                strokeWidth="1"
+                strokeDasharray="2 3"
+                opacity="0.65"
+              />
+              <path
+                d={projectionPaths.lowerPath}
+                fill="none"
+                stroke={isDark ? '#818cf8' : '#6366f1'}
+                strokeWidth="1"
+                strokeDasharray="2 3"
+                opacity="0.65"
+              />
+              <path
+                d={projectionPaths.centerPath}
+                fill="none"
+                stroke={isDark ? '#818cf8' : '#4f46e5'}
+                strokeWidth="2"
+                strokeDasharray="6 4"
+                strokeLinecap="round"
+              />
+              <circle
+                cx={projectionPaths.endX}
+                cy={projectionPaths.endY}
+                r="3.2"
+                fill={isDark ? '#1c1917' : '#ffffff'}
+                stroke={isDark ? '#818cf8' : '#4f46e5'}
+                strokeWidth="2"
+              />
+            </g>
+          )}
+
           {/* User Logged Measurements Polyline */}
           {userPath && (
             <path
@@ -1089,7 +1420,9 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
               >
                 <rect
                   width="178"
-                  height={scrubberState.nearestMeasurement ? 78 : 60}
+                  height={
+                    scrubberState.nearestMeasurement || scrubberState.projected ? 78 : 60
+                  }
                   rx="10"
                   fill="#18181b"
                   opacity="0.96"
@@ -1117,7 +1450,7 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                 >
                   Normal Range: {displayValue(scrubberState.p3)} – {displayValue(scrubberState.p97)}
                 </text>
-                {scrubberState.nearestMeasurement && (
+                {scrubberState.nearestMeasurement ? (
                   <>
                     <line x1="8" y1="50" x2="170" y2="50" stroke="#3f3f46" strokeWidth="0.75" />
                     <text
@@ -1135,7 +1468,25 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
                       {scrubberState.nearestMeasurement.date} · {scrubberState.nearestMeasurement.ageLabel} · Z: {scrubberState.nearestMeasurement.zScore}
                     </text>
                   </>
-                )}
+                ) : scrubberState.projected ? (
+                  <>
+                    <line x1="8" y1="50" x2="170" y2="50" stroke="#3f3f46" strokeWidth="0.75" />
+                    <text
+                      x="10"
+                      y="62"
+                      className="text-[10px] font-bold fill-indigo-300 font-sans"
+                    >
+                      Projected: {displayValue(scrubberState.projected.val)} ({scrubberState.projected.percentile}th %)
+                    </text>
+                    <text
+                      x="10"
+                      y="73"
+                      className="text-[8px] fill-stone-400 font-sans"
+                    >
+                      ±1 SE: {displayValue(scrubberState.projected.low)} – {displayValue(scrubberState.projected.high)}
+                    </text>
+                  </>
+                ) : null}
               </g>
             </g>
           )}
@@ -1220,6 +1571,18 @@ export const InteractiveGrowthChart: React.FC<InteractiveGrowthChartProps> = ({
             <span className="w-3 h-2 bg-stone-100 dark:bg-stone-800 rounded-xs border border-stone-200 dark:border-stone-700"></span>
             <span className="text-stone-600 dark:text-stone-300">3rd – 97th %</span>
           </div>
+          {projectionPaths && (
+            <>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3.5 border-t-2 border-dashed border-indigo-600 dark:border-indigo-400"></span>
+                <span className="text-stone-600 dark:text-stone-300">Weight Projection</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-2 bg-indigo-500/20 rounded-xs border border-dotted border-indigo-500/70 dark:border-indigo-400/70"></span>
+                <span className="text-stone-600 dark:text-stone-300">±1 SE Zone</span>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-1 text-[11px] text-stone-400 dark:text-stone-500">

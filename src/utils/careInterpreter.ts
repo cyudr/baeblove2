@@ -1442,10 +1442,19 @@ export interface NextFeedRecommendation {
   isDue: boolean;
   intervalMin: number;
   intervalLabel: string;
+  rhythmIntervalMin: number;
+  rhythmIntervalLabel: string;
+  gapAdjustmentMin: number;
+  dailyGapMl: number | null;
   sampleCount: number;
   rhythmSource: 'time-of-day' | 'recent-median' | 'formula-cadence';
   lastFeedTime: string;
   lastFeedDate: string;
+  lastFeedIsToday: boolean;
+  lastFeedMl: number;
+  lastFeedDurationMin: number;
+  elapsedSinceLastMin: number | null;
+  elapsedSinceLastLabel: string | null;
   recommendedMl: number | null;
 }
 
@@ -1492,51 +1501,73 @@ function circularHourDistance(a: number, b: number): number {
   return Math.min(diff, 24 - diff);
 }
 
+export interface NextFeedTargetGapContext {
+  dailyTargetMl?: number | null;
+  todayTotalMl?: number | null;
+}
+
 /**
- * Predicts the next feeding time from the baby's past feeding rhythm and latest feed,
- * paired with the existing calculated per-feed recommended milk volume (mL).
+ * Predicts the next feeding time from the baby's past feeding rhythm, latest feed,
+ * and current feed target gap, paired with the existing calculated per-feed recommended milk volume (mL).
  * - Clusters split/top-up logs within 45 min into a single feed session (start-to-start).
  * - Uses valid inter-feed gaps (45 min to 10 hours) from recent history (14-day window, up to 30 gaps).
  * - Prefers time-of-day matched rhythm (±3h around last feed's hour) blended 75/25 with overall recent median
  *   when at least 3 time-of-day intervals exist; otherwise uses recent median or formula cadence fallback.
+ * - Adjusts timing gently based on today's remaining feed target gap (dailyTargetMl - todayTotalMl)
+ *   and last feed volume relative to recommendedFeedMl.
  */
 export function computeNextFeedRecommendation(
   records: RoutineRecord[],
   recommendedFeedMl: number | null,
   feedsPerDay: number = DEFAULT_MILK_FORMULA.feedsPerDay,
-  now: Date = new Date()
+  now: Date = new Date(),
+  targetGapContext?: NextFeedTargetGapContext
 ): NextFeedRecommendation | null {
-  const feedTimestamps: number[] = [];
+  const feedEvents: Array<{ ts: number; volMl: number; durationMin: number }> = [];
 
   for (const r of records) {
-    const isFeed =
-      (r.emb_mL ?? 0) > 0 || (r.formula_mL ?? 0) > 0 || (r.feed_duration_min ?? 0) > 0;
+    const volMl = Math.max(0, r.emb_mL ?? 0) + Math.max(0, r.formula_mL ?? 0);
+    const durationMin = Math.max(0, r.feed_duration_min ?? 0);
+    const isFeed = volMl > 0 || durationMin > 0;
     if (!isFeed) continue;
     const ts = parseRoutineRecordLocalTimestamp(r);
     if (ts !== null) {
-      feedTimestamps.push(ts);
+      feedEvents.push({ ts, volMl, durationMin });
     }
   }
 
-  if (feedTimestamps.length === 0) return null;
+  if (feedEvents.length === 0) return null;
 
-  feedTimestamps.sort((a, b) => a - b);
+  feedEvents.sort((a, b) => a.ts - b.ts);
 
   // Cluster feeds within 45 minutes into one session anchored at session start time
   const CLUSTER_GAP_MS = 45 * 60_000;
-  const sessionStarts: number[] = [];
-  let prevRawTs = feedTimestamps[0];
-  sessionStarts.push(feedTimestamps[0]);
+  const sessions: Array<{ startMs: number; totalMl: number; totalDurationMin: number }> = [];
+  let prevRawTs = feedEvents[0].ts;
+  sessions.push({
+    startMs: feedEvents[0].ts,
+    totalMl: feedEvents[0].volMl,
+    totalDurationMin: feedEvents[0].durationMin,
+  });
 
-  for (let i = 1; i < feedTimestamps.length; i++) {
-    const ts = feedTimestamps[i];
-    if (ts - prevRawTs >= CLUSTER_GAP_MS) {
-      sessionStarts.push(ts);
+  for (let i = 1; i < feedEvents.length; i++) {
+    const ev = feedEvents[i];
+    if (ev.ts - prevRawTs >= CLUSTER_GAP_MS) {
+      sessions.push({
+        startMs: ev.ts,
+        totalMl: ev.volMl,
+        totalDurationMin: ev.durationMin,
+      });
+    } else {
+      const current = sessions[sessions.length - 1];
+      current.totalMl += ev.volMl;
+      current.totalDurationMin += ev.durationMin;
     }
-    prevRawTs = ts;
+    prevRawTs = ev.ts;
   }
 
-  const latestSessionMs = sessionStarts[sessionStarts.length - 1];
+  const latestSession = sessions[sessions.length - 1];
+  const latestSessionMs = latestSession.startMs;
   const latestSessionDate = new Date(latestSessionMs);
 
   // Extract valid inter-feed intervals (45 min .. 10 hours)
@@ -1544,12 +1575,12 @@ export function computeNextFeedRecommendation(
   const MAX_INTERVAL_MIN = 600;
   const allIntervals: Array<{ startHour: number; diffMin: number; endMs: number }> = [];
 
-  for (let i = 1; i < sessionStarts.length; i++) {
-    const diffMin = (sessionStarts[i] - sessionStarts[i - 1]) / 60_000;
+  for (let i = 1; i < sessions.length; i++) {
+    const diffMin = (sessions[i].startMs - sessions[i - 1].startMs) / 60_000;
     if (diffMin >= MIN_INTERVAL_MIN && diffMin <= MAX_INTERVAL_MIN) {
-      const startDate = new Date(sessionStarts[i - 1]);
+      const startDate = new Date(sessions[i - 1].startMs);
       const startHour = startDate.getHours() + startDate.getMinutes() / 60;
-      allIntervals.push({ startHour, diffMin, endMs: sessionStarts[i] });
+      allIntervals.push({ startHour, diffMin, endMs: sessions[i].startMs });
     }
   }
 
@@ -1562,7 +1593,7 @@ export function computeNextFeedRecommendation(
       ? feedsPerDay
       : DEFAULT_MILK_FORMULA.feedsPerDay;
 
-  let rawIntervalMin: number;
+  let rawRhythmMin: number;
   let sampleCount: number;
   let rhythmSource: NextFeedRecommendation['rhythmSource'];
 
@@ -1578,22 +1609,106 @@ export function computeNextFeedRecommendation(
     if (sameWindow.length >= 3) {
       const todSorted = sameWindow.map((iv) => iv.diffMin).sort((a, b) => a - b);
       const todMedian = interpolateQuantile(todSorted, 0.5);
-      rawIntervalMin = todMedian * 0.75 + overallMedian * 0.25;
+      rawRhythmMin = todMedian * 0.75 + overallMedian * 0.25;
       sampleCount = sameWindow.length;
       rhythmSource = 'time-of-day';
     } else {
-      rawIntervalMin = overallMedian;
+      rawRhythmMin = overallMedian;
       sampleCount = activePool.length;
       rhythmSource = 'recent-median';
     }
   } else {
-    rawIntervalMin = (24 / safeFeedsPerDay) * 60;
+    rawRhythmMin = (24 / safeFeedsPerDay) * 60;
     sampleCount = 0;
     rhythmSource = 'formula-cadence';
   }
 
-  const intervalMin = Math.max(MIN_INTERVAL_MIN, Math.round(rawIntervalMin / 5) * 5);
-  const nextFeedMs = latestSessionMs + intervalMin * 60_000;
+  const rhythmIntervalMin = Math.max(MIN_INTERVAL_MIN, Math.round(rawRhythmMin / 5) * 5);
+
+  const todayStr = formatLocalDateYMD(now);
+  const lastFeedDate = formatLocalDateYMD(latestSessionDate);
+  const lastFeedIsToday = lastFeedDate === todayStr;
+
+  // Compute today's total milk directly from records if not provided
+  const dailyTargetMl =
+    targetGapContext?.dailyTargetMl && targetGapContext.dailyTargetMl > 0
+      ? targetGapContext.dailyTargetMl
+      : null;
+
+  let todayTotalMl =
+    typeof targetGapContext?.todayTotalMl === 'number' && Number.isFinite(targetGapContext.todayTotalMl)
+      ? targetGapContext.todayTotalMl
+      : null;
+
+  if (todayTotalMl === null && dailyTargetMl !== null) {
+    let sum = 0;
+    for (const r of records) {
+      if (getRoutineRecordDate(r) === todayStr) {
+        sum += Math.max(0, r.emb_mL ?? 0) + Math.max(0, r.formula_mL ?? 0);
+      }
+    }
+    todayTotalMl = sum;
+  }
+
+  const dailyGapMl =
+    dailyTargetMl !== null && todayTotalMl !== null ? dailyTargetMl - todayTotalMl : null;
+
+  // Factor feed target gap into next feed timing:
+  // 1) Remaining daily target gap vs remaining time today (when last feed was today)
+  // 2) Last feed volume deviation vs per-feed target
+  let rawDailyGapAdjMin = 0;
+  if (
+    lastFeedIsToday &&
+    dailyGapMl !== null &&
+    recommendedFeedMl !== null &&
+    recommendedFeedMl > 0
+  ) {
+    const endOfDayMs = new Date(
+      latestSessionDate.getFullYear(),
+      latestSessionDate.getMonth(),
+      latestSessionDate.getDate(),
+      23,
+      59,
+      0,
+      0
+    ).getTime();
+    const remainingDayMin = Math.max(0, (endOfDayMs - latestSessionMs) / 60_000);
+
+    if (dailyGapMl > 0 && remainingDayMin > 30) {
+      const remainingFeedsNeeded = Math.max(0.5, dailyGapMl / recommendedFeedMl);
+      const targetPaceIntervalMin = remainingDayMin / remainingFeedsNeeded;
+      if (targetPaceIntervalMin < rhythmIntervalMin) {
+        const diff = targetPaceIntervalMin - rhythmIntervalMin;
+        rawDailyGapAdjMin = Math.max(-45, diff * 0.45);
+      }
+    } else if (dailyGapMl <= 0) {
+      const surplusFeeds = Math.abs(dailyGapMl) / recommendedFeedMl;
+      rawDailyGapAdjMin = Math.min(25, 10 + surplusFeeds * 15);
+    }
+  }
+
+  let rawLastFeedAdjMin = 0;
+  if (
+    latestSession.totalMl > 0 &&
+    recommendedFeedMl !== null &&
+    recommendedFeedMl > 0
+  ) {
+    const perFeedRatio = (latestSession.totalMl - recommendedFeedMl) / recommendedFeedMl;
+    rawLastFeedAdjMin = Math.max(
+      -30,
+      Math.min(25, perFeedRatio * rhythmIntervalMin * 0.25)
+    );
+  }
+
+  const combinedRawAdj = Math.max(-50, Math.min(30, rawDailyGapAdjMin + rawLastFeedAdjMin));
+  const minSafeInterval = Math.min(rhythmIntervalMin, Math.max(MIN_INTERVAL_MIN, 90));
+  const adjustedIntervalMin = Math.max(
+    minSafeInterval,
+    Math.min(MAX_INTERVAL_MIN, Math.round((rhythmIntervalMin + combinedRawAdj) / 5) * 5)
+  );
+  const gapAdjustmentMin = adjustedIntervalMin - rhythmIntervalMin;
+
+  const nextFeedMs = latestSessionMs + adjustedIntervalMin * 60_000;
   const nextFeedDateObj = new Date(nextFeedMs);
 
   const formatHHMM = (d: Date) =>
@@ -1601,10 +1716,8 @@ export function computeNextFeedRecommendation(
 
   const recommendedDate = formatLocalDateYMD(nextFeedDateObj);
   const recommendedTime = formatHHMM(nextFeedDateObj);
-  const lastFeedDate = formatLocalDateYMD(latestSessionDate);
   const lastFeedTime = formatHHMM(latestSessionDate);
 
-  const todayStr = formatLocalDateYMD(now);
   const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12, 0, 0, 0);
   const tomorrowStr = formatLocalDateYMD(tomorrowDate);
 
@@ -1612,19 +1725,39 @@ export function computeNextFeedRecommendation(
   const isTomorrow = recommendedDate === tomorrowStr;
   const isDue = now.getTime() >= nextFeedMs && now.getTime() - latestSessionMs <= 24 * 3_600_000;
 
+  const rawElapsedMin = Math.floor((now.getTime() - latestSessionMs) / 60_000);
+  const elapsedSinceLastMin =
+    rawElapsedMin >= 0 && rawElapsedMin <= 48 * 60 ? rawElapsedMin : null;
+  const elapsedSinceLastLabel =
+    elapsedSinceLastMin !== null
+      ? elapsedSinceLastMin < 1
+        ? 'just now'
+        : `${formatDurationHm(elapsedSinceLastMin)} ago`
+      : null;
+
   return {
     recommendedTime,
     recommendedDate,
     isToday,
     isTomorrow,
     isDue,
-    intervalMin,
-    intervalLabel: formatDurationHm(intervalMin),
+    intervalMin: adjustedIntervalMin,
+    intervalLabel: formatDurationHm(adjustedIntervalMin),
+    rhythmIntervalMin,
+    rhythmIntervalLabel: formatDurationHm(rhythmIntervalMin),
+    gapAdjustmentMin,
+    dailyGapMl,
     sampleCount,
     rhythmSource,
     lastFeedTime,
     lastFeedDate,
+    lastFeedIsToday,
+    lastFeedMl: latestSession.totalMl,
+    lastFeedDurationMin: latestSession.totalDurationMin,
+    elapsedSinceLastMin,
+    elapsedSinceLastLabel,
     recommendedMl: recommendedFeedMl,
   };
 }
+
 

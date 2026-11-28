@@ -337,11 +337,15 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
         profileRoutineRecords,
         routineInsights.recommendedFeedMl,
         milkFormulaConfig.feedsPerDay,
-        new Date(nowTick)
+        new Date(nowTick),
+        {
+          dailyTargetMl: routineInsights.estimatedTargetMl,
+        }
       ),
     [
       profileRoutineRecords,
       routineInsights.recommendedFeedMl,
+      routineInsights.estimatedTargetMl,
       milkFormulaConfig.feedsPerDay,
       nowTick,
     ]
@@ -614,18 +618,35 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {(nextFeedRecommendation || routineInsights.recommendedFeedMl !== null) && (
               <div
-                className="inline-flex items-center gap-1.5 text-xs select-none"
+                className="flex flex-col items-start md:items-end gap-0.5 select-none"
                 title={
                   nextFeedRecommendation
                     ? [
-                        `Last feed: ${nextFeedRecommendation.lastFeedDate} ${nextFeedRecommendation.lastFeedTime}`,
-                        `Rhythm: every ${nextFeedRecommendation.intervalLabel} (${
+                        `Last feed: ${nextFeedRecommendation.lastFeedDate} ${nextFeedRecommendation.lastFeedTime}${
+                          nextFeedRecommendation.lastFeedMl > 0
+                            ? ` (${nextFeedRecommendation.lastFeedMl} mL)`
+                            : nextFeedRecommendation.lastFeedDurationMin > 0
+                              ? ` (${nextFeedRecommendation.lastFeedDurationMin} min)`
+                              : ''
+                        }`,
+                        `Rhythm: every ${nextFeedRecommendation.rhythmIntervalLabel} (${
                           nextFeedRecommendation.rhythmSource === 'time-of-day'
                             ? `time-of-day pattern, ${nextFeedRecommendation.sampleCount} feeds`
                             : nextFeedRecommendation.rhythmSource === 'recent-median'
                               ? `recent median, ${nextFeedRecommendation.sampleCount} intervals`
                               : `${milkFormulaConfig.feedsPerDay} feeds/day cadence`
                         })`,
+                        nextFeedRecommendation.gapAdjustmentMin !== 0
+                          ? `Target gap adj: ${
+                              nextFeedRecommendation.gapAdjustmentMin > 0 ? '+' : ''
+                            }${nextFeedRecommendation.gapAdjustmentMin}m${
+                              nextFeedRecommendation.dailyGapMl !== null
+                                ? nextFeedRecommendation.dailyGapMl > 0
+                                  ? ` (${nextFeedRecommendation.dailyGapMl} mL left today)`
+                                  : ` (daily target met)`
+                                : ''
+                            } → ${nextFeedRecommendation.intervalLabel}`
+                          : null,
                         nextFeedRecommendation.recommendedMl !== null
                           ? `Target: ${nextFeedRecommendation.recommendedMl} mL/feed`
                           : null,
@@ -635,38 +656,71 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                     : `Recommended target: ${routineInsights.recommendedFeedMl} mL/feed (log a feed to estimate next feed time)`
                 }
               >
-                <Clock
-                  className={`w-3.5 h-3.5 shrink-0 ${
-                    nextFeedRecommendation?.isDue
-                      ? 'text-amber-600 dark:text-amber-300 [filter:drop-shadow(0_0_6px_rgba(245,158,11,0.7))] dark:[filter:drop-shadow(0_0_8px_rgba(251,191,36,0.9))]'
-                      : 'text-sky-600 dark:text-sky-300 [filter:drop-shadow(0_0_6px_rgba(14,165,233,0.65))] dark:[filter:drop-shadow(0_0_8px_rgba(56,189,248,0.85))]'
-                  }`}
-                />
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">
-                  Next Feed
-                </span>
-                {nextFeedRecommendation && (
-                  <span
-                    className={`font-mono font-bold whitespace-nowrap ${
-                      nextFeedRecommendation.isDue
-                        ? 'text-amber-700 dark:text-amber-300 [text-shadow:0_0_10px_rgba(245,158,11,0.65)] dark:[text-shadow:0_0_12px_rgba(251,191,36,0.9)]'
-                        : 'text-sky-700 dark:text-sky-300 [text-shadow:0_0_10px_rgba(14,165,233,0.6)] dark:[text-shadow:0_0_12px_rgba(56,189,248,0.85)]'
+                {/* Row 1: Next Feed Recommendation */}
+                <div className="inline-flex items-center gap-1.5 text-xs">
+                  <Clock
+                    className={`w-3.5 h-3.5 shrink-0 ${
+                      nextFeedRecommendation?.isDue
+                        ? 'text-amber-600 dark:text-amber-300 [filter:drop-shadow(0_0_6px_rgba(245,158,11,0.7))] dark:[filter:drop-shadow(0_0_8px_rgba(251,191,36,0.9))]'
+                        : 'text-sky-600 dark:text-sky-300 [filter:drop-shadow(0_0_6px_rgba(14,165,233,0.65))] dark:[filter:drop-shadow(0_0_8px_rgba(56,189,248,0.85))]'
                     }`}
-                  >
-                    {nextFeedRecommendation.isTomorrow
-                      ? `Tmr ${nextFeedRecommendation.recommendedTime}`
-                      : nextFeedRecommendation.isToday
-                        ? nextFeedRecommendation.recommendedTime
-                        : `${nextFeedRecommendation.recommendedDate.slice(5)} ${nextFeedRecommendation.recommendedTime}`}
+                  />
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">
+                    Next Feed
                   </span>
-                )}
-                {nextFeedRecommendation && routineInsights.recommendedFeedMl !== null && (
-                  <span className="text-stone-300 dark:text-stone-600 font-bold">·</span>
-                )}
-                {routineInsights.recommendedFeedMl !== null && (
-                  <span className="font-mono font-bold whitespace-nowrap text-emerald-700 dark:text-emerald-300 [text-shadow:0_0_10px_rgba(16,185,129,0.6)] dark:[text-shadow:0_0_12px_rgba(52,211,153,0.85)]">
-                    {routineInsights.recommendedFeedMl} mL
-                  </span>
+                  {nextFeedRecommendation && (
+                    <span
+                      className={`font-mono font-bold whitespace-nowrap ${
+                        nextFeedRecommendation.isDue
+                          ? 'text-amber-700 dark:text-amber-300 [text-shadow:0_0_10px_rgba(245,158,11,0.65)] dark:[text-shadow:0_0_12px_rgba(251,191,36,0.9)]'
+                          : 'text-sky-700 dark:text-sky-300 [text-shadow:0_0_10px_rgba(14,165,233,0.6)] dark:[text-shadow:0_0_12px_rgba(56,189,248,0.85)]'
+                      }`}
+                    >
+                      {nextFeedRecommendation.isTomorrow
+                        ? `Tmr ${nextFeedRecommendation.recommendedTime}`
+                        : nextFeedRecommendation.isToday
+                          ? nextFeedRecommendation.recommendedTime
+                          : `${nextFeedRecommendation.recommendedDate.slice(5)} ${nextFeedRecommendation.recommendedTime}`}
+                    </span>
+                  )}
+                  {nextFeedRecommendation && routineInsights.recommendedFeedMl !== null && (
+                    <span className="text-stone-300 dark:text-stone-600 font-bold">·</span>
+                  )}
+                  {routineInsights.recommendedFeedMl !== null && (
+                    <span className="font-mono font-bold whitespace-nowrap text-emerald-700 dark:text-emerald-300 [text-shadow:0_0_10px_rgba(16,185,129,0.6)] dark:[text-shadow:0_0_12px_rgba(52,211,153,0.85)]">
+                      {routineInsights.recommendedFeedMl} mL
+                    </span>
+                  )}
+                </div>
+
+                {/* Row 2: Last Feed Information */}
+                {nextFeedRecommendation && (
+                  <div className="inline-flex items-center gap-1.5 text-[11px] text-stone-500 dark:text-stone-400 tabular-nums">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 dark:text-stone-500">
+                      Last Feed
+                    </span>
+                    <span className="font-mono font-semibold text-stone-700 dark:text-stone-300 whitespace-nowrap">
+                      {nextFeedRecommendation.lastFeedIsToday
+                        ? nextFeedRecommendation.lastFeedTime
+                        : `${nextFeedRecommendation.lastFeedDate.slice(5)} ${nextFeedRecommendation.lastFeedTime}`}
+                    </span>
+                    {(nextFeedRecommendation.lastFeedMl > 0 ||
+                      nextFeedRecommendation.lastFeedDurationMin > 0) && (
+                      <>
+                        <span className="text-stone-300 dark:text-stone-600">·</span>
+                        <span className="font-mono font-semibold text-stone-600 dark:text-stone-300 whitespace-nowrap">
+                          {nextFeedRecommendation.lastFeedMl > 0
+                            ? `${nextFeedRecommendation.lastFeedMl} mL`
+                            : `${nextFeedRecommendation.lastFeedDurationMin} min`}
+                        </span>
+                      </>
+                    )}
+                    {nextFeedRecommendation.elapsedSinceLastLabel && (
+                      <span className="text-[10px] font-mono text-stone-400 dark:text-stone-500 whitespace-nowrap">
+                        ({nextFeedRecommendation.elapsedSinceLastLabel})
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             )}
